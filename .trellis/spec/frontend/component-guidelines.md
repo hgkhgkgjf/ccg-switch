@@ -6,54 +6,132 @@
 
 ## Overview
 
-<!--
-Document your project's component conventions here.
-
-Questions to answer:
-- What component patterns do you use?
-- How are props defined?
-- How do you handle composition?
-- What accessibility standards apply?
--->
-
-(To be filled by the team)
+Components are **function components** with TypeScript. There are no class
+components. Props are typed with a local `interface` named `<Component>Props`.
+Components are kept presentational where practical: page components own state
+and pass data + callbacks down to feature components.
 
 ---
 
 ## Component Structure
 
-<!-- Standard structure of a component file -->
+Standard order within a component file:
 
-(To be filled by the team)
+1. Imports — lucide icons first is common, then React hooks, then Tauri APIs,
+   then local types/components.
+2. Exported `type`/`interface` the component needs to share (e.g. `ModalType`).
+3. The `<Component>Props` interface.
+4. Small module-scope pure helpers if needed (e.g. `maskApiKey`).
+5. The component function with destructured props.
+6. `export default` (most components) — required for any component used with
+   `React.lazy` in `App.tsx`.
+
+```tsx
+interface ProviderCardProps {
+    provider: Provider;
+    isDragging?: boolean;
+    onSwitch: (id: string) => void;
+    onEdit: (provider: Provider) => void;
+    onDelete: (id: string, name: string) => void;
+    healthStatus?: HealthStatus;
+}
+
+export default function ProviderCard({
+    provider,
+    isDragging,
+    onSwitch,
+    onEdit,
+    onDelete,
+    healthStatus,
+}: ProviderCardProps) {
+    const { t } = useTranslation();
+    const [showKey, setShowKey] = useState(false);
+    return ( /* ... */ );
+}
+```
+
+See `src/components/providers/ProviderCard.tsx` and
+`src/components/common/ModalDialog.tsx` for the canonical shape.
 
 ---
 
 ## Props Conventions
 
-<!-- How props should be defined and typed -->
-
-(To be filled by the team)
+- Define props with a local `interface` named `<Component>Props`. Do not inline
+  the type in the function signature for non-trivial components.
+- Optional props use `?` and are given defaults via destructuring
+  (`type = 'confirm'`, `isDestructive = false`).
+- Event callbacks are named `onXxx` and typed explicitly
+  (`onSwitch: (id: string) => void`).
+- Children/content slots use `children?: React.ReactNode`.
+- Pass primitives and callbacks down; let the parent (usually a page) own the
+  data fetching and mutation. Pages call the store, components receive results.
 
 ---
 
 ## Styling Patterns
 
-<!-- How styles are applied (CSS modules, styled-components, Tailwind, etc.) -->
+- **TailwindCSS 3 + DaisyUI 4.** Styles are utility classes in `className`.
+  There are no CSS modules or styled-components; only `App.css`/`index` global
+  styles exist.
+- DaisyUI component classes are used heavily: `btn`, `btn-ghost`, `btn-sm`,
+  `badge`, `modal`, `input input-bordered`, `select`, `table`, `loading`.
+- **Dark mode** is expressed inline with `dark:` variants and DaisyUI semantic
+  tokens (`base-100`, `base-200`, `base-content`). Always pair light styles with
+  a dark counterpart, e.g.
+  `bg-white dark:bg-base-100 border border-gray-100 dark:border-base-200`.
+- Recurring visual patterns (keep consistent with existing code):
+  - Card: `bg-white dark:bg-base-100 rounded-xl shadow-sm border border-gray-100 dark:border-base-200`
+  - Primary action button: gradient, e.g.
+    `bg-gradient-to-r from-blue-500 to-purple-500 ... text-white border-none btn-sm`
+  - Active/selected state: green ring/border accents.
+- Conditional classes are composed with template strings today. A `cn()` helper
+  (clsx + tailwind-merge) exists at `src/utils/cn.ts` — prefer it for new
+  components with conditional class logic.
+- Icons come from `lucide-react`, sized with `w-*/h-*` (commonly `w-4 h-4`,
+  `w-3.5 h-3.5`); spinners use `<Loader2 className="animate-spin" />`.
 
-(To be filled by the team)
+---
+
+## Modals, Toasts, and Portals
+
+- **Modals/overlays render through `createPortal(..., document.body)`.** Use the
+  shared `ModalDialog` (`components/common/ModalDialog.tsx`) for confirm/alert
+  dialogs rather than building new ones. It handles ESC-to-close, backdrop
+  click, icon/type theming, and destructive styling.
+- Modal-open state lives in the page (`useState`), often as an object carrying
+  the target row: `useState<{ isOpen; id; name }>`.
+- **Toasts**: call the module-level `showToast(message, type, duration?, onClick?)`
+  imported from `components/common/ToastContainer`. `<ToastContainer/>` must be
+  mounted once near the root. Do not build ad-hoc notification UI.
+- Tauri window dragging: top regions use `data-tauri-drag-region`; modals add a
+  fixed drag strip so the window stays movable behind the overlay.
 
 ---
 
 ## Accessibility
 
-<!-- A11y requirements and patterns -->
+Current state (document reality): a11y is partial.
+- Interactive controls use real `<button>`/`<input>`/`<select>` elements.
+- Icon-only buttons carry a `title` attribute (acts as a tooltip; some are
+  Chinese-only literals rather than i18n keys — see Common Mistakes).
+- Focus styles are kept on actionable buttons in `ModalDialog`
+  (`focus:outline-none focus:ring-2`).
 
-(To be filled by the team)
+When adding components, at minimum: use semantic elements, give icon-only
+buttons an accessible label (`title` or `aria-label`), and keep visible focus
+states. Note that full WCAG compliance has not been verified for this project.
 
 ---
 
 ## Common Mistakes
 
-<!-- Component-related mistakes your team has made -->
-
-(To be filled by the team)
+- **Hardcoded Chinese strings.** Some `title`/toast text is a literal Chinese
+  string instead of a `t('...')` key (e.g. `title="拖拽排序"`, `'启动终端失败'`).
+  New user-facing text must go through i18n and be added to both `en.json` and
+  `zh.json`.
+- Forgetting `export default` on a page component, which breaks `React.lazy`.
+- Putting feature-specific components in `common/` — keep `common/` for true
+  primitives.
+- Adding a one-off confirm dialog instead of reusing `ModalDialog`.
+- Light-only styling with no `dark:` variant.
