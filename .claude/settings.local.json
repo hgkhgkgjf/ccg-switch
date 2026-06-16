@@ -50,7 +50,21 @@
       "Bash(cd \"C:/guodevelop/claude-switch-v1/claude-switch-1.0\" && node -e \"console.log\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json','utf8'\\)\\).version\\)\")",
       "Bash(cp:*)",
       "Bash(find:*)",
-      "Bash(xargs -n1 basename)"
+      "Bash(xargs -n1 basename)",
+      "Bash(cp -r /c/guodevelop/demo/jetbrains-cc-gui/ai-bridge src-tauri/resources/)",
+      "Bash(rm -f src-tauri/resources/ai-bridge/*.test.js)",
+      "Bash(rustc -vV)",
+      "Bash(rustup toolchain *)",
+      "Bash(env)",
+      "Bash(cat C:\\\\\\\\Users\\\\\\\\Administrator\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--guodevelop-ccg-switch\\\\\\\\56559835-3140-46a6-a20d-6b340475af5a\\\\\\\\tasks\\\\\\\\bnjrlnu6s.output)",
+      "Bash([ -f \"$VSWHERE\" ])",
+      "Bash('/c/Program Files \\(x86\\)/Microsoft Visual Studio/Installer/vswhere.exe' -latest -property installationPath)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(cmd.exe /c '\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\Auxiliary\\\\Build\\\\vcvars64.bat\" && where rc.exe && where cl.exe')",
+      "Bash(export AI_BRIDGE_DEPS_DIR=\"/tmp/ccg-deps-test\")",
+      "Bash(cd *)",
+      "Bash(echo *)",
+      "Read(//c/Users/Administrator/.codemoss/**)"
     ]
   }
 }

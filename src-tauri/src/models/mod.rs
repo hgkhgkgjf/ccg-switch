@@ -1,4 +1,5 @@
 pub mod app_type;
+pub mod chat;
 pub mod config;
 pub mod mcp;
 pub mod prompt;

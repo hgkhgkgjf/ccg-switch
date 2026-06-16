@@ -7,6 +7,7 @@ import {
     ChatDoneEvent,
     ChatDaemonEvent,
     ChatProvider,
+    MessageRaw,
 } from '../types/chat';
 import {
     AskUserQuestionRequest,
@@ -133,7 +134,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set({ pendingPlanApproval: event.payload });
         });
 
-        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn];
+        // 监听 chat://message 事件（工具调用可视化）
+        const messageUn = await listen<{ json: string }>('chat://message', (event) => {
+            try {
+                const raw = JSON.parse(event.payload.json) as MessageRaw;
+
+                // 更新最后一条相同角色的消息的 raw 字段
+                set((state) => {
+                    const messages = [...state.messages];
+
+                    // 手动实现 findLastIndex（向后兼容）
+                    let lastIndex = -1;
+                    for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].role === raw.type) {
+                            lastIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (lastIndex === -1) {
+                        console.warn('[useChatStore] Received MESSAGE without existing message');
+                        return state;
+                    }
+
+                    messages[lastIndex] = {
+                        ...messages[lastIndex],
+                        raw,
+                    };
+
+                    return { messages };
+                });
+            } catch (e) {
+                console.error('[useChatStore] Failed to parse MESSAGE:', e);
+            }
+        });
+
+        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn, messageUn];
 
         // 预热 daemon（懒启动也可，但提前启动可减少首条消息延迟）
         try {

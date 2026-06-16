@@ -62,6 +62,15 @@
             "missingBanner": "{{name}} is not installed yet. Install it to start chatting."
         }
     },
+    "tools": {
+        "readFile": "Read File",
+        "editFile": "Edit File",
+        "writeFile": "Write File",
+        "runCommand": "Run Command",
+        "search": "Search",
+        "fileMatch": "File Match",
+        "unknown": "Unknown Tool"
+    },
     "mcp": {
         "title": "MCP Server Management",
         "servers": "Servers",

@@ -9,11 +9,45 @@ export interface ChatMessage {
     role: ChatRole;
     /** 已渲染的文本内容（流式累积） */
     content: string;
+    /** 结构化数据（来自 [MESSAGE] 标签） */
+    raw?: MessageRaw;
     /** 是否仍在流式输出中 */
     streaming?: boolean;
     /** 出错信息（如有） */
     error?: string;
     createdAt: number;
+}
+
+/** MESSAGE 标签的完整结构 */
+export interface MessageRaw {
+    type: 'user' | 'assistant';
+    message: {
+        content: ContentBlock[];
+    };
+    uuid?: string;
+    timestamp?: string;
+}
+
+/** 内容块联合类型 */
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+
+export interface TextBlock {
+    type: 'text';
+    text: string;
+}
+
+export interface ToolUseBlock {
+    type: 'tool_use';
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+}
+
+export interface ToolResultBlock {
+    type: 'tool_result';
+    tool_use_id: string;
+    content?: string | ContentBlock[];
+    is_error?: boolean;
 }
 
 /** 后端 "chat://stream" 事件载荷 */

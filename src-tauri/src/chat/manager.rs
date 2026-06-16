@@ -143,6 +143,18 @@ impl ChatManager {
             while let Some(item) = rx.recv().await {
                 match item {
                     StreamLine::Line { text } => {
+                        // 检测 [MESSAGE] 标签，发送专用事件
+                        if let Some(json) = text.strip_prefix("[MESSAGE]") {
+                            let json_trimmed = json.trim();
+                            if !json_trimmed.is_empty() {
+                                let _ = app.emit(
+                                    "chat://message",
+                                    json!({ "json": json_trimmed }),
+                                );
+                            }
+                        }
+
+                        // 继续发送原始 stream 事件（向后兼容）
                         let _ = app.emit(
                             "chat://stream",
                             json!({ "requestId": request_id, "kind": "line", "text": text }),

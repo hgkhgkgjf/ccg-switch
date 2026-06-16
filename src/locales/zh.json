@@ -51,6 +51,15 @@
             "missingBanner": "{{name}} 尚未安装，安装后才能开始对话。"
         }
     },
+    "tools": {
+        "readFile": "读取文件",
+        "editFile": "编辑文件",
+        "writeFile": "写入文件",
+        "runCommand": "运行命令",
+        "search": "搜索",
+        "fileMatch": "文件匹配",
+        "unknown": "未知工具"
+    },
     "mcp": {
         "title": "MCP 服务器管理",        "servers": "个服务器",
         "empty": "暂无 MCP 服务器",

@@ -6,6 +6,7 @@ import { useSdkStore } from '../stores/useSdkStore';
 import SdkDependencyPanel from '../components/chat/SdkDependencyPanel';
 import AskUserQuestionDialog from '../components/chat/AskUserQuestionDialog';
 import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
+import ContentBlockRenderer from '../components/chat/ContentBlockRenderer';
 import ModalDialog from '../components/common/ModalDialog';
 import type { ChatMessage } from '../types/chat';
 
@@ -227,6 +228,8 @@ export default function ChatPage() {
 
 function MessageBubble({ message }: { message: ChatMessage }) {
     const isUser = message.role === 'user';
+    const hasBlocks = message.raw?.message?.content && message.raw.message.content.length > 0;
+
     return (
         <div className={`chat ${isUser ? 'chat-end' : 'chat-start'}`}>
             <div
@@ -234,9 +237,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                     isUser ? 'chat-bubble-primary' : ''
                 } ${message.error ? 'chat-bubble-error' : ''}`}
             >
-                {message.content || (message.streaming ? (
-                    <Loader2 size={16} className="animate-spin" />
-                ) : null)}
+                {hasBlocks ? (
+                    <ContentBlockRenderer
+                        blocks={message.raw!.message.content}
+                    />
+                ) : (
+                    message.content || (message.streaming ? (
+                        <Loader2 size={16} className="animate-spin" />
+                    ) : null)
+                )}
                 {message.error && (
                     <div className="text-xs opacity-70 mt-1">{message.error}</div>
                 )}
