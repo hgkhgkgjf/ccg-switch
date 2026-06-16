@@ -8,7 +8,7 @@
 
 @@@auto:current-status
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-06-16
 @@@/auto:current-status
 
