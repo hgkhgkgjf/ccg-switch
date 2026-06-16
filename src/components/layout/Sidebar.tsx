@@ -5,7 +5,7 @@ import { useConfigStore } from '../../stores/useConfigStore';
 import Logo from './Logo';
 import {
     LayoutDashboard, Key, Globe, FileText, Zap,
-    Bot, FolderOpen, Settings, Server
+    Bot, FolderOpen, Settings, Server, MessageSquare
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -14,6 +14,7 @@ interface SidebarProps {
 
 const mainNavItems = [
     { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+    { path: '/chat', icon: MessageSquare, labelKey: 'nav.chat' },
     { path: '/providers', icon: Key, labelKey: 'nav.providers' },
     { path: '/proxy', icon: Server, labelKey: 'nav.proxy' },
     { path: '/mcp', icon: Globe, labelKey: 'nav.mcp' },

@@ -16,6 +16,7 @@
         "import": "Import",
         "success": "Success",
         "error": "Error",
+        "close": "Close",
         "unknown": "Unknown",
         "warning": "Warning",
         "info": "Info",
@@ -29,6 +30,7 @@
     },
     "nav": {
         "dashboard": "Dashboard",
+        "chat": "Chat",
         "providers": "Providers",
         "proxy": "Proxy",
         "mcp": "MCP Servers",
@@ -38,6 +40,27 @@
         "workspaces": "Workspaces",
         "settings": "Settings",
         "token_usage": "Token Usage"
+    },
+    "chat": {
+        "ready": "Ready",
+        "starting": "Starting…",
+        "clear": "Clear",
+        "empty": "Start a conversation with AI",
+        "placeholder": "Type a message. Enter to send, Shift+Enter for newline",
+        "send": "Send",
+        "stop": "Stop",
+        "sdk": {
+            "title": "SDK Dependencies",
+            "manage": "Dependencies",
+            "hint": "SDKs are not bundled. First-time use requires installing them locally via system npm.",
+            "refresh": "Refresh",
+            "installed": "Installed",
+            "notInstalled": "Not installed",
+            "install": "Install",
+            "installing": "Installing",
+            "uninstall": "Uninstall",
+            "missingBanner": "{{name}} is not installed yet. Install it to start chatting."
+        }
     },
     "mcp": {
         "title": "MCP Server Management",

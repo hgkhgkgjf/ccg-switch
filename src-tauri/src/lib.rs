@@ -1,3 +1,4 @@
+mod chat;
 mod commands;
 mod database;
 mod deeplink;
@@ -13,6 +14,7 @@ mod utils;
 
 use commands::advanced_commands;
 use commands::backup_commands;
+use commands::chat_commands;
 use commands::deeplink_commands;
 use commands::mcp_commands;
 use commands::prompt_commands;
@@ -882,6 +884,18 @@ pub fn run() {
             backup_commands::rename_db_backup,
             backup_commands::get_backup_settings,
             backup_commands::save_backup_settings,
+            // Chat 命令（交互式 Claude Code / Codex）
+            chat_commands::chat_send,
+            chat_commands::chat_abort,
+            chat_commands::chat_is_running,
+            chat_commands::chat_start_daemon,
+            chat_commands::chat_sdk_status,
+            chat_commands::chat_install_sdk,
+            chat_commands::chat_uninstall_sdk,
+            chat_commands::chat_restart_daemon,
+            // Permission 命令（权限审批响应）
+            chat_commands::permission_respond_ask_user_question,
+            chat_commands::permission_respond_plan_approval,
         ])
         .setup(|app| {
             // 初始化数据库
@@ -901,6 +915,14 @@ pub fn run() {
 
             let state = store::AppState::new(db_arc);
             app.manage(state);
+
+            // 交互式 Chat：注册 ChatState（懒启动 ai-bridge daemon）
+            {
+                let chat_manager = chat::ChatManager::new(app.handle().clone());
+                app.manage(chat_commands::ChatState {
+                    manager: chat_manager,
+                });
+            }
 
             // 自动备份：启动时检查 + 后台定时任务
             {
@@ -980,6 +1002,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {
+            // 退出时优雅关闭 ai-bridge daemon（避免遗留孤儿 node 进程；
+            // daemon 自身也有父进程监控兜底）。
+            if let tauri::RunEvent::Exit = _event {
+                if let Some(chat_state) =
+                    _app_handle.try_state::<chat_commands::ChatState>()
+                {
+                    tauri::async_runtime::block_on(chat_state.manager.shutdown());
+                }
+            }
+
             // macOS: 点击 dock 图标时恢复隐藏的窗口
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {

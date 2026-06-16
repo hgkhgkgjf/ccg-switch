@@ -1,0 +1,102 @@
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type {
+    SdkStatus,
+    SdkInstallLogEvent,
+    SdkInstallDoneEvent,
+} from '../types/chat';
+
+interface SdkState {
+    statuses: SdkStatus[];
+    loading: boolean;
+    /** 正在安装的 sdkId（null 表示无安装进行中） */
+    installing: string | null;
+    /** 安装日志（按行累积，最多保留最近 200 行） */
+    logs: string[];
+    error: string | null;
+    initialized: boolean;
+
+    init: () => Promise<void>;
+    refresh: () => Promise<void>;
+    install: (sdkId: string) => Promise<void>;
+    uninstall: (sdkId: string) => Promise<void>;
+    clearLogs: () => void;
+}
+
+let unlisteners: UnlistenFn[] = [];
+const MAX_LOG_LINES = 200;
+
+export const useSdkStore = create<SdkState>((set, get) => ({
+    statuses: [],
+    loading: false,
+    installing: null,
+    logs: [],
+    error: null,
+    initialized: false,
+
+    init: async () => {
+        if (get().initialized) return;
+        set({ initialized: true });
+
+        unlisteners.forEach((u) => u());
+        unlisteners = [];
+
+        const logUn = await listen<SdkInstallLogEvent>('chat://sdk-install-log', (event) => {
+            set((state) => {
+                const next = [...state.logs, event.payload.line];
+                if (next.length > MAX_LOG_LINES) next.splice(0, next.length - MAX_LOG_LINES);
+                return { logs: next };
+            });
+        });
+
+        const doneUn = await listen<SdkInstallDoneEvent>(
+            'chat://sdk-install-done',
+            (event) => {
+                const { success, error } = event.payload;
+                set({
+                    installing: null,
+                    error: success ? null : error || '安装失败',
+                });
+                // 安装结束后刷新状态
+                get().refresh();
+            },
+        );
+
+        unlisteners = [logUn, doneUn];
+        await get().refresh();
+    },
+
+    refresh: async () => {
+        set({ loading: true });
+        try {
+            const statuses = await invoke<SdkStatus[]>('chat_sdk_status');
+            set({ statuses, loading: false });
+        } catch (e) {
+            set({ error: String(e), loading: false });
+        }
+    },
+
+    install: async (sdkId) => {
+        if (get().installing) return;
+        set({ installing: sdkId, logs: [], error: null });
+        try {
+            // 注意：该命令在安装完成后才 resolve（含 daemon 重启），
+            // 进度通过事件实时推送。
+            await invoke('chat_install_sdk', { sdkId });
+        } catch (e) {
+            set({ installing: null, error: String(e) });
+        }
+    },
+
+    uninstall: async (sdkId) => {
+        try {
+            await invoke('chat_uninstall_sdk', { sdkId });
+            await get().refresh();
+        } catch (e) {
+            set({ error: String(e) });
+        }
+    },
+
+    clearLogs: () => set({ logs: [] }),
+}));

@@ -14,10 +14,12 @@
         "export": "导出",
         "import": "导入",
         "success": "成功",
-        "error": "错误"
+        "error": "错误",
+        "close": "关闭"
     },
     "nav": {
         "dashboard": "仪表盘",
+        "chat": "对话",
         "providers": "服务商",
         "proxy": "代理",
         "mcp": "MCP 服务器",
@@ -28,9 +30,29 @@
         "settings": "设置",
         "token_usage": "Token 用量"
     },
+    "chat": {
+        "ready": "就绪",
+        "starting": "启动中…",
+        "clear": "清空",
+        "empty": "开始与 AI 对话",
+        "placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
+        "send": "发送",
+        "stop": "停止",
+        "sdk": {
+            "title": "SDK 依赖",
+            "manage": "依赖",
+            "hint": "SDK 不随应用打包，首次使用需通过系统 npm 安装到本地。",
+            "refresh": "刷新",
+            "installed": "已安装",
+            "notInstalled": "未安装",
+            "install": "安装",
+            "installing": "安装中",
+            "uninstall": "卸载",
+            "missingBanner": "{{name}} 尚未安装，安装后才能开始对话。"
+        }
+    },
     "mcp": {
-        "title": "MCP 服务器管理",
-        "servers": "个服务器",
+        "title": "MCP 服务器管理",        "servers": "个服务器",
         "empty": "暂无 MCP 服务器",
         "empty_hint": "点击上方\"添加\"按钮添加第一个 MCP 服务器",
         "global": "全局",
