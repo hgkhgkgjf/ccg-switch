@@ -3,7 +3,7 @@
   "name": "markdown",
   "title": "Markdown 渲染",
   "description": "集成 marked + highlight.js + DOMPurify + mermaid，实现代码高亮（28 种语言）、代码复制按钮、流式安全处理",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

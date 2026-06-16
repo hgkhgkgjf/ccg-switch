@@ -114,3 +114,154 @@ a {
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out;
 }
+
+/* Markdown 样式 */
+.markdown-block {
+  line-height: 1.6;
+  color: inherit;
+}
+
+.markdown-block h1,
+.markdown-block h2,
+.markdown-block h3,
+.markdown-block h4,
+.markdown-block h5,
+.markdown-block h6 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-block h1 {
+  font-size: 1.5em;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  padding-bottom: 0.3em;
+}
+
+.markdown-block h2 {
+  font-size: 1.3em;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  padding-bottom: 0.3em;
+}
+
+.markdown-block h3 {
+  font-size: 1.15em;
+}
+
+.markdown-block p {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+.markdown-block ul,
+.markdown-block ol {
+  padding-left: 2em;
+  margin-bottom: 1em;
+}
+
+.markdown-block li {
+  margin-bottom: 0.25em;
+}
+
+.markdown-block code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 0.9em;
+  background-color: rgba(128, 128, 128, 0.1);
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.markdown-block pre {
+  padding: 1em;
+  margin: 0.5em 0 1em 0;
+  overflow-x: auto;
+  background-color: #0d1117;
+  border-radius: 6px;
+  position: relative;
+}
+
+.markdown-block pre code {
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+  border-radius: 0;
+  font-size: 0.875em;
+  line-height: 1.5;
+}
+
+.markdown-block blockquote {
+  padding: 0 1em;
+  margin: 0 0 1em 0;
+  color: rgba(128, 128, 128, 0.8);
+  border-left: 0.25em solid rgba(128, 128, 128, 0.3);
+}
+
+.markdown-block table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1em;
+}
+
+.markdown-block table th,
+.markdown-block table td {
+  padding: 0.5em 1em;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.markdown-block table th {
+  font-weight: 600;
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+.markdown-block a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+
+.markdown-block a:hover {
+  text-decoration: underline;
+}
+
+.markdown-block hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 1.5em 0;
+  background-color: rgba(128, 128, 128, 0.2);
+  border: 0;
+}
+
+/* 代码块复制按钮 */
+.markdown-block .copy-button {
+  position: absolute;
+  top: 0.5em;
+  right: 0.5em;
+  padding: 0.4em;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markdown-block pre:hover .copy-button {
+  opacity: 1;
+}
+
+.markdown-block .copy-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.markdown-block .copy-button.copied {
+  background-color: rgba(0, 255, 0, 0.2);
+  border-color: rgba(0, 255, 0, 0.3);
+  color: #00ff00;
+}

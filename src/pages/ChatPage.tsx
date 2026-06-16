@@ -7,6 +7,7 @@ import SdkDependencyPanel from '../components/chat/SdkDependencyPanel';
 import AskUserQuestionDialog from '../components/chat/AskUserQuestionDialog';
 import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
 import ContentBlockRenderer from '../components/chat/ContentBlockRenderer';
+import MarkdownBlock from '../components/chat/MarkdownBlock';
 import ModalDialog from '../components/common/ModalDialog';
 import type { ChatMessage } from '../types/chat';
 
@@ -233,7 +234,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     return (
         <div className={`chat ${isUser ? 'chat-end' : 'chat-start'}`}>
             <div
-                className={`chat-bubble whitespace-pre-wrap break-words ${
+                className={`chat-bubble ${
                     isUser ? 'chat-bubble-primary' : ''
                 } ${message.error ? 'chat-bubble-error' : ''}`}
             >
@@ -241,11 +242,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                     <ContentBlockRenderer
                         blocks={message.raw!.message.content}
                     />
-                ) : (
-                    message.content || (message.streaming ? (
-                        <Loader2 size={16} className="animate-spin" />
-                    ) : null)
-                )}
+                ) : message.content ? (
+                    <MarkdownBlock
+                        content={message.content}
+                        isStreaming={message.streaming}
+                    />
+                ) : message.streaming ? (
+                    <Loader2 size={16} className="animate-spin" />
+                ) : null}
                 {message.error && (
                     <div className="text-xs opacity-70 mt-1">{message.error}</div>
                 )}

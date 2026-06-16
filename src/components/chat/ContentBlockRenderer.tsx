@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { ContentBlock, ToolResultBlock } from '../../types/chat';
 import GenericToolBlock from './GenericToolBlock';
+import MarkdownBlock from './MarkdownBlock';
 
 interface ContentBlockRendererProps {
     blocks: ContentBlock[];
@@ -28,9 +29,10 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
                 switch (block.type) {
                     case 'text':
                         return (
-                            <div key={index} className="whitespace-pre-wrap leading-relaxed">
-                                {block.text}
-                            </div>
+                            <MarkdownBlock
+                                key={index}
+                                content={block.text}
+                            />
                         );
 
                     case 'tool_use':
