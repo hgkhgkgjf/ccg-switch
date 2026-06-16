@@ -20,3 +20,12 @@ export type { ReadToolGroupBlockProps } from './ReadToolGroupBlock';
 
 export { default as EditToolGroupBlock } from './EditToolGroupBlock';
 export type { EditToolGroupBlockProps } from './EditToolGroupBlock';
+
+export { default as SearchToolGroupBlock } from './SearchToolGroupBlock';
+export type { SearchToolGroupBlockProps } from './SearchToolGroupBlock';
+
+export { default as AgentGroupBlock } from './AgentGroupBlock';
+export type { AgentGroupBlockProps } from './AgentGroupBlock';
+
+export { default as TaskExecutionBlock } from './TaskExecutionBlock';
+export type { TaskExecutionBlockProps } from './TaskExecutionBlock';
