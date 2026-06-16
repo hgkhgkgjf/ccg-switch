@@ -56,6 +56,29 @@ function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * 把文本增量追加到最后一条流式 assistant 消息。
+ * 不依赖 requestId 映射：daemon 响应极快，按 streaming 状态定位最稳。
+ */
+function appendToStreamingAssistant(
+    set: (fn: (state: ChatState) => Partial<ChatState>) => void,
+    delta: string,
+): void {
+    set((state) => {
+        const messages = [...state.messages];
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && messages[i].streaming) {
+                messages[i] = {
+                    ...messages[i],
+                    content: messages[i].content + delta,
+                };
+                break;
+            }
+        }
+        return { messages };
+    });
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
     provider: 'claude',
@@ -80,22 +103,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const streamUn = await listen<ChatStreamEvent>('chat://stream', (event) => {
             const { text } = event.payload;
 
-            // 不依赖 requestId 映射：直接找最后一条 streaming 的 assistant 消息追加内容。
-            // daemon 响应极快，done/stream 事件可能在 invoke 返回前到达，无法靠
-            // requestId→消息 映射定位（映射尚未建立）。单请求模式下按 streaming 状态定位最稳。
-            set((state) => {
-                const messages = [...state.messages];
-                for (let i = messages.length - 1; i >= 0; i--) {
-                    if (messages[i].role === 'assistant' && messages[i].streaming) {
-                        messages[i] = {
-                            ...messages[i],
-                            content: messages[i].content + text + '\n',
-                        };
-                        break;
-                    }
+            // 解析 daemon 的标签化输出。daemon stdout 每行都带标签前缀，
+            // 只有 [CONTENT_DELTA] 是真正要显示的回复文本，其余（[DEBUG]、
+            // [LIFECYCLE]、[MESSAGE]、[MESSAGE_START] 等）是协议/诊断信息，
+            // 不应渲染到消息气泡里。参考 jcc-gui 的 ClaudeStreamAdapter。
+
+            // [SESSION_ID]：保存会话 ID，供后续消息延续上下文。
+            if (text.startsWith('[SESSION_ID]')) {
+                const sid = text.slice('[SESSION_ID]'.length).trim();
+                if (sid) set({ sessionId: sid });
+                return;
+            }
+
+            // [CONTENT_DELTA]：JSON 编码的文本增量，追加到当前流式消息。
+            if (text.startsWith('[CONTENT_DELTA]')) {
+                const payload = text.slice('[CONTENT_DELTA]'.length).trim();
+                let delta = payload;
+                try {
+                    delta = JSON.parse(payload) as string;
+                } catch {
+                    // 非 JSON，按原文处理
                 }
-                return { messages };
-            });
+                appendToStreamingAssistant(set, delta);
+                return;
+            }
+
+            // [CONTENT]：非流式模式的完整文本块（直接追加）。
+            if (text.startsWith('[CONTENT]')) {
+                const content = text.slice('[CONTENT]'.length).trim();
+                appendToStreamingAssistant(set, content);
+                return;
+            }
+
+            // 其余标签行（[DEBUG]/[LIFECYCLE]/[MESSAGE]/[MESSAGE_START]/
+            // [STREAM_START]/[STREAM_END]/[USAGE]/[BLOCK_RESET] 等）忽略，
+            // 不渲染为消息内容。[MESSAGE] 由 chat://message 事件单独处理。
         });
 
         const doneUn = await listen<ChatDoneEvent>('chat://done', (event) => {
@@ -212,6 +254,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             cwd: opts?.cwd,
             model: opts?.model,
             permissionMode,
+            streaming: true,
         };
 
         try {
