@@ -11,11 +11,16 @@ export default function StatusIndicator({ status }: StatusIndicatorProps) {
     return (
         <div
             className={`
-                w-2 h-2 rounded-full
-                ${status === 'pending' ? 'bg-warning animate-pulse' : ''}
-                ${status === 'completed' ? 'bg-success' : ''}
-                ${status === 'error' ? 'bg-error' : ''}
+                w-2 h-2 rounded-full transition-all duration-300
+                ${status === 'pending' ? 'bg-warning animate-pulse shadow-lg shadow-warning/50' : ''}
+                ${status === 'completed' ? 'bg-success shadow-sm shadow-success/30' : ''}
+                ${status === 'error' ? 'bg-error animate-pulse shadow-lg shadow-error/50' : ''}
             `}
+            title={
+                status === 'pending' ? '执行中...' :
+                status === 'completed' ? '已完成' :
+                '执行失败'
+            }
         />
     );
 }

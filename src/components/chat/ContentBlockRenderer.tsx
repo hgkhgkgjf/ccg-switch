@@ -23,12 +23,12 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
     }, [blocks]);
 
     return (
-        <>
+        <div className="space-y-2">
             {blocks.map((block, index) => {
                 switch (block.type) {
                     case 'text':
                         return (
-                            <div key={index} className="whitespace-pre-wrap">
+                            <div key={index} className="whitespace-pre-wrap leading-relaxed">
                                 {block.text}
                             </div>
                         );
@@ -52,12 +52,12 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
                     default:
                         console.warn('[ContentBlockRenderer] Unknown block type:', (block as any).type);
                         return (
-                            <div key={index} className="text-warning text-sm">
+                            <div key={index} className="text-warning text-sm bg-warning/10 px-3 py-2 rounded-lg">
                                 Unknown block: {(block as any).type}
                             </div>
                         );
                 }
             })}
-        </>
+        </div>
     );
 }

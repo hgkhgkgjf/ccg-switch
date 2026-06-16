@@ -91,26 +91,37 @@ export default function GenericToolBlock({ name, input, result }: GenericToolBlo
     const hasExpandableContent = otherParams.length > 0;
 
     return (
-        <div className="border border-base-300 rounded-lg p-3 my-2 bg-base-100">
+        <div className="border border-base-300 rounded-lg p-3 my-2 bg-base-100 shadow-sm hover:shadow-md transition-shadow">
             <div
-                className={`flex items-center justify-between ${hasExpandableContent ? 'cursor-pointer' : ''}`}
+                className={`flex items-center justify-between ${
+                    hasExpandableContent
+                        ? 'cursor-pointer hover:bg-base-200/50 -m-3 p-3 rounded-lg transition-colors'
+                        : ''
+                }`}
                 onClick={() => hasExpandableContent && setExpanded(!expanded)}
             >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <Icon size={16} className="text-base-content/60 flex-shrink-0" />
+                    <Icon
+                        size={16}
+                        className={`flex-shrink-0 ${
+                            status === 'error' ? 'text-error' :
+                            status === 'completed' ? 'text-success' :
+                            'text-warning'
+                        }`}
+                    />
                     <span className="font-medium text-sm">{displayName}</span>
                     {summary && (
-                        <span className="text-sm text-base-content/60 truncate">
+                        <span className="text-sm text-base-content/60 truncate" title={summary}>
                             {summary}
                         </span>
                     )}
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                     <StatusIndicator status={status} />
                     {hasExpandableContent && (
                         <ChevronDown
                             size={16}
-                            className={`text-base-content/60 transition-transform ${
+                            className={`text-base-content/60 transition-transform duration-200 ${
                                 expanded ? 'rotate-180' : ''
                             }`}
                         />
@@ -119,14 +130,16 @@ export default function GenericToolBlock({ name, input, result }: GenericToolBlo
             </div>
 
             {expanded && hasExpandableContent && (
-                <div className="mt-2 pt-2 border-t border-base-300 space-y-1">
+                <div className="mt-3 pt-3 border-t border-base-300 space-y-2 animate-fadeIn">
                     {otherParams.map(([key, value]) => (
-                        <div key={key} className="flex gap-2 text-sm">
-                            <span className="text-base-content/60 flex-shrink-0">{key}:</span>
-                            <span className="font-mono text-xs break-all">
+                        <div key={key} className="flex gap-3 text-sm">
+                            <span className="text-base-content/70 font-medium flex-shrink-0 min-w-[80px]">
+                                {key}:
+                            </span>
+                            <span className="font-mono text-xs break-all text-base-content/90 bg-base-200/50 px-2 py-1 rounded flex-1">
                                 {typeof value === 'string'
                                     ? value
-                                    : JSON.stringify(value)}
+                                    : JSON.stringify(value, null, 2)}
                             </span>
                         </div>
                     ))}
