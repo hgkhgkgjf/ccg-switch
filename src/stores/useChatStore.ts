@@ -14,6 +14,48 @@ import {
     AskUserQuestionRequest,
     PlanApprovalRequest,
 } from '../types/permission';
+import type {
+    PermissionMode,
+    ReasoningEffort,
+    ChatProviderId,
+} from '../components/chat/composer/constants';
+import {
+    CLAUDE_MODELS,
+    CODEX_MODELS,
+    reasoningLevelsFor,
+} from '../components/chat/composer/constants';
+
+const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
+const MODEL_KEY_PREFIX = 'ccg-chat-model:';
+const REASONING_KEY = 'ccg-chat-reasoning';
+
+function loadDraft(provider: ChatProviderId): string {
+    try {
+        return localStorage.getItem(DRAFT_KEY_PREFIX + provider) ?? '';
+    } catch {
+        return '';
+    }
+}
+
+function defaultModel(provider: ChatProviderId): string {
+    try {
+        const saved = localStorage.getItem(MODEL_KEY_PREFIX + provider);
+        if (saved) return saved;
+    } catch {
+        // ignore
+    }
+    return provider === 'codex' ? CODEX_MODELS[0].id : CLAUDE_MODELS[0].id;
+}
+
+function loadReasoning(): ReasoningEffort {
+    try {
+        const saved = localStorage.getItem(REASONING_KEY) as ReasoningEffort | null;
+        if (saved) return saved;
+    } catch {
+        // ignore
+    }
+    return 'high';
+}
 
 interface ChatState {
     messages: ChatMessage[];
@@ -24,7 +66,15 @@ interface ChatState {
      * （后续任务），纯文本对话用 'default' 即可，涉及工具的复杂任务可临时用
      * 'bypassPermissions'（自动放行，请仅在信任的工作目录使用）。
      */
-    permissionMode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+    permissionMode: PermissionMode;
+    /** 当前选中的模型 id（按 provider 维度持久化） */
+    model: string;
+    /** 推理强度（reasoning effort） */
+    reasoningEffort: ReasoningEffort;
+    /** 输入框草稿（按 provider 维度持久化，跨页面保留） */
+    draft: string;
+    /** 累计上下文 token 数（用于用量环估算） */
+    contextTokens: number;
     /** daemon 是否就绪 */
     daemonReady: boolean;
     /** 最近一次 daemon 生命周期消息（诊断用） */
@@ -43,7 +93,10 @@ interface ChatState {
 
     init: () => Promise<void>;
     setProvider: (p: ChatProvider) => void;
-    setPermissionMode: (m: ChatState['permissionMode']) => void;
+    setPermissionMode: (m: PermissionMode) => void;
+    setModel: (id: string) => void;
+    setReasoningEffort: (e: ReasoningEffort) => void;
+    setDraft: (text: string) => void;
     send: (text: string, opts?: { cwd?: string; model?: string }) => Promise<void>;
     abort: () => Promise<void>;
     clear: () => void;
@@ -84,6 +137,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
     provider: 'claude',
     permissionMode: 'default',
+    model: defaultModel('claude'),
+    reasoningEffort: loadReasoning(),
+    draft: loadDraft('claude'),
+    contextTokens: 0,
     daemonReady: false,
     daemonStatus: null,
     activeRequestId: null,
@@ -149,7 +206,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                                 break;
                             }
                         }
-                        return { messages };
+                        // 上下文 token ≈ 本轮输入(含缓存) + 输出，作为用量环的估算值。
+                        const contextTokens =
+                            (usage.input_tokens || 0) +
+                            (usage.cache_read_input_tokens || 0) +
+                            (usage.cache_creation_input_tokens || 0) +
+                            (usage.output_tokens || 0);
+                        return { messages, contextTokens };
                     });
                 } catch {
                     // 忽略解析失败
@@ -245,9 +308,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
     },
 
-    setProvider: (p) => set({ provider: p }),
+    setProvider: (p) => {
+        // 切换 provider 时同步切换持久化的模型与草稿，并校正推理档位。
+        const provider = p as ChatProviderId;
+        const model = defaultModel(provider);
+        const levels = reasoningLevelsFor(provider, model);
+        set((state) => ({
+            provider: p,
+            model,
+            draft: loadDraft(provider),
+            reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
+                ? state.reasoningEffort
+                : (levels[levels.length - 1]?.id ?? 'high'),
+        }));
+    },
 
     setPermissionMode: (m) => set({ permissionMode: m }),
+
+    setModel: (id) => {
+        try {
+            localStorage.setItem(MODEL_KEY_PREFIX + get().provider, id);
+        } catch {
+            // ignore
+        }
+        // 切模型后校正推理档位（避免停留在新模型不支持的档）。
+        const levels = reasoningLevelsFor(get().provider as ChatProviderId, id);
+        set((state) => ({
+            model: id,
+            reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
+                ? state.reasoningEffort
+                : (levels[levels.length - 1]?.id ?? 'high'),
+        }));
+    },
+
+    setReasoningEffort: (e) => {
+        try {
+            localStorage.setItem(REASONING_KEY, e);
+        } catch {
+            // ignore
+        }
+        set({ reasoningEffort: e });
+    },
+
+    setDraft: (text) => {
+        try {
+            localStorage.setItem(DRAFT_KEY_PREFIX + get().provider, text);
+        } catch {
+            // ignore
+        }
+        set({ draft: text });
+    },
 
     send: async (text, opts) => {
         const trimmed = text.trim();
@@ -269,15 +379,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set((state) => ({
             messages: [...state.messages, userMsg, assistantMsg],
             error: null,
+            draft: '',
         }));
+        // 发送即清空持久化草稿。
+        try {
+            localStorage.removeItem(DRAFT_KEY_PREFIX + get().provider);
+        } catch {
+            // ignore
+        }
 
-        const { provider, sessionId, permissionMode } = get();
+        const { provider, sessionId, permissionMode, model, reasoningEffort } = get();
         const params: Record<string, unknown> = {
             message: trimmed,
             sessionId: sessionId ?? undefined,
             cwd: opts?.cwd,
-            model: opts?.model,
+            model: opts?.model ?? model,
             permissionMode,
+            reasoningEffort,
             streaming: true,
         };
 
@@ -309,7 +427,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ activeRequestId: null });
     },
 
-    clear: () => set({ messages: [], sessionId: null, error: null }),
+    clear: () => set({ messages: [], sessionId: null, error: null, contextTokens: 0 }),
 
     answerAskUserQuestion: async (requestId, answers) => {
         try {

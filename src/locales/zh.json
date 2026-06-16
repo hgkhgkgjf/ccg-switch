@@ -36,8 +36,69 @@
         "clear": "清空",
         "empty": "开始与 AI 对话",
         "placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
+        "richPlaceholder": "输入消息… @ 引用文件，# 调用子代理，! 插入预设，Enter 发送，Shift+Enter 换行",
         "send": "发送",
         "stop": "停止",
+        "context": "上下文",
+        "usagePercentage": "已用 {{percentage}}%",
+        "attach": "添加附件",
+        "noFileContext": "未选择文件上下文",
+        "removeFileContext": "移除文件上下文",
+        "collapsePanel": "收起状态面板",
+        "expandPanel": "展开状态面板",
+        "providerLabel": "AI 提供方",
+        "modeLabel": "权限模式",
+        "modelLabel": "模型",
+        "reasoningLabel": "推理强度",
+        "enhancePrompt": "润色提示词",
+        "modes": {
+            "default": {
+                "label": "默认模式",
+                "description": "标准权限，每步操作需手动确认"
+            },
+            "plan": {
+                "label": "计划模式",
+                "description": "只读分析，生成计划供你确认"
+            },
+            "acceptEdits": {
+                "label": "代理模式",
+                "description": "自动接受文件创建/编辑，减少确认"
+            },
+            "bypassPermissions": {
+                "label": "自动模式",
+                "description": "完全自动，跳过所有权限检查（谨慎使用）"
+            }
+        },
+        "reasoning": {
+            "low": { "label": "低", "description": "快速响应，基础推理" },
+            "medium": { "label": "中", "description": "平衡思考与速度" },
+            "high": { "label": "高", "description": "深度推理，适合复杂任务（默认）" },
+            "xhigh": { "label": "极高", "description": "更深推理，应对高难度任务" },
+            "max": { "label": "最高", "description": "最大推理深度" }
+        },
+        "models": {
+            "opus48": "Opus 4.8 · 最新最强",
+            "opus47": "Opus 4.7 · 上一代旗舰",
+            "fable5": "Fable 5 · 神话级最强",
+            "sonnet46": "Sonnet 4.6 · 默认模型",
+            "haiku45": "Haiku 4.5 · 最快速回答",
+            "gpt55": "GPT-5.5 · 最新前沿模型",
+            "gpt54": "GPT-5.4 · 增强能力",
+            "gpt52codex": "GPT-5.2-Codex · 前沿编码模型",
+            "gpt51codexMax": "GPT-5.1-Codex-Max · 深度快速推理",
+            "gpt52": "GPT-5.2 · 适合专业长任务"
+        },
+        "completion": {
+            "empty": "无匹配项"
+        },
+        "enhancer": {
+            "title": "提示词增强",
+            "original": "原文",
+            "enhanced": "增强版",
+            "loading": "正在润色…",
+            "useEnhanced": "采用增强版",
+            "keepOriginal": "保留原文"
+        },
         "sdk": {
             "title": "SDK 依赖",
             "manage": "依赖",

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, Square, Trash2, Loader2, Package } from 'lucide-react';
+import { Trash2, Loader2, Package } from 'lucide-react';
 import { useChatStore } from '../stores/useChatStore';
 import { useSdkStore } from '../stores/useSdkStore';
 import SdkDependencyPanel from '../components/chat/SdkDependencyPanel';
@@ -9,6 +9,7 @@ import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
 import ContentBlockRenderer from '../components/chat/ContentBlockRenderer';
 import MarkdownBlock from '../components/chat/MarkdownBlock';
 import MessageMeta from '../components/chat/MessageMeta';
+import { ChatComposer } from '../components/chat/composer/ChatComposer';
 import ModalDialog from '../components/common/ModalDialog';
 import type { ChatMessage } from '../types/chat';
 
@@ -25,20 +26,15 @@ export default function ChatPage() {
         provider,
         daemonReady,
         daemonStatus,
-        activeRequestId,
         error,
         pendingAskUserQuestion,
         pendingPlanApproval,
         init,
-        setProvider,
-        send,
-        abort,
         clear,
         answerAskUserQuestion,
         approvePlan,
     } = useChatStore();
 
-    const [input, setInput] = useState('');
     const [sdkModalOpen, setSdkModalOpen] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -54,60 +50,24 @@ export default function ChatPage() {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages]);
 
-    const isStreaming = activeRequestId !== null;
-
     // 当前 provider 对应的 SDK 是否已安装。
     const sdkId = provider === 'claude' ? 'claude-sdk' : 'codex-sdk';
     const currentSdk = sdkStatuses.find((s) => s.id === sdkId);
     const sdkMissing = currentSdk ? !currentSdk.installed : false;
 
-    const handleSend = async () => {
-        if (!input.trim() || isStreaming) return;
-        if (sdkMissing) {
-            setSdkModalOpen(true);
-            return;
-        }
-        const text = input;
-        setInput('');
-        await send(text);
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    };
-
     return (
         <div className="flex flex-col h-full">
-            {/* 头部：provider 切换 + daemon 状态 + 清空 */}
+            {/* 头部：daemon 状态 + 依赖 + 清空 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-base-300">
-                <div className="flex items-center gap-3">
-                    <div className="tabs tabs-boxed tabs-sm">
-                        <button
-                            className={`tab ${provider === 'claude' ? 'tab-active' : ''}`}
-                            onClick={() => setProvider('claude')}
-                        >
-                            Claude
-                        </button>
-                        <button
-                            className={`tab ${provider === 'codex' ? 'tab-active' : ''}`}
-                            onClick={() => setProvider('codex')}
-                        >
-                            Codex
-                        </button>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs">
-                        <span
-                            className={`inline-block w-2 h-2 rounded-full ${
-                                daemonReady ? 'bg-success' : 'bg-warning'
-                            }`}
-                        />
-                        <span className="text-base-content/60">
-                            {daemonReady ? t('chat.ready') : daemonStatus || t('chat.starting')}
-                        </span>
-                    </div>
+                <div className="flex items-center gap-1.5 text-xs">
+                    <span
+                        className={`inline-block w-2 h-2 rounded-full ${
+                            daemonReady ? 'bg-success' : 'bg-warning'
+                        }`}
+                    />
+                    <span className="text-base-content/60">
+                        {daemonReady ? t('chat.ready') : daemonStatus || t('chat.starting')}
+                    </span>
                 </div>
                 <div className="flex items-center gap-2">
                     <button
@@ -162,34 +122,11 @@ export default function ChatPage() {
                 </div>
             )}
 
-            {/* 输入区 */}
-            <div className="border-t border-base-300 p-3">
-                <div className="flex items-end gap-2">
-                    <textarea
-                        className="textarea textarea-bordered flex-1 resize-none min-h-[44px] max-h-40"
-                        rows={1}
-                        placeholder={t('chat.placeholder')}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                    />
-                    {isStreaming ? (
-                        <button className="btn btn-error" onClick={abort}>
-                            <Square size={16} />
-                            {t('chat.stop')}
-                        </button>
-                    ) : (
-                        <button
-                            className="btn btn-primary"
-                            onClick={handleSend}
-                            disabled={!input.trim()}
-                        >
-                            <Send size={16} />
-                            {t('chat.send')}
-                        </button>
-                    )}
-                </div>
-            </div>
+            {/* 发送控制台（顶部上下文栏 + 富输入 + 底部工具栏） */}
+            <ChatComposer
+                sdkMissing={sdkMissing}
+                onSdkMissing={() => setSdkModalOpen(true)}
+            />
 
             {/* SDK 依赖管理弹窗 */}
             <ModalDialog

@@ -266,5 +266,99 @@ impl ChatManager {
             self.warm_up().await
         }
     }
+
+    /// 一键润色 Prompt：以子进程方式跑 ai-bridge 的 prompt-enhancer 脚本。
+    ///
+    /// 复用 daemon 的 node/bridge/deps 解析与环境注入（API Key、Base URL、
+    /// AI_BRIDGE_DEPS_DIR），通过 stdin 传 `{prompt, legacyModel}` JSON，
+    /// 读取 stdout 的 `[ENHANCED]<text>`（脚本把换行编码为 {{NEWLINE}}）。
+    pub async fn enhance_prompt(&self, prompt: String, model: String) -> Result<String, String> {
+        use std::process::Stdio;
+        use tokio::io::AsyncWriteExt;
+
+        if prompt.trim().is_empty() {
+            return Ok(String::new());
+        }
+
+        let node = resources::detect_node()?;
+        let bridge = resources::resolve_bridge_dir(&self.app)?;
+        let deps = resources::deps_dir(&self.app)?;
+        let (api_key, base_url) = self.get_active_provider_config().await?;
+
+        // 规范化路径：去掉 Windows UNC 前缀，Node ESM loader 不认。
+        let normalize = |p: &std::path::Path| -> std::path::PathBuf {
+            let s = p.to_string_lossy();
+            if s.starts_with(r"\\?\") {
+                std::path::PathBuf::from(s.trim_start_matches(r"\\?\"))
+            } else {
+                p.to_path_buf()
+            }
+        };
+        let script = normalize(&bridge.join("services").join("prompt-enhancer.js"));
+        if !script.exists() {
+            return Err(format!("prompt-enhancer.js not found at {}", script.display()));
+        }
+        let bridge_norm = normalize(&bridge);
+
+        let payload = serde_json::json!({
+            "prompt": prompt,
+            "legacyModel": model,
+        })
+        .to_string();
+
+        let mut cmd = tokio::process::Command::new(&node);
+        cmd.arg(&script)
+            .current_dir(&bridge_norm)
+            .env("AI_BRIDGE_DEPS_DIR", &deps)
+            .env("CLAUDE_SESSION_ID", "default")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(ref key) = api_key {
+            cmd.env("ANTHROPIC_AUTH_TOKEN", key);
+        }
+        if let Some(ref url) = base_url {
+            cmd.env("ANTHROPIC_BASE_URL", url);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            cmd.creation_flags(0x0800_0000);
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("启动 prompt-enhancer 失败: {e}"))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(payload.as_bytes())
+                .await
+                .map_err(|e| format!("写入 enhancer stdin 失败: {e}"))?;
+            stdin
+                .shutdown()
+                .await
+                .map_err(|e| format!("关闭 enhancer stdin 失败: {e}"))?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| format!("等待 enhancer 进程失败: {e}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // 解析最后一行 [ENHANCED] 标签（脚本可能先打印若干诊断日志）。
+        for line in stdout.lines().rev() {
+            if let Some(rest) = line.strip_prefix("[ENHANCED]") {
+                let decoded = rest.replace("{{NEWLINE}}", "\n");
+                return Ok(decoded);
+            }
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "prompt-enhancer 未返回结果。stderr: {}",
+            stderr.trim()
+        ))
+    }
 }
 

@@ -47,8 +47,69 @@
         "clear": "Clear",
         "empty": "Start a conversation with AI",
         "placeholder": "Type a message. Enter to send, Shift+Enter for newline",
+        "richPlaceholder": "Type a message… @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline",
         "send": "Send",
         "stop": "Stop",
+        "context": "context",
+        "usagePercentage": "{{percentage}}% used",
+        "attach": "Add attachment",
+        "noFileContext": "No file context selected",
+        "removeFileContext": "Remove file context",
+        "collapsePanel": "Collapse status panel",
+        "expandPanel": "Expand status panel",
+        "providerLabel": "AI provider",
+        "modeLabel": "Permission mode",
+        "modelLabel": "Model",
+        "reasoningLabel": "Reasoning effort",
+        "enhancePrompt": "Enhance prompt",
+        "modes": {
+            "default": {
+                "label": "Default Mode",
+                "description": "Standard permissions, confirm each operation"
+            },
+            "plan": {
+                "label": "Plan Mode",
+                "description": "Read-only analysis, generates a plan for approval"
+            },
+            "acceptEdits": {
+                "label": "Agent Mode",
+                "description": "Auto-accept file edits, fewer confirmations"
+            },
+            "bypassPermissions": {
+                "label": "Auto Mode",
+                "description": "Fully automated, bypasses all permission checks (use with caution)"
+            }
+        },
+        "reasoning": {
+            "low": { "label": "Low", "description": "Quick responses with basic reasoning" },
+            "medium": { "label": "Medium", "description": "Balanced thinking and speed" },
+            "high": { "label": "High", "description": "Deep reasoning for complex tasks (default)" },
+            "xhigh": { "label": "XHigh", "description": "Extra deep reasoning for demanding tasks" },
+            "max": { "label": "Max", "description": "Maximum reasoning depth" }
+        },
+        "models": {
+            "opus48": "Opus 4.8 · Latest and most capable",
+            "opus47": "Opus 4.7 · Previous flagship",
+            "fable5": "Fable 5 · Most powerful · Mythos-class",
+            "sonnet46": "Sonnet 4.6 · Default model",
+            "haiku45": "Haiku 4.5 · Fastest for quick answers",
+            "gpt55": "GPT-5.5 · Latest frontier model",
+            "gpt54": "GPT-5.4 · Enhanced capabilities",
+            "gpt52codex": "GPT-5.2-Codex · Frontier coding model",
+            "gpt51codexMax": "GPT-5.1-Codex-Max · Deep & fast reasoning",
+            "gpt52": "GPT-5.2 · Optimized for long tasks"
+        },
+        "completion": {
+            "empty": "No matches"
+        },
+        "enhancer": {
+            "title": "Prompt Enhancer",
+            "original": "Original",
+            "enhanced": "Enhanced",
+            "loading": "Enhancing…",
+            "useEnhanced": "Use enhanced",
+            "keepOriginal": "Keep original"
+        },
         "sdk": {
             "title": "SDK Dependencies",
             "manage": "Dependencies",

@@ -896,6 +896,8 @@ pub fn run() {
             // Permission 命令（权限审批响应）
             chat_commands::permission_respond_ask_user_question,
             chat_commands::permission_respond_plan_approval,
+            chat_commands::chat_list_workspace_files,
+            chat_commands::chat_enhance_prompt,
         ])
         .setup(|app| {
             // 初始化数据库
