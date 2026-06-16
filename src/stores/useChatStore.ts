@@ -8,6 +8,7 @@ import {
     ChatDaemonEvent,
     ChatProvider,
     MessageRaw,
+    TokenUsage,
 } from '../types/chat';
 import {
     AskUserQuestionRequest,
@@ -135,8 +136,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return;
             }
 
+            // [USAGE]：本轮 token 用量，保存到当前流式 assistant 消息。
+            if (text.startsWith('[USAGE]')) {
+                const payload = text.slice('[USAGE]'.length).trim();
+                try {
+                    const usage = JSON.parse(payload) as TokenUsage;
+                    set((state) => {
+                        const messages = [...state.messages];
+                        for (let i = messages.length - 1; i >= 0; i--) {
+                            if (messages[i].role === 'assistant' && messages[i].streaming) {
+                                messages[i] = { ...messages[i], usage };
+                                break;
+                            }
+                        }
+                        return { messages };
+                    });
+                } catch {
+                    // 忽略解析失败
+                }
+                return;
+            }
+
             // 其余标签行（[DEBUG]/[LIFECYCLE]/[MESSAGE]/[MESSAGE_START]/
-            // [STREAM_START]/[STREAM_END]/[USAGE]/[BLOCK_RESET] 等）忽略，
+            // [STREAM_START]/[STREAM_END]/[BLOCK_RESET] 等）忽略，
             // 不渲染为消息内容。[MESSAGE] 由 chat://message 事件单独处理。
         });
 
@@ -151,6 +173,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                               ...m,
                               streaming: false,
                               error: success ? m.error : error || '执行失败',
+                              // 记录本轮耗时（从消息创建到流式结束）
+                              durationMs: Date.now() - m.createdAt,
                           }
                         : m,
                 ),

@@ -16,6 +16,18 @@ export interface ChatMessage {
     /** 出错信息（如有） */
     error?: string;
     createdAt: number;
+    /** 本轮耗时（毫秒），流式结束时记录（仅 assistant） */
+    durationMs?: number;
+    /** 本轮 token 用量（来自 [USAGE] 标签，仅 assistant） */
+    usage?: TokenUsage;
+}
+
+/** Token 用量（对应 daemon [USAGE] 标签的 JSON） */
+export interface TokenUsage {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
 }
 
 /** MESSAGE 标签的完整结构 */

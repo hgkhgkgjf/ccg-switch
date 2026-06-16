@@ -8,6 +8,7 @@ import AskUserQuestionDialog from '../components/chat/AskUserQuestionDialog';
 import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
 import ContentBlockRenderer from '../components/chat/ContentBlockRenderer';
 import MarkdownBlock from '../components/chat/MarkdownBlock';
+import MessageMeta from '../components/chat/MessageMeta';
 import ModalDialog from '../components/common/ModalDialog';
 import type { ChatMessage } from '../types/chat';
 
@@ -231,8 +232,20 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     const isUser = message.role === 'user';
     const hasBlocks = message.raw?.message?.content && message.raw.message.content.length > 0;
 
+    // 格式化时间戳 HH:MM
+    const time = new Date(message.createdAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+
     return (
         <div className={`chat ${isUser ? 'chat-end' : 'chat-start'}`}>
+            {/* 用户消息显示发送时间 */}
+            {isUser && (
+                <div className="chat-header text-xs text-base-content/50 mb-1">
+                    {time}
+                </div>
+            )}
             <div
                 className={`chat-bubble ${
                     isUser ? 'chat-bubble-primary' : ''
@@ -254,6 +267,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                     <div className="text-xs opacity-70 mt-1">{message.error}</div>
                 )}
             </div>
+            {/* assistant 消息显示耗时和 token 用量 */}
+            {!isUser && !message.streaming && (
+                <div className="chat-footer">
+                    <MessageMeta durationMs={message.durationMs} usage={message.usage} />
+                </div>
+            )}
         </div>
     );
 }
