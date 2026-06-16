@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { ContentBlock, ToolResultBlock } from '../../types/chat';
 import GenericToolBlock from './GenericToolBlock';
 import MarkdownBlock from './MarkdownBlock';
+import ThinkingBlock from './ThinkingBlock';
 
 interface ContentBlockRendererProps {
     blocks: ContentBlock[];
@@ -9,7 +10,7 @@ interface ContentBlockRendererProps {
 
 /**
  * 内容块渲染器 - 根据块类型路由到对应组件
- * 支持 text、tool_use、tool_result 三种块类型
+ * 支持 text、tool_use、tool_result、thinking 四种块类型
  */
 export default function ContentBlockRenderer({ blocks }: ContentBlockRendererProps) {
     // 构建 tool_use_id → tool_result 的映射
@@ -32,6 +33,14 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
                             <MarkdownBlock
                                 key={index}
                                 content={block.text}
+                            />
+                        );
+
+                    case 'thinking':
+                        return (
+                            <ThinkingBlock
+                                key={index}
+                                content={block.thinking}
                             />
                         );
 

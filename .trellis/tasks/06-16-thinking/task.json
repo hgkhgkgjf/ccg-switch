@@ -3,7 +3,7 @@
   "name": "thinking",
   "title": "Thinking 内容显示",
   "description": "解析 THINKING_DELTA 事件，实现折叠式灰色块 + Markdown 渲染",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

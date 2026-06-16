@@ -29,7 +29,7 @@ export interface MessageRaw {
 }
 
 /** 内容块联合类型 */
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
 
 export interface TextBlock {
     type: 'text';
@@ -48,6 +48,11 @@ export interface ToolResultBlock {
     tool_use_id: string;
     content?: string | ContentBlock[];
     is_error?: boolean;
+}
+
+export interface ThinkingBlock {
+    type: 'thinking';
+    thinking: string;
 }
 
 /** 后端 "chat://stream" 事件载荷 */
