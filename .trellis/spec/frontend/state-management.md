@@ -90,6 +90,43 @@ warmup.
 | Transient async status for a view | custom hook | `useHealthCheck` statuses |
 | Imperative drag tracking | `useRef` + `useState` | `ProvidersPage` `dragSourceRef` |
 | Route | HashRouter | `App.tsx` `createHashRouter` |
+| **Event-driven request (Tauri push)** | **Zustand store** | **`pendingAskUserQuestion` (权限审批)** |
+
+### Event-Driven State Pattern (Tauri → Frontend)
+
+When the backend pushes events to the frontend (via `app.emit()`), store the
+pending request in a Zustand store and conditionally render a modal/dialog:
+
+```ts
+interface ChatState {
+    pendingAskUserQuestion: AskUserQuestionRequest | null;
+    answerAskUserQuestion: (requestId: string, answers: Record<string, string>) => Promise<void>;
+}
+
+// In init():
+const askUserUn = await listen<AskUserQuestionRequest>('permission://ask-user-question', (event) => {
+    set({ pendingAskUserQuestion: event.payload });
+});
+
+// In action:
+answerAskUserQuestion: async (requestId, answers) => {
+    await invoke('permission_respond_ask_user_question', { requestId, answers });
+    set({ pendingAskUserQuestion: null }); // Clear after response
+}
+```
+
+**In the page**:
+```tsx
+{pendingAskUserQuestion && (
+    <AskUserQuestionDialog
+        request={pendingAskUserQuestion}
+        onAnswer={(answers) => answerAskUserQuestion(pendingAskUserQuestion.requestId, answers)}
+    />
+)}
+```
+
+This pattern keeps event-driven modals decoupled from page state—any page can
+show the dialog when the backend pushes the event.
 
 ---
 

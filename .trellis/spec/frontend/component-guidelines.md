@@ -107,6 +107,68 @@ See `src/components/providers/ProviderCard.tsx` and
 - Tauri window dragging: top regions use `data-tauri-drag-region`; modals add a
   fixed drag strip so the window stays movable behind the overlay.
 
+### Event-Driven Modal Pattern (Backend → Frontend)
+
+For modals triggered by backend events (e.g., permission requests via Tauri
+`app.emit()`), the pattern is:
+
+1. **Store the request** in a Zustand store field (`pendingAskUserQuestion: Request | null`)
+2. **Listen to the event** in the store's `init()` method and set the field
+3. **Conditionally render the modal** in the page: `{pendingRequest && <Dialog ... />}`
+4. **Clear the field** after user responds (in the store action that calls `invoke`)
+
+Example (permission approval dialog):
+```tsx
+// Store (useChatStore.ts)
+interface ChatState {
+    pendingAskUserQuestion: AskUserQuestionRequest | null;
+    answerAskUserQuestion: (requestId: string, answers: Record<string, string>) => Promise<void>;
+}
+
+init: async () => {
+    const askUserUn = await listen<AskUserQuestionRequest>('permission://ask-user-question', (event) => {
+        set({ pendingAskUserQuestion: event.payload });
+    });
+    // ...
+}
+
+answerAskUserQuestion: async (requestId, answers) => {
+    await invoke('permission_respond_ask_user_question', { requestId, answers });
+    set({ pendingAskUserQuestion: null });
+}
+
+// Page (ChatPage.tsx)
+const { pendingAskUserQuestion, answerAskUserQuestion } = useChatStore();
+
+return (
+    <>
+        {/* ... main content */}
+        {pendingAskUserQuestion && (
+            <AskUserQuestionDialog
+                request={pendingAskUserQuestion}
+                onAnswer={(answers) => answerAskUserQuestion(pendingAskUserQuestion.requestId, answers)}
+            />
+        )}
+    </>
+);
+
+// Component (AskUserQuestionDialog.tsx)
+export default function AskUserQuestionDialog({ request, onAnswer }: Props) {
+    return createPortal(
+        <>
+            <div className="fixed top-0 left-0 right-0 h-8 z-[9998]" data-tauri-drag-region />
+            <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center">
+                {/* modal content */}
+            </div>
+        </>,
+        document.body
+    );
+}
+```
+
+This pattern keeps the modal globally accessible (can be shown from any page)
+without coupling to page-local state.
+
 ---
 
 ## Accessibility
