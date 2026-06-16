@@ -1,0 +1,260 @@
+/* 工具块样式 */
+
+/* 工具块容器 */
+.task-container {
+  border: 1px solid oklch(var(--b2));
+  border-radius: 8px;
+  margin: 8px 0;
+  background: oklch(var(--b1));
+  overflow: hidden;
+}
+
+/* 工具块标题 */
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.task-header:hover {
+  background: oklch(var(--b2));
+}
+
+.task-title-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-title-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  opacity: 0.7;
+}
+
+.tool-title-text {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-title-summary {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 状态指示器 */
+.tool-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tool-status-indicator.pending {
+  background: #fbbf24; /* yellow-400 */
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.tool-status-indicator.completed {
+  background: #10b981; /* green-500 */
+}
+
+.tool-status-indicator.error {
+  background: #ef4444; /* red-500 */
+}
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 工具详情区域 */
+.task-details {
+  border-top: 1px solid oklch(var(--b2));
+  background: oklch(var(--b1));
+}
+
+.task-content-wrapper {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 工具节区域 */
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+}
+
+/* 工具参数 */
+.tool-params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  background: oklch(var(--b2));
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.tool-param-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.tool-param-key {
+  color: #60a5fa; /* blue-400 */
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.tool-param-value {
+  flex: 1;
+  color: oklch(var(--bc));
+  opacity: 0.9;
+}
+
+/* 工具结果 */
+.tool-result {
+  background: oklch(var(--b2));
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tool-result-error {
+  background: rgba(239, 68, 68, 0.1); /* red-500 with opacity */
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.tool-result-text {
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: oklch(var(--bc));
+}
+
+.tool-result-error .tool-result-text {
+  color: #ef4444; /* red-500 */
+}
+
+/* 工具操作按钮 */
+.tool-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 文件路径链接 */
+.clickable-file {
+  color: #60a5fa; /* blue-400 */
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.clickable-file:hover {
+  color: #3b82f6; /* blue-500 */
+}
+
+/* 响应式设计 - 移动端 */
+@media (max-width: 768px) {
+  .task-container {
+    margin: 4px 0;
+  }
+
+  .task-header {
+    padding: 8px 12px;
+  }
+
+  .task-content-wrapper {
+    padding: 12px;
+  }
+
+  .tool-title-text {
+    font-size: 13px;
+  }
+
+  .tool-title-summary {
+    display: none; /* 隐藏次要信息 */
+  }
+
+  .tool-params,
+  .tool-result {
+    font-size: 12px;
+  }
+}
+
+/* 深色主题适配 */
+[data-theme="dark"] .task-container {
+  border-color: #374151; /* gray-700 */
+  background: #1f2937; /* gray-800 */
+}
+
+[data-theme="dark"] .task-header:hover {
+  background: #374151; /* gray-700 */
+}
+
+[data-theme="dark"] .tool-params,
+[data-theme="dark"] .tool-result {
+  background: #111827; /* gray-900 */
+}
+
+[data-theme="dark"] .tool-result-error {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Codicon 字体支持（假设已全局引入） */
+.codicon {
+  font-family: 'codicon';
+  font-size: inherit;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.codicon-tools::before {
+  content: '\ea76';
+}
+
+.codicon-file-code::before {
+  content: '\ea7f';
+}
+
+.codicon-folder::before {
+  content: '\ea7b';
+}

@@ -1,5 +1,6 @@
 import { createHashRouter, RouterProvider } from 'react-router-dom';
 import './App.css';
+import './styles/toolBlocks.css';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import { lazy, Suspense } from 'react';

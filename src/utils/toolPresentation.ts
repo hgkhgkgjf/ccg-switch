@@ -5,12 +5,10 @@ import type { ToolInput, ToolTargetInfo, LineInfo } from '../types/tools';
 /**
  * 解析工具的文件路径目标
  * @param input 工具输入参数
- * @param toolType 工具类型（用于确定优先级）
  * @returns 文件路径目标信息，如果无法解析则返回 null
  */
 export function resolveToolTarget(
   input: ToolInput,
-  toolType: 'read' | 'edit' | 'bash'
 ): ToolTargetInfo | null {
   // 优先级：file_path > path > target_file
   const rawPath = (input.file_path || input.path || input.target_file) as string | undefined;
@@ -54,12 +52,10 @@ export function resolveToolTarget(
 /**
  * 提取工具调用的行号信息
  * @param input 工具输入参数
- * @param target 文件路径目标（可选，用于额外验证）
  * @returns 行号信息
  */
 export function getToolLineInfo(
   input: ToolInput,
-  target: ToolTargetInfo | null
 ): LineInfo {
   // 优先级：offset > line > start_line
   const start = input.offset || input.line || input.start_line;
