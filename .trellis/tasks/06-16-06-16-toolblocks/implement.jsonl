@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"React 组件开发规范，工具块组件需遵循"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"TypeScript 类型定义规范，工具类型定义需遵循"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Zustand 状态管理模式，deniedToolIds 状态需遵循"}
+{"file":".trellis/spec/guides/pre-development-checklist.md","reason":"开发前检查清单，确保架构设计符合规范"}

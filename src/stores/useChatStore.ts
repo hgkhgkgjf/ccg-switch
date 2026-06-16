@@ -90,8 +90,12 @@ interface ChatState {
     pendingAskUserQuestion: AskUserQuestionRequest | null;
     /** 待审批的 PlanApproval 请求（弹窗） */
     pendingPlanApproval: PlanApprovalRequest | null;
+    /** 被用户拒绝的工具调用 ID 集合 */
+    deniedToolIds: Set<string>;
 
     init: () => Promise<void>;
+    addDeniedTool: (toolId: string) => void;
+    clearDeniedTools: () => void;
     setProvider: (p: ChatProvider) => void;
     setPermissionMode: (m: PermissionMode) => void;
     setModel: (id: string) => void;
@@ -149,6 +153,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     error: null,
     pendingAskUserQuestion: null,
     pendingPlanApproval: null,
+    deniedToolIds: new Set(),
 
     init: async () => {
         if (get().initialized) return;
@@ -451,5 +456,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set({ error: String(e) });
         }
     },
+
+    addDeniedTool: (toolId) =>
+        set((state) => ({
+            deniedToolIds: new Set(state.deniedToolIds).add(toolId),
+        })),
+
+    clearDeniedTools: () => set({ deniedToolIds: new Set() }),
 }));
 
