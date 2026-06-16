@@ -898,6 +898,8 @@ pub fn run() {
             chat_commands::permission_respond_plan_approval,
             chat_commands::chat_list_workspace_files,
             chat_commands::chat_enhance_prompt,
+            // Editor 命令
+            commands::editor_commands::open_file_in_editor,
         ])
         .setup(|app| {
             // 初始化数据库
