@@ -13,6 +13,7 @@ Common cross-layer bugs:
 - API returns format A, frontend expects format B
 - Database stores X, service transforms to Y, but loses data
 - Multiple layers implement the same logic differently
+- **State updates in one layer invalidate data in another layer**
 
 ---
 
@@ -31,6 +32,7 @@ For each arrow, ask:
 - What format is the data in?
 - What could go wrong?
 - Who is responsible for validation?
+- **What happens when this data is updated from another source?**
 
 ### Step 2: Identify Boundaries
 
@@ -40,6 +42,7 @@ For each arrow, ask:
 | Service ↔ Database    | Format conversions, null handling |
 | Backend ↔ Frontend    | Serialization, date formats       |
 | Component ↔ Component | Props shape changes               |
+| **Event ↔ State**     | **Race conditions, data overwrites** |
 
 ### Step 3: Define Contracts
 
@@ -48,6 +51,7 @@ For each boundary:
 - What is the exact input format?
 - What is the exact output format?
 - What errors can occur?
+- **What fields must be preserved across updates?**
 
 ---
 
@@ -257,3 +261,96 @@ state correctly, but several commands still re-parsed event payload fields with
 local casts. The fix was to make the core event layer own `ThreadChannelEvent`
 and `isThreadEvent`, make `reduceChannelMetadata` the only channel metadata
 projection, and make `reduceThreads` the only thread replay reducer.
+
+---
+
+## Case Study: Chat Message State Corruption
+
+### Problem
+User sends a message in ChatPage. The message text disappears immediately after send, only showing assistant's tool calls. User's original message is invisible.
+
+### Layer Analysis
+
+```
+User Input → ChatComposer → useChatStore.send() 
+  → Create userMsg with content field
+  → Add to messages array
+  → Backend processes message
+  → chat://message event arrives
+  → Update message with raw field
+  → UI renders MessageBubble
+```
+
+### Bug Locations
+
+1. **State Layer (useChatStore)**:
+   - Initial message creation has `content: trimmed` ✅
+   - `chat://message` event handler updates message with `raw` field
+   - Potential issue: `{ ...oldMessage, raw }` spread might not preserve `content`
+
+2. **Render Layer (MessageBubble)**:
+   - Condition: `hasBlocks ? render raw : content ? render content : null`
+   - If `content` is lost but `raw.message.content` is empty, renders nothing
+
+3. **Input Layer (ChatComposer)**:
+   - Draft persistence issue: `setProvider` reloads draft from localStorage
+   - Input box shows old text even after send
+
+### Prevention Checklist
+
+When updating state from events:
+
+- [ ] **Preserve existing fields**: Use explicit field listing, not blind spread
+- [ ] **Add defensive logging**: Warn when critical fields disappear
+- [ ] **Test field survival**: Verify data survives state updates
+- [ ] **Add fallback rendering**: Don't render completely empty UI elements
+- [ ] **Document update contract**: Which fields are preserved vs replaced?
+
+### Code Pattern - Before (Unsafe)
+
+```typescript
+// ❌ Blind spread - may lose fields if raw structure differs
+messages[index] = {
+    ...messages[index],
+    raw,
+};
+```
+
+### Code Pattern - After (Safe)
+
+```typescript
+// ✅ Explicit preservation + validation
+const oldMessage = messages[index];
+const updatedMessage = {
+    ...oldMessage,
+    raw,
+    // Explicitly preserve critical fields
+    content: oldMessage.content,
+};
+
+// Defensive check
+if (oldMessage.content && !updatedMessage.content) {
+    console.error('[Store] Content field lost during update!', { old, new: updatedMessage });
+}
+
+messages[index] = updatedMessage;
+```
+
+### Systematic Expansion
+
+Similar issues to check:
+
+- [ ] Other event handlers that update messages (done, usage, stream)
+- [ ] Provider switching logic (loads draft from localStorage)
+- [ ] Message persistence (localStorage/IndexedDB)
+- [ ] Message filtering/grouping (doesn't drop user messages)
+
+### Root Cause Category
+
+**Category B - Cross-Layer Contract Violation**:
+- Event layer (`chat://message`) updates state layer (useChatStore)
+- Contract unclear: which fields are replaced vs preserved?
+- No validation that critical fields survive the update
+- UI layer assumes fields exist but has no fallback
+
+---
