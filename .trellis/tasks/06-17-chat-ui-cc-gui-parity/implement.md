@@ -136,6 +136,7 @@ Goal: define the next focused task for cc-gui-like input interaction.
   - [x] Browse projects with existing `get_dashboard_projects`.
   - [x] Browse supported Claude/Codex sessions with existing `list_sessions`.
   - [x] Search and refresh the selected project's session list.
+  - [x] Split the sidebar into independent project/session scroll panes so selected project sessions stay visible instead of being pushed below a long project list.
   - [x] Load selected session history via `get_unified_session_messages`.
   - [x] Continue selected sessions by reusing `sessionId`, provider and project cwd in `chat_send`.
   - [x] Start a new chat using the selected project's cwd.
@@ -186,6 +187,7 @@ Latest validation notes:
 - [x] `npm run build` - TypeScript and Vite production build passed.
 - [x] `git diff --check` - no whitespace errors; only Windows LF-to-CRLF warnings.
 - [x] Browser smoke check at `http://127.0.0.1:5173/#/chat` - chat page renders, session sidebar/input/status are visible, `@` input does not render `undefined`, no browser console errors observed.
+- [x] Browser layout smoke check after sidebar split - project/session panes render as separate scroll sections; plain Vite browser cannot load real Tauri session data and logs expected `invoke` runtime errors outside the desktop shell.
 - [ ] Desktop Tauri verification with real session data - still needed for selecting an existing session and continuing a message against the daemon.
 
 ## Rollback notes

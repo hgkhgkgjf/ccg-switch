@@ -85,6 +85,11 @@ See `src/components/providers/ProviderCard.tsx` and
   - Primary action button: gradient, e.g.
     `bg-gradient-to-r from-blue-500 to-purple-500 ... text-white border-none btn-sm`
   - Active/selected state: green ring/border accents.
+- Master/detail sidebars must keep the detail region visible. Use separate
+  `min-h-0` flex children with independent `overflow-y-auto` panes instead of
+  putting both the master list and detail list in one long scroll container.
+  Example: project list `basis-2/5 overflow-y-auto`, session list
+  `flex-1 overflow-y-auto`.
 - Conditional classes are composed with template strings today. A `cn()` helper
   (clsx + tailwind-merge) exists at `src/utils/cn.ts` — prefer it for new
   components with conditional class logic.
@@ -197,3 +202,6 @@ states. Note that full WCAG compliance has not been verified for this project.
   primitives.
 - Adding a one-off confirm dialog instead of reusing `ModalDialog`.
 - Light-only styling with no `dark:` variant.
+- Putting a long master list and its dependent detail list into the same
+  scrolling sidebar. Users can select a master item and still not see the
+  detail rows because they are pushed below the rest of the master list.
