@@ -314,6 +314,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     setProvider: (p) => {
+        const currentProvider = get().provider;
+        // 如果 provider 没有变化，不重新加载草稿
+        if (currentProvider === p) {
+            set({ provider: p });
+            return;
+        }
+
         // 切换 provider 时同步切换持久化的模型与草稿，并校正推理档位。
         const provider = p as ChatProviderId;
         const model = defaultModel(provider);

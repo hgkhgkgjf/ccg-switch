@@ -79,10 +79,20 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         }
         // 把文件上下文作为前缀附加（@file 简化版）
         const finalText = activeFile ? `@${activeFile}\n${text}` : text;
-        await send(finalText, { cwd });
+
+        // 先清空 UI（立即生效）
         setActiveFile(undefined);
+
+        // 发送消息（store 内部会清空 draft）
+        await send(finalText, { cwd });
+
+        // 确保 textarea 高度重置
         requestAnimationFrame(() => {
-            if (textareaRef.current) textareaRef.current.style.height = 'auto';
+            const el = textareaRef.current;
+            if (el) {
+                el.style.height = 'auto';
+                el.focus();
+            }
         });
     };
 
