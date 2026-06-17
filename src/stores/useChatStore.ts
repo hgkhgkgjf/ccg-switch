@@ -15,11 +15,13 @@ import type {SessionMeta, UnifiedSessionMessage} from '../types/session';
 import {AskUserQuestionRequest, PlanApprovalRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
 import {CLAUDE_MODELS, CODEX_MODELS, reasoningLevelsFor,} from '../components/chat/composer/constants';
-import {mergeRawChatMessage} from '../utils/chatMessageFlow';
+import {mergeRawChatMessage, TOOL_RESULT_CONTENT} from '../utils/chatMessageFlow';
 
 const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
 const MODEL_KEY_PREFIX = 'ccg-chat-model:';
 const REASONING_KEY = 'ccg-chat-reasoning';
+const HANDOFF_CONTEXT_MAX_MESSAGES = 24;
+const HANDOFF_CONTEXT_MAX_CHARS = 12_000;
 
 function loadDraft(provider: ChatProviderId): string {
     try {
@@ -79,6 +81,8 @@ interface ChatState {
     currentCwd: string | null;
     /** 当前从历史中载入的会话元信息 */
     activeSession: SessionMeta | null;
+    /** provider 切换后，下一次无原生 session 的发送需要携带的历史来源 */
+    handoffContextProvider: ChatProvider | null;
     /** 事件监听器是否已注册 */
     initialized: boolean;
     error: string | null;
@@ -165,6 +169,52 @@ function mapHistoryMessage(
     };
 }
 
+function hasHandoffContent(message: ChatMessage): boolean {
+    if (message.streaming || message.error) return false;
+    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system') return false;
+    const content = message.content.trim();
+    return content.length > 0 && content !== TOOL_RESULT_CONTENT;
+}
+
+function roleLabel(role: ChatRole): string {
+    if (role === 'assistant') return 'Assistant';
+    if (role === 'system') return 'System';
+    return 'User';
+}
+
+function trimToMaxChars(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(text.length - maxChars);
+}
+
+function buildProviderHandoffMessage(
+    userMessage: string,
+    messages: ChatMessage[],
+    sourceProvider: ChatProvider,
+    targetProvider: ChatProvider,
+): string {
+    const transcript = messages
+        .filter(hasHandoffContent)
+        .slice(-HANDOFF_CONTEXT_MAX_MESSAGES)
+        .map((message) => `${roleLabel(message.role)}: ${message.content.trim()}`)
+        .join('\n\n');
+
+    if (!transcript.trim()) return userMessage;
+
+    const boundedTranscript = trimToMaxChars(transcript, HANDOFF_CONTEXT_MAX_CHARS);
+
+    return [
+        `<previous-conversation-context source-provider="${sourceProvider}" target-provider="${targetProvider}">`,
+        `The visible chat history below came from the ${sourceProvider} provider before the user switched to ${targetProvider}.`,
+        'Treat it as prior conversation context and continue from it. Do not mention this wrapper unless it is directly relevant.',
+        '',
+        boundedTranscript,
+        '</previous-conversation-context>',
+        '',
+        userMessage,
+    ].join('\n');
+}
+
 async function abortActiveRequestIfNeeded(
     get: () => ChatState,
     set: (state: Partial<ChatState>) => void,
@@ -193,6 +243,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     sessionId: null,
     currentCwd: null,
     activeSession: null,
+    handoffContextProvider: null,
     initialized: false,
     error: null,
     pendingAskUserQuestion: null,
@@ -216,9 +267,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // 不应渲染到消息气泡里。参考 jcc-gui 的 ClaudeStreamAdapter。
 
             // [SESSION_ID]：保存会话 ID，供后续消息延续上下文。
-            if (text.startsWith('[SESSION_ID]')) {
-                const sid = text.slice('[SESSION_ID]'.length).trim();
-                if (sid) set({ sessionId: sid });
+            if (text.startsWith('[SESSION_ID]') || text.startsWith('[THREAD_ID]')) {
+                const marker = text.startsWith('[THREAD_ID]') ? '[THREAD_ID]' : '[SESSION_ID]';
+                const sid = text.slice(marker.length).trim();
+                if (sid) set({ sessionId: sid, handoffContextProvider: null });
                 return;
             }
 
@@ -357,6 +409,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             draft: loadDraft(provider),
             sessionId: null,
             activeSession: null,
+            handoffContextProvider: state.messages.some(hasHandoffContent) ? currentProvider : null,
             reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
                 ? state.reasoningEffort
                 : (levels[levels.length - 1]?.id ?? 'high'),
@@ -402,6 +455,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     send: async (text, opts) => {
         const trimmed = text.trim();
         if (!trimmed) return;
+        const stateBeforeSend = get();
+        const outboundMessage = stateBeforeSend.handoffContextProvider
+            && stateBeforeSend.handoffContextProvider !== stateBeforeSend.provider
+            && !stateBeforeSend.sessionId
+            ? buildProviderHandoffMessage(
+                trimmed,
+                stateBeforeSend.messages,
+                stateBeforeSend.handoffContextProvider,
+                stateBeforeSend.provider,
+            )
+            : trimmed;
 
         const userMsg: ChatMessage = {
             id: newId(),
@@ -430,8 +494,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const { provider, sessionId, permissionMode, model, reasoningEffort, currentCwd } = get();
         const params: Record<string, unknown> = {
-            message: trimmed,
-            sessionId: sessionId ?? undefined,
+            message: outboundMessage,
+            sessionId: provider === 'claude' ? (sessionId ?? undefined) : undefined,
+            threadId: provider === 'codex' ? (sessionId ?? undefined) : undefined,
             cwd: opts?.cwd ?? currentCwd ?? undefined,
             model: opts?.model ?? model,
             permissionMode,
@@ -484,6 +549,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 sessionId: session.sessionId,
                 currentCwd: session.projectDir,
                 activeSession: session,
+                handoffContextProvider: null,
                 activeRequestId: null,
                 contextTokens: 0,
                 error: null,
@@ -499,6 +565,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             messages: [],
             sessionId: null,
             activeSession: null,
+            handoffContextProvider: null,
             currentCwd: cwd ?? state.currentCwd,
             activeRequestId: null,
             contextTokens: 0,
@@ -517,7 +584,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     clear: async () => {
         await abortActiveRequestIfNeeded(get, set);
-        set({ messages: [], sessionId: null, activeSession: null, error: null, contextTokens: 0 });
+        set({
+            messages: [],
+            sessionId: null,
+            activeSession: null,
+            handoffContextProvider: null,
+            error: null,
+            contextTokens: 0,
+        });
     },
 
     answerAskUserQuestion: async (requestId, answers) => {

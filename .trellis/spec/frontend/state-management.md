@@ -438,6 +438,121 @@ startNewSession: async (cwd) => {
 
 ---
 
+## Scenario: Chat Provider Switch Context Handoff
+
+### 1. Scope / Trigger
+
+- Trigger: the chat UI lets the user switch between `claude` and `codex` while
+  a visible transcript is already loaded.
+- This is a cross-layer command/event contract. The UI presents one transcript,
+  but providers keep incompatible native session identifiers:
+  Claude uses `sessionId`; Codex uses `threadId`.
+
+### 2. Signatures
+
+```ts
+interface ChatState {
+    provider: ChatProvider;
+    sessionId: string | null;
+    activeSession: SessionMeta | null;
+    handoffContextProvider: ChatProvider | null;
+    messages: ChatMessage[];
+
+    setProvider: (p: ChatProvider) => void;
+    send: (text: string, opts?: { cwd?: string; model?: string }) => Promise<void>;
+}
+```
+
+```ts
+await invoke<string>('chat_send', {
+    provider,
+    command: 'send',
+    params: {
+        message,
+        sessionId: provider === 'claude' ? sessionId : undefined,
+        threadId: provider === 'codex' ? sessionId : undefined,
+        cwd,
+        model,
+        permissionMode,
+        reasoningEffort,
+        streaming: true,
+    },
+});
+```
+
+### 3. Contracts
+
+- The frontend may store both Claude session ids and Codex thread ids in the
+  same `sessionId` field, but it must map them back to the provider-specific
+  command parameter at send time.
+- `chat://stream` lines starting with `[SESSION_ID]` and `[THREAD_ID]` both
+  update `ChatState.sessionId`.
+- On provider switch, `setProvider()` must clear the provider-native session id
+  and `activeSession`, because Claude sessions cannot be resumed as Codex
+  threads and vice versa.
+- If visible text history remains after a provider switch, set
+  `handoffContextProvider` to the previous provider. The next send with no
+  native `sessionId`/`threadId` must prepend a bounded hidden transcript to the
+  outbound payload. The visible UI message stays as the user's original input.
+- Once a provider returns `[SESSION_ID]` or `[THREAD_ID]`, clear
+  `handoffContextProvider`; the new provider-native session now owns future
+  context.
+- `loadSession()`, `startNewSession()`, and `clear()` must reset
+  `handoffContextProvider`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Codex emits `[THREAD_ID] abc` | Store `sessionId === "abc"` and clear pending handoff. |
+| Sending with `provider === "codex"` and `sessionId === "abc"` | Send `params.threadId === "abc"` and no Claude `sessionId`. |
+| Sending with `provider === "claude"` and `sessionId === "abc"` | Send `params.sessionId === "abc"` and no Codex `threadId`. |
+| User switches Claude -> Codex while transcript is visible | Clear native session id, remember Claude as handoff source, keep visible messages. |
+| First Codex send after switch has no thread id | Outbound payload includes bounded prior transcript plus the user's new prompt. |
+| User starts a new session or clears chat | Clear transcript and pending handoff; do not inject old context. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a loaded Claude history remains visible, the user switches to Codex, and
+  Codex's first turn receives a hidden transcript so it can continue the work.
+- Base: a normal Codex session saves `[THREAD_ID]` and resumes future sends with
+  `threadId`.
+- Bad: keeping the visible transcript while sending a brand-new Codex thread
+  with only the latest user message. The UI implies context continuity but the
+  model has none.
+
+### 6. Tests Required
+
+- Unit test: `[THREAD_ID]` updates `sessionId` and the next Codex send includes
+  `threadId`.
+- Unit test: Claude -> Codex provider switch injects visible history into the
+  outbound payload while preserving the visible user message.
+- Build check: `npm run build` must pass because strict TypeScript catches
+  store interface drift and test-target library mismatches.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const params = {
+    message: text,
+    sessionId: sessionId ?? undefined,
+};
+```
+
+#### Correct
+
+```ts
+const params = {
+    message: outboundMessage,
+    sessionId: provider === 'claude' ? sessionId ?? undefined : undefined,
+    threadId: provider === 'codex' ? sessionId ?? undefined : undefined,
+};
+```
+
+---
+
 ## When to Use Global State
 
 Promote to a Zustand store when **more than one page/component needs the same
