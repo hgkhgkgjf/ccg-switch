@@ -291,10 +291,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         return state;
                     }
 
-                    messages[lastIndex] = {
-                        ...messages[lastIndex],
+                    const oldMessage = messages[lastIndex];
+                    const updatedMessage = {
+                        ...oldMessage,
                         raw,
                     };
+
+                    // 调试：检查用户消息的 content 字段是否被保留
+                    if (raw.type === 'user' && oldMessage.content && !updatedMessage.content) {
+                        console.error('[useChatStore] User message content lost!', {
+                            old: oldMessage,
+                            new: updatedMessage,
+                            raw,
+                        });
+                    }
+
+                    messages[lastIndex] = updatedMessage;
 
                     return { messages };
                 });

@@ -175,6 +175,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         minute: '2-digit',
     });
 
+    // 调试：用户消息没有 content 时警告
+    if (isUser && !message.content && !hasBlocks) {
+        console.warn('[MessageBubble] User message without content:', message);
+    }
+
     return (
         <div className={`chat ${isUser ? 'chat-end' : 'chat-start'}`}>
             {/* 用户消息显示发送时间 */}
@@ -199,7 +204,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                     />
                 ) : message.streaming ? (
                     <Loader2 size={16} className="animate-spin" />
-                ) : null}
+                ) : (
+                    /* 防止完全空白的气泡 */
+                    isUser && <span className="opacity-50 italic">Empty message</span>
+                )}
                 {message.error && (
                     <div className="text-xs opacity-70 mt-1">{message.error}</div>
                 )}
