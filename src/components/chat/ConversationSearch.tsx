@@ -1,5 +1,5 @@
 import {Search, X} from 'lucide-react';
-import {forwardRef} from 'react';
+import {forwardRef, type KeyboardEvent} from 'react';
 import {useTranslation} from 'react-i18next';
 
 interface ConversationSearchProps {
@@ -13,6 +13,13 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
 ) {
     const { t } = useTranslation();
 
+    const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Escape' && value) {
+            event.preventDefault();
+            onChange('');
+        }
+    };
+
     return (
         <div className="border-b border-base-300 bg-base-100/90 px-4 py-2 shadow-sm backdrop-blur">
             <div className="mx-auto flex w-full max-w-4xl items-center gap-2 rounded-full border border-base-300 bg-base-200/40 px-3 py-1.5 text-xs text-base-content/60 transition-colors focus-within:border-base-content/30 focus-within:bg-base-100 hover:border-base-content/20">
@@ -25,6 +32,7 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
                     placeholder={t('chat.layout.searchPlaceholder')}
                     aria-label={t('chat.layout.searchPlaceholder')}
                     onChange={(event) => onChange(event.target.value)}
+                    onKeyDown={handleKeyDown}
                 />
                 {value && (
                     <button
@@ -32,6 +40,7 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
                         className="btn btn-ghost btn-xs h-6 min-h-0 w-6 rounded-full p-0 text-base-content/45 hover:text-base-content"
                         title={t('chat.layout.clearSearch')}
                         aria-label={t('chat.layout.clearSearch')}
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => onChange('')}
                     >
                         <X size={13} />
