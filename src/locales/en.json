@@ -46,8 +46,39 @@
         "starting": "Starting…",
         "clear": "Clear",
         "empty": "Start a conversation with AI",
+        "message": {
+            "user": "You",
+            "assistant": "AI Assistant",
+            "system": "System",
+            "copy": "Copy",
+            "copied": "Copied",
+            "emptyUser": "Empty message",
+            "unknownBlock": "Unknown content block",
+            "showEarlier": "Show {{count}} earlier messages ({{total}} remaining)",
+            "waiting": "Waiting for response…",
+            "streamingConnected": "Connected, generating response…"
+        },
+        "thinking": {
+            "title": "AI is thinking…"
+        },
+        "markdown": {
+            "copyCode": "Copy code",
+            "copiedCode": "Copied code"
+        },
+        "layout": {
+            "anchorRail": "Message anchors",
+            "searchPlaceholder": "Conversation search slot reserved",
+            "scrollToBottom": "Scroll to bottom",
+            "statusPanel": "Session status",
+            "messageCount": "Messages",
+            "clearSearch": "Clear search",
+            "searchResults": "Found {{count}} matching messages",
+            "searchNoResults": "No matching messages found"
+        },
         "placeholder": "Type a message. Enter to send, Shift+Enter for newline",
         "richPlaceholder": "Type a message… @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline",
+        "dropFileHint": "Drop to add a context file",
+        "historyHint": "Press ↑ to restore the previous input, ↓ to return to an empty draft",
         "send": "Send",
         "stop": "Stop",
         "context": "context",

@@ -1,17 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Trash2, Loader2, Package } from 'lucide-react';
-import { useChatStore } from '../stores/useChatStore';
-import { useSdkStore } from '../stores/useSdkStore';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Package, Trash2} from 'lucide-react';
+import {useChatStore} from '../stores/useChatStore';
+import {useSdkStore} from '../stores/useSdkStore';
 import SdkDependencyPanel from '../components/chat/SdkDependencyPanel';
 import AskUserQuestionDialog from '../components/chat/AskUserQuestionDialog';
 import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
-import ContentBlockRenderer from '../components/chat/ContentBlockRenderer';
-import MarkdownBlock from '../components/chat/MarkdownBlock';
-import MessageMeta from '../components/chat/MessageMeta';
-import { ChatComposer } from '../components/chat/composer/ChatComposer';
+import MessageList from '../components/chat/MessageList';
+import ConversationSearch from '../components/chat/ConversationSearch';
+import MessageAnchorRail from '../components/chat/MessageAnchorRail';
+import ScrollControl from '../components/chat/ScrollControl';
+import StatusPanel from '../components/chat/StatusPanel';
+import {ChatComposer} from '../components/chat/composer/ChatComposer';
 import ModalDialog from '../components/common/ModalDialog';
-import type { ChatMessage } from '../types/chat';
+import {shouldRenderChatMessage} from '../utils/chatMessageFlow';
+
+const BOTTOM_REVEAL_THRESHOLD = 160;
 
 /**
  * 交互式对话页 —— 对接 ai-bridge daemon（Claude Code / Codex）。
@@ -20,7 +24,7 @@ import type { ChatMessage } from '../types/chat';
  * 工具调用可视化、Diff、权限审批将在后续任务中补充。
  */
 export default function ChatPage() {
-    const { t } = useTranslation();
+    const {t} = useTranslation();
     const {
         messages,
         provider,
@@ -36,24 +40,96 @@ export default function ChatPage() {
     } = useChatStore();
 
     const [sdkModalOpen, setSdkModalOpen] = useState(false);
+    const [isNearBottom, setIsNearBottom] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
     const scrollRef = useRef<HTMLDivElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const isNearBottomRef = useRef(true);
 
     const sdkStatuses = useSdkStore((s) => s.statuses);
     const sdkInit = useSdkStore((s) => s.init);
 
     useEffect(() => {
-        init();
-        sdkInit();
+        void init();
+        void sdkInit();
     }, [init, sdkInit]);
 
+    const updateBottomState = useCallback(() => {
+        const scrollEl = scrollRef.current;
+        if (!scrollEl) return;
+
+        const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+        const nextIsNearBottom = distanceFromBottom < BOTTOM_REVEAL_THRESHOLD;
+        isNearBottomRef.current = nextIsNearBottom;
+        setIsNearBottom(nextIsNearBottom);
+    }, []);
+
     useEffect(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        const scrollEl = scrollRef.current;
+        if (!scrollEl || !isNearBottomRef.current) return;
+
+        requestAnimationFrame(() => {
+            scrollEl.scrollTo({top: scrollEl.scrollHeight, behavior: 'smooth'});
+        });
     }, [messages]);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+                event.preventDefault();
+                searchInputRef.current?.focus();
+                searchInputRef.current?.select();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     // 当前 provider 对应的 SDK 是否已安装。
     const sdkId = provider === 'claude' ? 'claude-sdk' : 'codex-sdk';
     const currentSdk = sdkStatuses.find((s) => s.id === sdkId);
     const sdkMissing = currentSdk ? !currentSdk.installed : false;
+    const hasMessages = messages.length > 0;
+    const renderableMessageCount = useMemo(
+        () => messages.filter((message) => shouldRenderChatMessage(message)).length,
+        [messages],
+    );
+
+    const handleSearchChange = useCallback((value: string) => {
+        setSearchQuery(value);
+
+        if (value.trim()) {
+            requestAnimationFrame(() => {
+                scrollRef.current?.scrollTo({top: 0, behavior: 'smooth'});
+            });
+        }
+    }, []);
+
+    const handleClear = () => {
+        setSearchQuery('');
+        isNearBottomRef.current = true;
+        setIsNearBottom(true);
+        clear();
+    };
+
+    const scrollToBottom = () => {
+        const scrollEl = scrollRef.current;
+        if (!scrollEl) return;
+
+        scrollEl.scrollTo({top: scrollEl.scrollHeight, behavior: 'smooth'});
+        isNearBottomRef.current = true;
+        setIsNearBottom(true);
+    };
+
+    const scrollToTop = () => {
+        const scrollEl = scrollRef.current;
+        if (!scrollEl) return;
+
+        scrollEl.scrollTo({top: 0, behavior: 'smooth'});
+        isNearBottomRef.current = false;
+        setIsNearBottom(false);
+    };
 
     return (
         <div className="flex flex-col h-full">
@@ -74,15 +150,15 @@ export default function ChatPage() {
                         className={`btn btn-ghost btn-sm ${sdkMissing ? 'text-warning' : ''}`}
                         onClick={() => setSdkModalOpen(true)}
                     >
-                        <Package size={16} />
+                        <Package size={16}/>
                         {t('chat.sdk.manage')}
                     </button>
                     <button
                         className="btn btn-ghost btn-sm"
-                        onClick={clear}
+                        onClick={handleClear}
                         disabled={messages.length === 0}
                     >
-                        <Trash2 size={16} />
+                        <Trash2 size={16}/>
                         {t('chat.clear')}
                     </button>
                 </div>
@@ -92,7 +168,7 @@ export default function ChatPage() {
             {sdkMissing && (
                 <div className="px-4 pt-3">
                     <div className="alert alert-warning py-2 text-sm flex items-center justify-between">
-                        <span>{t('chat.sdk.missingBanner', { name: currentSdk?.displayName })}</span>
+                        <span>{t('chat.sdk.missingBanner', {name: currentSdk?.displayName})}</span>
                         <button
                             className="btn btn-sm btn-warning"
                             onClick={() => setSdkModalOpen(true)}
@@ -103,16 +179,41 @@ export default function ChatPage() {
                 </div>
             )}
 
-            {/* 消息区 */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-base-content/40">
-                        <p className="text-sm">{t('chat.empty')}</p>
+            {/* 消息区：预留 cc-gui 风格的搜索、锚点和状态扩展槽 */}
+            <div className="relative flex min-h-0 flex-1 overflow-hidden bg-base-200/20">
+                <MessageAnchorRail
+                    hasMessages={hasMessages}
+                    onScrollToTop={scrollToTop}
+                    onScrollToBottom={scrollToBottom}
+                />
+
+                <div className="flex min-w-0 flex-1 flex-col">
+                    <ConversationSearch ref={searchInputRef} value={searchQuery} onChange={handleSearchChange} />
+
+                    <div
+                        ref={scrollRef}
+                        className="flex-1 scroll-pb-8 overflow-y-auto px-3 py-5 sm:px-4"
+                        onScroll={updateBottomState}
+                    >
+                        {!hasMessages && (
+                            <div className="flex h-full flex-col items-center justify-center text-base-content/40">
+                                <p className="text-sm">{t('chat.empty')}</p>
+                            </div>
+                        )}
+                        <MessageList messages={messages} searchQuery={searchQuery} />
                     </div>
-                )}
-                {messages.map((m) => (
-                    <MessageBubble key={m.id} message={m} />
-                ))}
+
+                    <ScrollControl
+                        visible={hasMessages && !isNearBottom}
+                        onScrollToBottom={scrollToBottom}
+                    />
+                </div>
+
+                <StatusPanel
+                    provider={provider}
+                    messageCount={renderableMessageCount}
+                    daemonReady={daemonReady}
+                />
             </div>
 
             {/* 错误提示 */}
@@ -137,7 +238,7 @@ export default function ChatPage() {
                 onConfirm={() => setSdkModalOpen(false)}
                 onClose={() => setSdkModalOpen(false)}
             >
-                <SdkDependencyPanel />
+                <SdkDependencyPanel/>
             </ModalDialog>
 
             {/* AskUserQuestion 权限请求弹窗 */}
@@ -160,63 +261,6 @@ export default function ChatPage() {
                     }
                     onCancel={() => approvePlan(pendingPlanApproval.requestId, false, 'default')}
                 />
-            )}
-        </div>
-    );
-}
-
-function MessageBubble({ message }: { message: ChatMessage }) {
-    const isUser = message.role === 'user';
-    const hasBlocks = message.raw?.message?.content && message.raw.message.content.length > 0;
-
-    // 格式化时间戳 HH:MM
-    const time = new Date(message.createdAt).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-
-    // 调试：用户消息没有 content 时警告
-    if (isUser && !message.content && !hasBlocks) {
-        console.warn('[MessageBubble] User message without content:', message);
-    }
-
-    return (
-        <div className={`chat ${isUser ? 'chat-end' : 'chat-start'}`}>
-            {/* 用户消息显示发送时间 */}
-            {isUser && (
-                <div className="chat-header text-xs text-base-content/50 mb-1">
-                    {time}
-                </div>
-            )}
-            <div
-                className={`chat-bubble ${
-                    isUser ? 'chat-bubble-primary' : ''
-                } ${message.error ? 'chat-bubble-error' : ''}`}
-            >
-                {hasBlocks ? (
-                    <ContentBlockRenderer
-                        blocks={message.raw!.message.content}
-                    />
-                ) : message.content ? (
-                    <MarkdownBlock
-                        content={message.content}
-                        isStreaming={message.streaming}
-                    />
-                ) : message.streaming ? (
-                    <Loader2 size={16} className="animate-spin" />
-                ) : (
-                    /* 防止完全空白的气泡 */
-                    isUser && <span className="opacity-50 italic">Empty message</span>
-                )}
-                {message.error && (
-                    <div className="text-xs opacity-70 mt-1">{message.error}</div>
-                )}
-            </div>
-            {/* assistant 消息显示耗时和 token 用量 */}
-            {!isUser && !message.streaming && (
-                <div className="chat-footer">
-                    <MessageMeta durationMs={message.durationMs} usage={message.usage} />
-                </div>
             )}
         </div>
     );

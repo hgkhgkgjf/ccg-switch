@@ -1,17 +1,18 @@
-import { useMemo } from 'react';
-import type { ContentBlock, ToolResultBlock, ToolUseBlock } from '../../types/chat';
-import { groupToolBlocks } from '../../utils/toolGrouping';
-import { getToolType } from '../../types/tools';
+import {useMemo} from 'react';
+import {useTranslation} from 'react-i18next';
+import type {ContentBlock, ToolResultBlock, ToolUseBlock} from '../../types/chat';
+import {groupToolBlocks} from '../../utils/toolGrouping';
+import {getToolType} from '../../types/tools';
 import {
-    GenericToolBlock,
-    BashToolBlock,
-    ReadToolBlock,
-    EditToolBlock,
-    BashToolGroupBlock,
-    ReadToolGroupBlock,
-    EditToolGroupBlock,
-    SearchToolGroupBlock,
     AgentGroupBlock,
+    BashToolBlock,
+    BashToolGroupBlock,
+    EditToolBlock,
+    EditToolGroupBlock,
+    GenericToolBlock,
+    ReadToolBlock,
+    ReadToolGroupBlock,
+    SearchToolGroupBlock,
     TaskExecutionBlock,
 } from '../toolBlocks';
 import MarkdownBlock from './MarkdownBlock';
@@ -19,6 +20,8 @@ import ThinkingBlock from './ThinkingBlock';
 
 interface ContentBlockRendererProps {
     blocks: ContentBlock[];
+    findToolResult: (toolId: string) => ToolResultBlock | null | undefined;
+    expandThinkingBlockIndex?: number;
 }
 
 /**
@@ -26,23 +29,12 @@ interface ContentBlockRendererProps {
  * 支持 text、tool_use、tool_result、thinking 四种块类型
  * 自动分组连续的同类型工具（3+ 个）
  */
-export default function ContentBlockRenderer({ blocks }: ContentBlockRendererProps) {
-    // 构建 tool_use_id → tool_result 的映射
-    const resultMap = useMemo(() => {
-        const map = new Map<string, ToolResultBlock>();
-        blocks.forEach(block => {
-            if (block.type === 'tool_result') {
-                map.set(block.tool_use_id, block);
-            }
-        });
-        return map;
-    }, [blocks]);
-
-    // 查找工具结果的辅助函数
-    const findToolResult = (toolId: string): ToolResultBlock | null | undefined => {
-        return resultMap.get(toolId);
-    };
-
+export default function ContentBlockRenderer({
+    blocks,
+    findToolResult,
+    expandThinkingBlockIndex,
+}: ContentBlockRendererProps) {
+    const { t } = useTranslation();
     // 应用分组算法
     const groupedBlocks = useMemo(() => groupToolBlocks(blocks), [blocks]);
 
@@ -136,6 +128,8 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
                                 <ThinkingBlock
                                     key={grouped.originalIndex}
                                     content={block.thinking}
+                                    defaultExpanded={grouped.originalIndex === expandThinkingBlockIndex}
+                                    title={t('chat.thinking.title')}
                                 />
                             );
 
@@ -152,10 +146,10 @@ export default function ContentBlockRenderer({ blocks }: ContentBlockRendererPro
                             return null;
 
                         default:
-                            console.warn('[ContentBlockRenderer] Unknown block type:', (block as any).type);
+                            console.warn('[ContentBlockRenderer] Unknown block:', block);
                             return (
                                 <div key={grouped.originalIndex} className="text-warning text-sm bg-warning/10 px-3 py-2 rounded-lg">
-                                    Unknown block: {(block as any).type}
+                                    {t('chat.message.unknownBlock')}
                                 </div>
                             );
                     }

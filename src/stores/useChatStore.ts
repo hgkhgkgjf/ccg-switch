@@ -1,29 +1,19 @@
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import {create} from 'zustand';
+import {invoke} from '@tauri-apps/api/core';
+import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {
-    ChatMessage,
-    ChatStreamEvent,
-    ChatDoneEvent,
     ChatDaemonEvent,
+    ChatDoneEvent,
+    ChatMessage,
     ChatProvider,
+    ChatStreamEvent,
     MessageRaw,
     TokenUsage,
 } from '../types/chat';
-import {
-    AskUserQuestionRequest,
-    PlanApprovalRequest,
-} from '../types/permission';
-import type {
-    PermissionMode,
-    ReasoningEffort,
-    ChatProviderId,
-} from '../components/chat/composer/constants';
-import {
-    CLAUDE_MODELS,
-    CODEX_MODELS,
-    reasoningLevelsFor,
-} from '../components/chat/composer/constants';
+import {AskUserQuestionRequest, PlanApprovalRequest,} from '../types/permission';
+import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
+import {CLAUDE_MODELS, CODEX_MODELS, reasoningLevelsFor,} from '../components/chat/composer/constants';
+import {mergeRawChatMessage} from '../utils/chatMessageFlow';
 
 const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
 const MODEL_KEY_PREFIX = 'ccg-chat-model:';
@@ -273,41 +263,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             try {
                 const raw = JSON.parse(event.payload.json) as MessageRaw;
 
-                // 更新最后一条相同角色的消息的 raw 字段
                 set((state) => {
-                    const messages = [...state.messages];
-
-                    // 手动实现 findLastIndex（向后兼容）
-                    let lastIndex = -1;
-                    for (let i = messages.length - 1; i >= 0; i--) {
-                        if (messages[i].role === raw.type) {
-                            lastIndex = i;
-                            break;
-                        }
-                    }
-
-                    if (lastIndex === -1) {
-                        console.warn('[useChatStore] Received MESSAGE without existing message');
-                        return state;
-                    }
-
-                    const oldMessage = messages[lastIndex];
-                    const updatedMessage = {
-                        ...oldMessage,
-                        raw,
-                    };
-
-                    // 调试：检查用户消息的 content 字段是否被保留
-                    if (raw.type === 'user' && oldMessage.content && !updatedMessage.content) {
-                        console.error('[useChatStore] User message content lost!', {
-                            old: oldMessage,
-                            new: updatedMessage,
-                            raw,
-                        });
-                    }
-
-                    messages[lastIndex] = updatedMessage;
-
+                    const messages = mergeRawChatMessage(state.messages, raw, {
+                        createId: newId,
+                        now: Date.now,
+                    });
                     return { messages };
                 });
             } catch (e) {
@@ -483,4 +443,3 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     clearDeniedTools: () => set({ deniedToolIds: new Set() }),
 }));
-

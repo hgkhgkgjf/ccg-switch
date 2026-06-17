@@ -1,13 +1,21 @@
-import { useCallback, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
-import { useChatStore } from '../../../stores/useChatStore';
-import { ContextBar } from './ContextBar';
-import { ButtonArea } from './ButtonArea';
-import { CompletionMenu } from './CompletionMenu';
-import { PromptEnhancerDialog } from './PromptEnhancerDialog';
-import { useCompletions } from './useCompletions';
-import { contextWindowFor, type ChatProviderId } from './constants';
+import {
+    type ChangeEvent,
+    type ClipboardEvent,
+    type DragEvent,
+    type KeyboardEvent,
+    useCallback,
+    useRef,
+    useState,
+} from 'react';
+import {useTranslation} from 'react-i18next';
+import {invoke} from '@tauri-apps/api/core';
+import {useChatStore} from '../../../stores/useChatStore';
+import {ContextBar} from './ContextBar';
+import {ButtonArea} from './ButtonArea';
+import {CompletionMenu} from './CompletionMenu';
+import {PromptEnhancerDialog} from './PromptEnhancerDialog';
+import {useCompletions} from './useCompletions';
+import {type ChatProviderId, contextWindowFor} from './constants';
 
 interface ChatComposerProps {
     /** 当前 provider 对应 SDK 是否缺失（缺失时拦截发送，提示安装） */
@@ -41,7 +49,11 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     } = useChatStore();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const composingRef = useRef(false);
+    const draftHistoryRef = useRef<string[]>([]);
+    const historyCursorRef = useRef<number | null>(null);
     const [activeFile, setActiveFile] = useState<string | undefined>();
+    const [isDraggingFile, setIsDraggingFile] = useState(false);
     const [statusPanelExpanded, setStatusPanelExpanded] = useState(true);
 
     // Prompt 增强弹窗状态
@@ -63,7 +75,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
     }, []);
 
-    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
         const value = e.target.value;
         setDraft(value);
         completions.onTextChange(value, e.target.selectionStart ?? value.length);
@@ -82,6 +94,10 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
 
         // 先清空 UI（立即生效）
         setActiveFile(undefined);
+        if (draftHistoryRef.current[draftHistoryRef.current.length - 1] !== text) {
+            draftHistoryRef.current = [...draftHistoryRef.current.slice(-49), text];
+        }
+        historyCursorRef.current = null;
 
         // 发送消息（store 内部会清空 draft）
         await send(finalText, { cwd });
@@ -96,7 +112,37 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         });
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const applyDraftFromHistory = (historyIndex: number | null) => {
+        const nextDraft = historyIndex === null ? '' : draftHistoryRef.current[historyIndex] ?? '';
+        historyCursorRef.current = historyIndex;
+        setDraft(nextDraft);
+        requestAnimationFrame(() => {
+            const el = textareaRef.current;
+            if (!el) return;
+            el.focus();
+            el.setSelectionRange(nextDraft.length, nextDraft.length);
+            autosize();
+        });
+    };
+
+    const navigateDraftHistory = (direction: 'previous' | 'next'): boolean => {
+        const history = draftHistoryRef.current;
+        if (history.length === 0 || draft.trim()) return false;
+
+        if (direction === 'previous') {
+            const current = historyCursorRef.current ?? history.length;
+            applyDraftFromHistory(Math.max(0, current - 1));
+            return true;
+        }
+
+        if (historyCursorRef.current === null) return false;
+
+        const nextIndex = historyCursorRef.current + 1;
+        applyDraftFromHistory(nextIndex >= history.length ? null : nextIndex);
+        return true;
+    };
+
+    const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
         // 补全菜单优先消费方向键 / Esc / Enter
         const consumed = completions.handleKeyDown(e);
         if (consumed) {
@@ -120,10 +166,21 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
             }
             return;
         }
-        // 普通 Enter 发送，Shift+Enter 换行
-        if (e.key === 'Enter' && !e.shiftKey) {
+
+        if (e.key === 'ArrowUp' && navigateDraftHistory('previous')) {
             e.preventDefault();
-            handleSend();
+            return;
+        }
+
+        if (e.key === 'ArrowDown' && navigateDraftHistory('next')) {
+            e.preventDefault();
+            return;
+        }
+
+        // 普通 Enter 发送，Shift+Enter 换行；IME 组合输入时 Enter 仅用于确认候选词。
+        if (e.key === 'Enter' && !e.shiftKey && !composingRef.current && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            void handleSend();
         }
     };
 
@@ -131,6 +188,42 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         // 简化版：取第一个文件名作为文件上下文芯片。
         const first = files[0];
         if (first) setActiveFile(first.name);
+    };
+
+    const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+        if (e.clipboardData.files.length > 0) {
+            handleAddAttachment(e.clipboardData.files);
+        }
+    };
+
+    const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+        if (Array.from(e.dataTransfer.types).includes('Files')) {
+            e.preventDefault();
+            setIsDraggingFile(true);
+        }
+    };
+
+    const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+        if (Array.from(e.dataTransfer.types).includes('Files')) {
+            e.preventDefault();
+            setIsDraggingFile(true);
+        }
+    };
+
+    const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+        const nextTarget = e.relatedTarget as Node | null;
+        if (nextTarget && e.currentTarget.contains(nextTarget)) return;
+
+        setIsDraggingFile(false);
+    };
+
+    const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+        if (e.dataTransfer.files.length === 0) return;
+
+        e.preventDefault();
+        setIsDraggingFile(false);
+        handleAddAttachment(e.dataTransfer.files);
+        textareaRef.current?.focus();
     };
 
     const handleEnhance = async () => {
@@ -178,7 +271,15 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
             />
 
             {/* 输入框 + 补全菜单 */}
-            <div className="relative">
+            <div
+                className={`relative rounded-lg transition-colors ${
+                    isDraggingFile ? 'bg-primary/5 ring-2 ring-primary/30' : ''
+                }`}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+            >
                 {completions.isOpen && (
                     <CompletionMenu
                         items={completions.items}
@@ -208,8 +309,25 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
                     placeholder={t('chat.richPlaceholder')}
                     value={draft}
                     onChange={handleChange}
+                    onCompositionStart={() => {
+                        composingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                        composingRef.current = false;
+                    }}
                     onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
                 />
+                {isDraggingFile && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-dashed border-primary bg-primary/10 text-xs font-medium text-primary backdrop-blur-[1px]">
+                        {t('chat.dropFileHint')}
+                    </div>
+                )}
+                {!draft.trim() && draftHistoryRef.current.length > 0 && !isDraggingFile && (
+                    <div className="mt-1 px-1 text-[11px] text-base-content/35">
+                        {t('chat.historyHint')}
+                    </div>
+                )}
             </div>
 
             {/* 底部控制工具栏 */}

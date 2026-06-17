@@ -1,0 +1,236 @@
+import type {ChatMessage, ContentBlock, MessageRaw, TextBlock, ToolResultBlock,} from '../types/chat';
+
+interface MergeRawChatMessageOptions {
+    createId?: () => string;
+    now?: () => number;
+}
+
+const TOOL_RESULT_CONTENT = '[tool_result]';
+
+function defaultCreateId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function defaultNow(): number {
+    return Date.now();
+}
+
+function getRawContent(raw: MessageRaw): unknown {
+    const topLevelContent = (raw as unknown as { content?: unknown }).content;
+    return topLevelContent ?? raw.message?.content;
+}
+
+export function getContentBlocksFromRaw(raw?: MessageRaw | null): ContentBlock[] {
+    if (!raw) return [];
+    const content = getRawContent(raw);
+    if (Array.isArray(content)) {
+        return content.filter((block): block is ContentBlock => (
+            Boolean(block)
+            && typeof block === 'object'
+            && 'type' in block
+        ));
+    }
+    if (typeof content === 'string') {
+        return [{type: 'text', text: content}];
+    }
+    return [];
+}
+
+function isTextBlock(block: ContentBlock): block is TextBlock {
+    return block.type === 'text';
+}
+
+function isToolResultBlock(block: ContentBlock): block is ToolResultBlock {
+    return block.type === 'tool_result';
+}
+
+function getTextFromRaw(raw: MessageRaw): string {
+    return getContentBlocksFromRaw(raw)
+        .filter(isTextBlock)
+        .map((block) => block.text)
+        .filter((text) => text.trim().length > 0)
+        .join('\n');
+}
+
+function getToolResultIds(raw: MessageRaw): string[] {
+    return getContentBlocksFromRaw(raw)
+        .filter(isToolResultBlock)
+        .map((block) => block.tool_use_id)
+        .filter((id) => id.trim().length > 0);
+}
+
+export function hasToolResult(raw?: MessageRaw | null): boolean {
+    return getContentBlocksFromRaw(raw).some(isToolResultBlock);
+}
+
+function hasVisibleText(text: string | undefined): boolean {
+    return Boolean(text?.trim());
+}
+
+function isRenderableContentBlock(block: ContentBlock): boolean {
+    switch (block.type) {
+        case 'text':
+            return hasVisibleText(block.text);
+        case 'thinking':
+            return hasVisibleText(block.thinking);
+        case 'tool_use':
+            return true;
+        case 'tool_result':
+            return false;
+        default:
+            return false;
+    }
+}
+
+export function getRenderableContentBlocks(raw?: MessageRaw | null): ContentBlock[] {
+    return getContentBlocksFromRaw(raw).filter(isRenderableContentBlock);
+}
+
+export function shouldRenderChatMessage(message: ChatMessage): boolean {
+    if (message.role === 'user' && hasToolResult(message.raw)) return false;
+    if (message.streaming || message.error) return true;
+    if (message.content.trim().length > 0) return true;
+    return getRenderableContentBlocks(message.raw).length > 0;
+}
+
+export function findToolResult(
+    messages: ChatMessage[],
+    toolId: string | undefined,
+    startIndex = 0,
+): ToolResultBlock | null {
+    if (!toolId) return null;
+    const safeStart = Math.max(0, startIndex);
+
+    for (let i = safeStart; i < messages.length; i += 1) {
+        const blocks = getContentBlocksFromRaw(messages[i].raw);
+        const result = blocks.find(
+            (block): block is ToolResultBlock => (
+                block.type === 'tool_result'
+                && block.tool_use_id === toolId
+            ),
+        );
+        if (result) return result;
+    }
+
+    return null;
+}
+
+function findExistingToolResultMessage(messages: ChatMessage[], toolResultIds: string[]): number {
+    if (toolResultIds.length === 0) return -1;
+    const ids = new Set(toolResultIds);
+
+    return messages.findIndex((message) => (
+        getContentBlocksFromRaw(message.raw).some((block) => (
+            block.type === 'tool_result'
+            && ids.has(block.tool_use_id)
+        ))
+    ));
+}
+
+function findMatchingUserMessage(messages: ChatMessage[], raw: MessageRaw): number {
+    const rawText = getTextFromRaw(raw);
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role !== 'user') continue;
+        if (message.content === TOOL_RESULT_CONTENT) continue;
+        if (rawText && message.content === rawText) return i;
+    }
+    return -1;
+}
+
+function findAssistantMessage(messages: ChatMessage[]): number {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message.role === 'assistant' && message.streaming) return i;
+    }
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i].role === 'assistant') return i;
+    }
+    return -1;
+}
+
+function rawTimestamp(raw: MessageRaw, fallback: () => number): number {
+    if (!raw.timestamp) return fallback();
+    const parsed = Date.parse(raw.timestamp);
+    return Number.isFinite(parsed) ? parsed : fallback();
+}
+
+function appendRawMessage(
+    messages: ChatMessage[],
+    raw: MessageRaw,
+    content: string,
+    options: Required<MergeRawChatMessageOptions>,
+): ChatMessage[] {
+    return [
+        ...messages,
+        {
+            id: options.createId(),
+            role: raw.type,
+            content,
+            raw,
+            createdAt: rawTimestamp(raw, options.now),
+        },
+    ];
+}
+
+export function mergeRawChatMessage(
+    messages: ChatMessage[],
+    raw: MessageRaw,
+    options: MergeRawChatMessageOptions = {},
+): ChatMessage[] {
+    const resolvedOptions: Required<MergeRawChatMessageOptions> = {
+        createId: options.createId ?? defaultCreateId,
+        now: options.now ?? defaultNow,
+    };
+
+    if (raw.type === 'assistant') {
+        const existingIndex = findAssistantMessage(messages);
+        if (existingIndex === -1) {
+            return appendRawMessage(messages, raw, getTextFromRaw(raw), resolvedOptions);
+        }
+
+        return messages.map((message, index) => (
+            index === existingIndex
+                ? {
+                    ...message,
+                    raw,
+                    content: message.content,
+                }
+                : message
+        ));
+    }
+
+    if (hasToolResult(raw)) {
+        const existingIndex = findExistingToolResultMessage(messages, getToolResultIds(raw));
+        if (existingIndex !== -1) {
+            return messages.map((message, index) => (
+                index === existingIndex
+                    ? {
+                        ...message,
+                        raw,
+                        content: TOOL_RESULT_CONTENT,
+                    }
+                    : message
+            ));
+        }
+
+        return appendRawMessage(messages, raw, TOOL_RESULT_CONTENT, resolvedOptions);
+    }
+
+    const existingIndex = findMatchingUserMessage(messages, raw);
+    if (existingIndex === -1) {
+        return appendRawMessage(messages, raw, getTextFromRaw(raw), resolvedOptions);
+    }
+
+    return messages.map((message, index) => (
+        index === existingIndex
+            ? {
+                ...message,
+                raw,
+                content: message.content,
+            }
+            : message
+    ));
+}
+
+export {TOOL_RESULT_CONTENT};

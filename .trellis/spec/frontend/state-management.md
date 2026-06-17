@@ -130,6 +130,104 @@ show the dialog when the backend pushes the event.
 
 ---
 
+## Scenario: Chat Message Raw Event Merging
+
+### 1. Scope / Trigger
+
+- Trigger: frontend chat state consumes backend `chat://message` events that
+  contain structured `MessageRaw` payloads.
+- This is a cross-layer event contract. The Zustand store owns message merging;
+  React components must not patch raw chat payloads directly.
+
+### 2. Signatures
+
+```ts
+interface MessageRaw {
+    type: 'user' | 'assistant';
+    message: { content: ContentBlock[] };
+    uuid?: string;
+    timestamp?: string;
+}
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
+
+function mergeRawChatMessage(messages: ChatMessage[], raw: MessageRaw): ChatMessage[];
+function findToolResult(
+    messages: ChatMessage[],
+    toolId: string | undefined,
+    startIndex?: number,
+): ToolResultBlock | null;
+```
+
+### 3. Contracts
+
+- `chat://stream` updates the visible assistant `content` text; `chat://message`
+  updates the structured `raw` payload.
+- Assistant `raw` patches the current streaming assistant message first, then
+  the latest assistant message. It must not erase streamed `content`.
+- A user `raw` containing only text can patch the matching visible user prompt,
+  but it must preserve that prompt's existing `content`.
+- A user `raw` containing a `tool_result` is an internal protocol message. Store
+  it as a separate `ChatMessage` with `content === '[tool_result]'`; do not
+  overwrite the original user prompt.
+- Tool rendering must resolve `tool_use.id` by scanning later messages for a
+  matching `tool_result.tool_use_id`, starting at the assistant message index.
+- UI bubbles must hide internal user `tool_result` messages from the transcript.
+- UI bubbles must not render assistant messages that have no visible text,
+  thinking block, tool block, error, or streaming status.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| `chat://message` payload cannot be parsed | Log and ignore; keep existing messages unchanged. |
+| Assistant raw arrives before any assistant message exists | Append an assistant message derived from raw text blocks. |
+| User text raw matches an existing prompt | Patch `raw`; keep original visible `content`. |
+| User raw contains `tool_result` | Append or update the internal `[tool_result]` message. |
+| Duplicate `tool_result` for the same `tool_use_id` arrives | Update the existing internal result message instead of appending duplicates. |
+| Tool result arrives after the assistant tool block | UI finds it by cross-message lookup and updates the tool block status. |
+| Assistant message has empty content and only empty text/thinking blocks | Do not render an empty chat bubble. |
+| Assistant message has empty content but is streaming or has an error | Render status feedback so loading/error remains visible. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: prompt message stays visible, assistant tool block renders completed or
+  failed state from a later internal `tool_result` message.
+- Base: plain text conversations without tools still render from streamed
+  `content` and optionally attach raw text blocks.
+- Bad: replacing the last user message by role when a `tool_result` arrives;
+  this corrupts the transcript by turning the user's prompt into tool output.
+
+### 6. Tests Required
+
+- Unit test: user raw patch preserves the original prompt `content`.
+- Unit test: `tool_result` is appended as an internal user message and does not
+  overwrite the prompt.
+- Unit test: `findToolResult()` resolves a later `tool_result` for an earlier
+  assistant `tool_use`.
+- Unit test: empty assistant messages are not renderable, while streaming/error
+  assistant messages remain renderable.
+- Build check: `npm run build` must pass because strict TypeScript catches unused
+  imports and unsafe prop drift in the chat UI.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const lastUserIndex = findLastIndex(messages, (m) => m.role === raw.type);
+messages[lastUserIndex] = { ...messages[lastUserIndex], raw };
+```
+
+#### Correct
+
+```ts
+const messages = mergeRawChatMessage(state.messages, raw);
+const result = findToolResult(messages, toolUse.id, assistantMessageIndex);
+```
+
+---
+
 ## When to Use Global State
 
 Promote to a Zustand store when **more than one page/component needs the same

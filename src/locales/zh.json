@@ -35,8 +35,39 @@
         "starting": "启动中…",
         "clear": "清空",
         "empty": "开始与 AI 对话",
+        "message": {
+            "user": "你",
+            "assistant": "AI 助手",
+            "system": "系统",
+            "copy": "复制",
+            "copied": "已复制",
+            "emptyUser": "空消息",
+            "unknownBlock": "未知内容块",
+            "showEarlier": "显示更早 {{count}} 条消息（剩余 {{total}} 条）",
+            "waiting": "正在等待响应…",
+            "streamingConnected": "已连接，正在生成回复…"
+        },
+        "thinking": {
+            "title": "AI 正在思考…"
+        },
+        "markdown": {
+            "copyCode": "复制代码",
+            "copiedCode": "已复制代码"
+        },
+        "layout": {
+            "anchorRail": "消息锚点",
+            "searchPlaceholder": "已预留会话搜索入口",
+            "scrollToBottom": "滚动到底部",
+            "statusPanel": "会话状态",
+            "messageCount": "消息数",
+            "clearSearch": "清空搜索",
+            "searchResults": "找到 {{count}} 条匹配消息",
+            "searchNoResults": "没有找到匹配消息"
+        },
         "placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
         "richPlaceholder": "输入消息… @ 引用文件，# 调用子代理，! 插入预设，Enter 发送，Shift+Enter 换行",
+        "dropFileHint": "释放以添加上下文文件",
+        "historyHint": "按 ↑ 恢复上一条输入，按 ↓ 返回空草稿",
         "send": "发送",
         "stop": "停止",
         "context": "上下文",
