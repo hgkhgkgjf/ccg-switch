@@ -170,6 +170,7 @@
     "tools": {
         "readFile": "Read File",
         "editFile": "Edit File",
+        "editBatchFiles": "Batch Edit Files",
         "writeFile": "Write File",
         "runCommand": "Run Command",
         "search": "Search",

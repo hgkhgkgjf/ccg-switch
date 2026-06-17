@@ -1,6 +1,7 @@
 import type { ContentBlock, ToolUseBlock } from '../types/chat';
 import { getToolType } from '../types/tools';
 import type { ToolType } from '../types/tools';
+import { collectEditToolItems } from './toolPresentation';
 
 /** 分组后的块类型 */
 export type GroupedBlock =
@@ -9,7 +10,8 @@ export type GroupedBlock =
 
 /**
  * 将消息内容块按连续同类型工具分组
- * 规则：3+ 个连续同类型工具合并为 GroupBlock
+ * 规则：普通工具 3+ 个连续同类型工具合并为 GroupBlock；
+ * Edit 工具按可见编辑项计数，2+ 个文件/编辑项即合并为列表块。
  *
  * @param blocks 原始内容块数组
  * @returns 分组后的块数组
@@ -21,8 +23,12 @@ export function groupToolBlocks(blocks: ContentBlock[]): GroupedBlock[] {
   let currentToolType: ToolType | null = null;
 
   const submitCurrentGroup = () => {
-    if (currentGroup.length >= 3 && currentToolType) {
-      // 分组：3+ 个同类型工具
+    const shouldGroup = currentToolType === 'edit'
+      ? collectEditToolItems(currentGroup, () => null).length >= 2
+      : currentGroup.length >= 3;
+
+    if (shouldGroup && currentToolType) {
+      // 分组：普通工具 3+；Edit 工具 2+ 可见编辑项
       result.push({
         type: 'group',
         toolType: currentToolType,

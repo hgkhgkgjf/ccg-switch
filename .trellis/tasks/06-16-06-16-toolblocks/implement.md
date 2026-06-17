@@ -169,10 +169,12 @@ it('groups 3+ consecutive same-type tools', () => {
 - [ ] 测试：渲染 3 个 Read 工具
 
 #### 4.4 EditToolGroupBlock
-- [ ] `src/components/toolBlocks/EditToolGroupBlock.tsx`
+- [x] `src/components/toolBlocks/EditToolGroupBlock.tsx`
   - 文件列表 + 变更数量
+  - 支持 `MultiEdit` / `edit_file` 的 `input.edits[]` 拆行显示
+  - 支持 `apply_patch` patch hunks 拆成文件列表项
   - 展开/折叠
-- [ ] 测试：渲染 3 个 Edit 工具
+- [x] 测试：2 个 Edit 工具、单个 `MultiEdit` 多 edit、`apply_patch` 多文件/hunk 解析
 
 ---
 
@@ -438,6 +440,11 @@ git commit -m "feat(toolblocks): add Bash/Read/Edit blocks"
 ### 问题 3: 分组算法错误
 **症状**: 2 个工具被分组，或 4 个工具未分组  
 **解决**: 检查 `normalizeToolName` 是否正确，工具类型判断是否遗漏
+
+### 问题 5: 批量编辑列表不显示
+**症状**: `MultiEdit`、filesystem `edit_file` 或 `apply_patch` 在历史会话里只显示成单个工具块，看不到 cc-gui 中的“批量编辑文件”文件列表。
+**原因**: 只按 raw `tool_use` 数量分组，且没有把 `input.edits[]` / patch hunks 拆成可见编辑项。
+**解决**: `collectEditToolItems` 先统一提取可见编辑项；edit 工具按编辑项数量分组，2+ 个编辑项渲染 `EditToolGroupBlock`。
 
 ### 问题 4: 样式冲突
 **症状**: DaisyUI 样式覆盖自定义样式  

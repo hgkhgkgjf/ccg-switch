@@ -4,7 +4,7 @@ import { useState, memo } from 'react';
 import type { ToolResultBlock } from '../../types/chat';
 import type { ToolInput } from '../../types/tools';
 import { useIsToolDenied } from '../../hooks/useIsToolDenied';
-import { resolveToolTarget } from '../../utils/toolPresentation';
+import { collectEditToolItems, resolveToolTarget } from '../../utils/toolPresentation';
 import { getFileIcon } from '../../utils/fileIcons';
 import { openFile, copyToClipboard } from '../../utils/bridge';
 
@@ -16,7 +16,7 @@ export interface EditToolBlockProps {
 }
 
 const EditToolBlock = memo(function EditToolBlock({
-  name: _name,
+  name,
   input,
   result,
   toolId,
@@ -30,12 +30,19 @@ const EditToolBlock = memo(function EditToolBlock({
   }
 
   // 解析文件路径
+  const primaryItem = collectEditToolItems(
+    [{ type: 'tool_use', id: toolId ?? 'edit', name: name ?? 'Edit', input }],
+    () => result,
+  )[0];
   const target = resolveToolTarget(input);
-  const filePath = target?.rawPath || '';
+  const filePath = primaryItem?.filePath ?? target?.rawPath ?? '';
+  const displayPath = primaryItem?.displayPath ?? target?.displayPath ?? filePath;
+  const openPath = primaryItem?.openPath ?? target?.openPath;
+  const cleanFileName = primaryItem?.cleanFileName ?? target?.cleanFileName ?? filePath;
 
   // 提取编辑内容
-  const oldString = (input.old_string as string) || '';
-  const newString = (input.new_string as string) || '';
+  const oldString = primaryItem?.oldString ?? (input.old_string as string) ?? '';
+  const newString = primaryItem?.newString ?? (input.new_string as string) ?? '';
   const hasChanges = oldString || newString;
 
   // 状态计算
@@ -44,15 +51,15 @@ const EditToolBlock = memo(function EditToolBlock({
   const status = isError ? 'error' : isCompleted ? 'completed' : 'pending';
 
   // 文件图标
-  const fileIconSvg = target
-    ? getFileIcon(target.cleanFileName.split('.').pop() || '', target.cleanFileName)
+  const fileIconSvg = cleanFileName
+    ? getFileIcon(cleanFileName.split('.').pop() || '', cleanFileName)
     : '';
 
   // 文件路径点击
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (target?.isFile) {
-      openFile(target.openPath);
+    if (openPath) {
+      openFile(openPath);
     }
   };
 
@@ -84,7 +91,7 @@ const EditToolBlock = memo(function EditToolBlock({
                 dangerouslySetInnerHTML={{ __html: fileIconSvg }}
               />
             )}
-            {target?.displayPath || filePath}
+            {displayPath}
           </span>
           {isDenied && <span className="tool-title-summary text-error">• Denied</span>}
         </div>
@@ -139,10 +146,10 @@ const EditToolBlock = memo(function EditToolBlock({
 
             {/* 操作按钮 */}
             <div className="tool-actions">
-              {target?.isFile && (
+              {openPath && (
                 <button
                   className="btn btn-sm btn-ghost"
-                  onClick={() => openFile(target.openPath)}
+                  onClick={() => openFile(openPath)}
                 >
                   Open File
                 </button>

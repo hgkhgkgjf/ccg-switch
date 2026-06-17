@@ -5,11 +5,21 @@ export interface ToolInput {
   [key: string]: unknown;
   // 常见字段
   file_path?: string;
+  filePath?: string;
   path?: string;
   target_file?: string;
+  targetFile?: string;
   command?: string;
   old_string?: string;
+  oldString?: string;
+  oldText?: string;
   new_string?: string;
+  newString?: string;
+  newText?: string;
+  edits?: unknown[];
+  patch?: string;
+  input?: string;
+  content?: string;
   offset?: number;
   limit?: number;
   line?: number;
@@ -39,11 +49,24 @@ export const READ_TOOL_NAMES = new Set([
 export const EDIT_TOOL_NAMES = new Set([
   'edit',
   'Edit',
+  'editfile',
+  'edit_file',
   'write',
   'Write',
   'writefile',
   'WriteFile',
   'write_file',
+  'writetofile',
+  'write_to_file',
+  'replace',
+  'replacestring',
+  'replace_string',
+  'multiedit',
+  'MultiEdit',
+  'notebookedit',
+  'NotebookEdit',
+  'applypatch',
+  'apply_patch',
 ]);
 
 /** Bash 工具名称集合 */
@@ -131,6 +154,10 @@ export interface ToolTargetInfo {
   isFile: boolean;
   /** 是否是目录 */
   isDirectory: boolean;
+  /** 可选起始行 */
+  lineStart?: number;
+  /** 可选结束行 */
+  lineEnd?: number;
 }
 
 /** 行号信息 */

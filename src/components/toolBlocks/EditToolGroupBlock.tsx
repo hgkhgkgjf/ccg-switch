@@ -1,9 +1,10 @@
 // EditToolGroupBlock - Edit 工具分组块
 
-import { useState, memo } from 'react';
+import { useMemo, useState, memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ToolUseBlock, ToolResultBlock } from '../../types/chat';
 import { getGroupStatus } from '../../utils/toolGrouping';
-import { resolveToolTarget } from '../../utils/toolPresentation';
+import { collectEditToolItems } from '../../utils/toolPresentation';
 import { getFileIcon } from '../../utils/fileIcons';
 import EditToolBlock from './EditToolBlock';
 
@@ -16,15 +17,26 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
   blocks,
   findToolResult,
 }: EditToolGroupBlockProps) {
+  const { t } = useTranslation();
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
 
   // 计算整体状态
   const status = getGroupStatus(blocks, findToolResult);
+  const editItems = useMemo(
+    () => collectEditToolItems(blocks, findToolResult),
+    [blocks, findToolResult],
+  );
+  const totalAdditions = editItems.reduce((sum, item) => sum + item.additions, 0);
+  const totalDeletions = editItems.reduce((sum, item) => sum + item.deletions, 0);
+
+  if (editItems.length === 0) {
+    return null;
+  }
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
     if (expand) {
-      setExpandedIndices(new Set(blocks.map((_, i) => i)));
+      setExpandedIndices(new Set(editItems.map((_, i) => i)));
     } else {
       setExpandedIndices(new Set());
     }
@@ -41,50 +53,39 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
     setExpandedIndices(newSet);
   };
 
-  // 计算变更数量（简化版）
-  const getChangeCount = (block: ToolUseBlock): number => {
-    const oldString = block.input.old_string as string | undefined;
-    const newString = block.input.new_string as string | undefined;
-    if (oldString && newString) return 2; // 删除 + 添加
-    if (oldString || newString) return 1;
-    return 0;
-  };
-
   return (
     <div className="task-container task-group-container">
       {/* 分组标题 */}
       <div className="task-header task-group-header">
         <div className="task-title-section">
           <span className="edit-icon">✏️</span>
-          <span className="tool-title-text">Edit</span>
+          <span className="tool-title-text">{t('tools.editBatchFiles')}</span>
           <span className="tool-title-summary">
-            {blocks.length} {blocks.length === 1 ? 'file modified' : 'files modified'}
+            ({editItems.length})
           </span>
+          {(totalAdditions > 0 || totalDeletions > 0) && (
+            <span className="edit-total-stats">
+              {totalAdditions > 0 && <span className="edit-stat-added">+{totalAdditions}</span>}
+              {totalDeletions > 0 && <span className="edit-stat-deleted">-{totalDeletions}</span>}
+            </span>
+          )}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
 
       {/* 分组列表 */}
       <div className="task-group-list">
-        {blocks.map((block, index) => {
-          const result = findToolResult(block.id);
-          const target = resolveToolTarget(block.input);
-          const filePath = target?.displayPath || '';
-          const changeCount = getChangeCount(block);
+        {editItems.map((item, index) => {
           const isExpanded = expandedIndices.has(index);
 
           // 文件图标
-          const fileIconSvg = target
-            ? getFileIcon(target.cleanFileName.split('.').pop() || '', target.cleanFileName)
-            : '';
+          const fileIconSvg = getFileIcon(item.cleanFileName.split('.').pop() || '', item.cleanFileName);
 
           // 单个工具状态
-          const isCompleted = result !== undefined && result !== null;
-          const isError = isCompleted && result?.is_error === true;
-          const itemStatus = isError ? 'error' : isCompleted ? 'completed' : 'pending';
+          const itemStatus = item.isError ? 'error' : item.isCompleted ? 'completed' : 'pending';
 
           return (
-            <div key={block.id} className="task-group-item">
+            <div key={item.id} className="task-group-item">
               {/* 单项标题 */}
               <div
                 className="task-group-item-header"
@@ -98,14 +99,15 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
                       dangerouslySetInnerHTML={{ __html: fileIconSvg }}
                     />
                   )}
-                  <span className="task-group-item-file" title={filePath}>
-                    {filePath}
+                  <span className="task-group-item-file" title={item.filePath}>
+                    {item.displayPath}
                   </span>
                 </div>
                 <div className="task-group-item-status">
-                  {changeCount > 0 && (
-                    <span className="task-group-item-badge">
-                      {changeCount} {changeCount === 1 ? 'change' : 'changes'}
+                  {(item.additions > 0 || item.deletions > 0) && (
+                    <span className="task-group-item-badge edit-item-stats">
+                      {item.additions > 0 && <span className="edit-stat-added">+{item.additions}</span>}
+                      {item.deletions > 0 && <span className="edit-stat-deleted">-{item.deletions}</span>}
                     </span>
                   )}
                   <span className={`badge badge-sm ${itemStatus === 'error' ? 'badge-error' : itemStatus === 'completed' ? 'badge-success' : 'badge-warning'}`}>
@@ -121,10 +123,10 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
               {isExpanded && (
                 <div className="task-group-item-content">
                   <EditToolBlock
-                    name={block.name}
-                    input={block.input}
-                    result={result}
-                    toolId={block.id}
+                    name={item.name}
+                    input={item.input}
+                    result={item.result}
+                    toolId={item.toolId}
                   />
                 </div>
               )}

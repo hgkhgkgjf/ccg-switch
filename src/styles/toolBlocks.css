@@ -394,6 +394,29 @@
   flex-shrink: 0;
 }
 
+.edit-total-stats,
+.edit-item-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.edit-total-stats {
+  margin-left: 4px;
+  font-size: 12px;
+}
+
+.edit-stat-added {
+  color: #10b981; /* green-500 */
+}
+
+.edit-stat-deleted {
+  color: #ef4444; /* red-500 */
+}
+
 /* Diff 预览样式 */
 .diff-preview {
   background: oklch(var(--b2));

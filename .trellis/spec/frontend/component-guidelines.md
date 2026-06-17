@@ -90,6 +90,11 @@ See `src/components/providers/ProviderCard.tsx` and
   putting both the master list and detail list in one long scroll container.
   Example: project list `basis-2/5 overflow-y-auto`, session list
   `flex-1 overflow-y-auto`.
+- Tool block list renderers must group by the visible items users need to scan,
+  not only by raw `tool_use` count. Edit tools must expand `MultiEdit` /
+  `edit_file` `input.edits[]` and `apply_patch` patch hunks into file rows; if
+  the resulting edit item count is 2+, render `EditToolGroupBlock` so the file
+  list stays visible in live and historical sessions.
 - Conditional classes are composed with template strings today. A `cn()` helper
   (clsx + tailwind-merge) exists at `src/utils/cn.ts` — prefer it for new
   components with conditional class logic.
@@ -205,3 +210,6 @@ states. Note that full WCAG compliance has not been verified for this project.
 - Putting a long master list and its dependent detail list into the same
   scrolling sidebar. Users can select a master item and still not see the
   detail rows because they are pushed below the rest of the master list.
+- Rendering batch edit tools as a single generic/edit card. Users lose the
+  changed-file list for `MultiEdit`, filesystem `edit_file`, and `apply_patch`
+  unless those payloads are expanded into per-file edit items first.
