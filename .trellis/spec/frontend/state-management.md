@@ -228,6 +228,216 @@ const result = findToolResult(messages, toolUse.id, assistantMessageIndex);
 
 ---
 
+## Scenario: Chat Completion Command Payload Normalization
+
+### 1. Scope / Trigger
+
+- Trigger: a frontend completion hook consumes Tauri command payloads for chat
+  composer candidates, especially `chat_list_workspace_files`.
+- This is a cross-layer command contract. Rust structs do not automatically use
+  frontend camelCase unless the backend type explicitly declares
+  `#[serde(rename_all = "camelCase")]`.
+
+### 2. Signatures
+
+```rust
+#[derive(serde::Serialize)]
+pub struct WorkspaceFile {
+    pub rel_path: String,
+    pub name: String,
+    pub is_dir: bool,
+}
+
+#[tauri::command]
+pub fn chat_list_workspace_files(
+    dir: Option<String>,
+    query: Option<String>,
+) -> Result<Vec<WorkspaceFile>, String>;
+```
+
+```ts
+interface WorkspaceFilePayload {
+    relPath?: unknown;
+    rel_path?: unknown;
+    name?: unknown;
+    isDir?: unknown;
+    is_dir?: unknown;
+}
+
+function normalizeWorkspaceFile(file: WorkspaceFilePayload): WorkspaceFile | null;
+```
+
+### 3. Contracts
+
+- `chat_list_workspace_files` currently returns `rel_path`, `name`, and
+  `is_dir`.
+- Frontend command adapters may accept both `snake_case` and `camelCase` to
+  tolerate future backend serialization changes.
+- Rendering components must receive normalized `CompletionItem` data only.
+  `label`, `id`, and `insertText` must never be `undefined`.
+- Invalid command items are dropped before reaching `CompletionMenu`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Payload has `rel_path` / `is_dir` | Normalize to `relPath` / `isDir`. |
+| Payload has future `relPath` / `isDir` | Accept it without backend changes. |
+| Payload has no usable path | Return `null` and filter it out. |
+| Payload has no `name` | Derive name from basename of the relative path. |
+| Backend command fails | Close or empty the menu; do not render stale undefined labels. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `@src/pages/ChatPage.tsx` appears from a Rust payload shaped as
+  `{ rel_path: "src/pages/ChatPage.tsx", is_dir: false }`.
+- Base: a future adapter payload shaped as `{ relPath, isDir }` still works.
+- Bad: mapping `f.relPath` directly from the Rust payload and rendering
+  `undefined` candidates in the menu.
+
+### 6. Tests Required
+
+- Unit test: `snake_case` Rust payload normalizes to frontend shape.
+- Unit test: `camelCase` payload remains accepted.
+- Unit test: missing path returns `null`.
+- Build check: `npm run build` must pass because strict TypeScript catches
+  unsafe completion item drift.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const files = await invoke<WorkspaceFile[]>('chat_list_workspace_files');
+return files.map((file) => ({
+    id: file.relPath,
+    label: file.relPath,
+    insertText: file.relPath,
+}));
+```
+
+#### Correct
+
+```ts
+const files = await invoke<WorkspaceFilePayload[]>('chat_list_workspace_files');
+return files
+    .map(normalizeWorkspaceFile)
+    .filter((file): file is WorkspaceFile => file !== null)
+    .map((file) => ({
+        id: file.relPath,
+        label: file.relPath + (file.isDir ? '/' : ''),
+        insertText: file.relPath,
+    }));
+```
+
+---
+
+## Scenario: Chat Session Transition Abort Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: the user starts a new chat, clears the transcript, or loads a
+  historical chat while a daemon request is still active.
+- This is event-driven state. Tauri stream events can arrive after UI state has
+  started transitioning, so the store owns the transition boundary.
+
+### 2. Signatures
+
+```ts
+interface ChatState {
+    activeRequestId: string | null;
+    sessionId: string | null;
+    currentCwd: string | null;
+    activeSession: SessionMeta | null;
+
+    loadSession: (session: SessionMeta) => Promise<void>;
+    startNewSession: (cwd?: string | null) => Promise<void>;
+    clear: () => Promise<void>;
+    abort: () => Promise<void>;
+}
+```
+
+```ts
+await invoke('chat_abort');
+await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
+    providerId: session.providerId,
+    sourcePath: session.sourcePath,
+});
+```
+
+### 3. Contracts
+
+- If `activeRequestId` is present, `loadSession`, `startNewSession`, and
+  `clear` must call `chat_abort` before replacing transcript/session state.
+- `loadSession` then sets `provider`, `sessionId`, `currentCwd`,
+  `activeSession`, and mapped history messages from
+  `get_unified_session_messages`.
+- `startNewSession` clears `messages`, `sessionId`, `activeSession`, active
+  request state, and token counters while preserving or applying the target
+  `cwd`.
+- `clear` clears transcript/session state and active request state. It does not
+  change provider/model settings.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Active request exists and user loads history | Abort first, then load history. |
+| Active request exists and user starts a new chat | Abort first, then clear session state. |
+| `chat_abort` fails | Store `String(error)` and still remove stale `activeRequestId`. |
+| Unsupported history provider | Set an error and do not load messages. |
+| History role is unknown | Normalize to `system` instead of throwing. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a streaming response is interrupted before a history session replaces
+  the transcript.
+- Base: loading a completed session with no active request skips `chat_abort`
+  and only reads history.
+- Bad: clearing messages while the old daemon response is still active, letting
+  old stream events update the new chat.
+
+### 6. Tests Required
+
+- Unit test: `startNewSession()` with `activeRequestId` calls `chat_abort` and
+  clears session state.
+- Unit test: `loadSession()` with `activeRequestId` calls `chat_abort` before
+  `get_unified_session_messages`.
+- Build check: `npm run build` must pass because store action signatures are
+  consumed by page callbacks.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+startNewSession: (cwd) => set({
+    messages: [],
+    sessionId: null,
+    activeSession: null,
+    currentCwd: cwd,
+});
+```
+
+#### Correct
+
+```ts
+startNewSession: async (cwd) => {
+    await abortActiveRequestIfNeeded(get, set);
+    set((state) => ({
+        messages: [],
+        sessionId: null,
+        activeSession: null,
+        currentCwd: cwd ?? state.currentCwd,
+        activeRequestId: null,
+        contextTokens: 0,
+        error: null,
+    }));
+};
+```
+
+---
+
 ## When to Use Global State
 
 Promote to a Zustand store when **more than one page/component needs the same

@@ -122,6 +122,17 @@
         "completion": {
             "empty": "无匹配项"
         },
+        "sessionPanel": {
+            "title": "会话管理",
+            "newChat": "新对话",
+            "projects": "项目",
+            "sessions": "会话",
+            "searchProjects": "搜索项目...",
+            "selectProject": "选择项目查看会话",
+            "noProjects": "暂无项目",
+            "noSessions": "暂无会话",
+            "projectSessionCount": "{{count}} 个会话"
+        },
         "enhancer": {
             "title": "提示词增强",
             "original": "原文",

@@ -26,10 +26,19 @@ interface WorkspaceFile {
     isDir: boolean;
 }
 
+interface WorkspaceFilePayload {
+    relPath?: unknown;
+    rel_path?: unknown;
+    name?: unknown;
+    isDir?: unknown;
+    is_dir?: unknown;
+}
+
 interface PromptPreset {
     name: string;
     content: string;
-    filePath: string;
+    filePath?: string;
+    file_path?: string;
 }
 
 interface Subagent {
@@ -71,6 +80,26 @@ function detectTrigger(text: string, caret: number): ActiveCompletion | null {
         }
     }
     return null;
+}
+
+function stringField(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function basename(path: string): string {
+    const parts = path.split(/[/\\]/).filter(Boolean);
+    return parts[parts.length - 1] ?? path;
+}
+
+export function normalizeWorkspaceFile(file: WorkspaceFilePayload): WorkspaceFile | null {
+    const relPath = stringField(file.relPath) ?? stringField(file.rel_path);
+    if (!relPath) return null;
+
+    const name = stringField(file.name) ?? basename(relPath);
+    const isDirSource = file.isDir ?? file.is_dir;
+    const isDir = typeof isDirSource === 'boolean' ? isDirSource : false;
+
+    return { relPath, name, isDir };
 }
 
 interface UseCompletionsOptions {
@@ -139,16 +168,18 @@ export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionS
                     }));
                 }
                 case '@': {
-                    const files = await invoke<WorkspaceFile[]>(
+                    const files = await invoke<WorkspaceFilePayload[]>(
                         'chat_list_workspace_files',
-                        { dir: cwd, query: active.query },
+                        { dir: cwd, query: active.query || undefined },
                     );
-                    return files.map((f) => ({
-                        id: f.relPath,
-                        label: f.relPath + (f.isDir ? '/' : ''),
-                        description: f.isDir ? '目录' : undefined,
-                        insertText: f.relPath,
-                    }));
+                    return files
+                        .map(normalizeWorkspaceFile)
+                        .filter((f): f is WorkspaceFile => f !== null)
+                        .map((f) => ({
+                            id: f.relPath,
+                            label: f.relPath + (f.isDir ? '/' : ''),
+                            insertText: f.relPath,
+                        }));
                 }
                 case '#': {
                     const agents = await invoke<Subagent[]>('list_subagents');
@@ -163,11 +194,17 @@ export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionS
                 case '!': {
                     const prompts = await invoke<PromptPreset[]>('list_prompts');
                     return prompts
-                        .filter((p) => p.name.toLowerCase().includes(q))
+                        .filter((p) => (
+                            p.name.toLowerCase().includes(q)
+                            || p.content.toLowerCase().includes(q)
+                        ))
                         .map((p) => ({
                             id: p.name,
                             label: p.name,
-                            insertText: p.name,
+                            description: p.content
+                                ? (p.content.length > 80 ? `${p.content.slice(0, 80)}…` : p.content)
+                                : undefined,
+                            insertText: p.content || p.name,
                         }));
                 }
                 default:
@@ -215,9 +252,9 @@ export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionS
             const insert = item.insertText ?? item.label;
             const before = text.slice(0, active.start);
             const after = text.slice(active.start + 1 + active.query.length);
-            // 文件/代理/预设保留触发符；slash 命令直接替换为命令本身
+            // 文件/代理保留触发符；slash 命令和 Prompt 预设直接替换为正文。
             const replacement =
-                active.trigger === '/' ? insert : `${active.trigger}${insert}`;
+                active.trigger === '/' || active.trigger === '!' ? insert : `${active.trigger}${insert}`;
             const newText = `${before}${replacement} ${after}`;
             const caret = before.length + replacement.length + 1;
             close();

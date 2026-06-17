@@ -133,6 +133,17 @@
         "completion": {
             "empty": "No matches"
         },
+        "sessionPanel": {
+            "title": "Session Management",
+            "newChat": "New chat",
+            "projects": "Projects",
+            "sessions": "Sessions",
+            "searchProjects": "Search projects...",
+            "selectProject": "Select a project to view sessions",
+            "noProjects": "No projects",
+            "noSessions": "No sessions",
+            "projectSessionCount": "{{count}} sessions"
+        },
         "enhancer": {
             "title": "Prompt Enhancer",
             "original": "Original",

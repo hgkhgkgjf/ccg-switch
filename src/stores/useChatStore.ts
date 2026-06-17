@@ -6,10 +6,12 @@ import {
     ChatDoneEvent,
     ChatMessage,
     ChatProvider,
+    ChatRole,
     ChatStreamEvent,
     MessageRaw,
     TokenUsage,
 } from '../types/chat';
+import type {SessionMeta, UnifiedSessionMessage} from '../types/session';
 import {AskUserQuestionRequest, PlanApprovalRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
 import {CLAUDE_MODELS, CODEX_MODELS, reasoningLevelsFor,} from '../components/chat/composer/constants';
@@ -73,6 +75,10 @@ interface ChatState {
     activeRequestId: string | null;
     /** 当前会话 id（由 daemon 的 SESSION_ID 回填） */
     sessionId: string | null;
+    /** 当前会话关联的工作目录，供 @ 文件补全和 daemon cwd 使用 */
+    currentCwd: string | null;
+    /** 当前从历史中载入的会话元信息 */
+    activeSession: SessionMeta | null;
     /** 事件监听器是否已注册 */
     initialized: boolean;
     error: string | null;
@@ -92,8 +98,10 @@ interface ChatState {
     setReasoningEffort: (e: ReasoningEffort) => void;
     setDraft: (text: string) => void;
     send: (text: string, opts?: { cwd?: string; model?: string }) => Promise<void>;
+    loadSession: (session: SessionMeta) => Promise<void>;
+    startNewSession: (cwd?: string | null) => Promise<void>;
     abort: () => Promise<void>;
-    clear: () => void;
+    clear: () => Promise<void>;
     answerAskUserQuestion: (requestId: string, answers: Record<string, string>) => Promise<void>;
     approvePlan: (requestId: string, approved: boolean, targetMode: string) => Promise<void>;
 }
@@ -127,6 +135,50 @@ function appendToStreamingAssistant(
     });
 }
 
+function isChatProvider(providerId: string): providerId is ChatProvider {
+    return providerId === 'claude' || providerId === 'codex';
+}
+
+function normalizeHistoryRole(role: string): ChatRole {
+    const normalized = role.toLowerCase();
+    if (normalized === 'user' || normalized === 'assistant' || normalized === 'system') {
+        return normalized;
+    }
+    return 'system';
+}
+
+function mapHistoryMessage(
+    session: SessionMeta,
+    message: UnifiedSessionMessage,
+    index: number,
+): ChatMessage {
+    const parsedTime = message.ts ? Date.parse(message.ts) : NaN;
+    const createdAt = Number.isFinite(parsedTime)
+        ? parsedTime
+        : session.createdAt + index;
+
+    return {
+        id: `history-${session.providerId}-${session.sessionId}-${index}`,
+        role: normalizeHistoryRole(message.role),
+        content: message.content,
+        createdAt,
+    };
+}
+
+async function abortActiveRequestIfNeeded(
+    get: () => ChatState,
+    set: (state: Partial<ChatState>) => void,
+): Promise<void> {
+    if (!get().activeRequestId) return;
+
+    try {
+        await invoke('chat_abort');
+    } catch (e) {
+        set({ error: String(e) });
+    }
+    set({ activeRequestId: null });
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
     provider: 'claude',
@@ -139,6 +191,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     daemonStatus: null,
     activeRequestId: null,
     sessionId: null,
+    currentCwd: null,
+    activeSession: null,
     initialized: false,
     error: null,
     pendingAskUserQuestion: null,
@@ -301,6 +355,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             provider: p,
             model,
             draft: loadDraft(provider),
+            sessionId: null,
+            activeSession: null,
             reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
                 ? state.reasoningEffort
                 : (levels[levels.length - 1]?.id ?? 'high'),
@@ -372,11 +428,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // ignore
         }
 
-        const { provider, sessionId, permissionMode, model, reasoningEffort } = get();
+        const { provider, sessionId, permissionMode, model, reasoningEffort, currentCwd } = get();
         const params: Record<string, unknown> = {
             message: trimmed,
             sessionId: sessionId ?? undefined,
-            cwd: opts?.cwd,
+            cwd: opts?.cwd ?? currentCwd ?? undefined,
             model: opts?.model ?? model,
             permissionMode,
             reasoningEffort,
@@ -402,6 +458,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
     },
 
+    loadSession: async (session) => {
+        if (!isChatProvider(session.providerId)) {
+            set({ error: `Unsupported chat provider: ${session.providerId}` });
+            return;
+        }
+
+        try {
+            await abortActiveRequestIfNeeded(get, set);
+            const history = await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
+                providerId: session.providerId,
+                sourcePath: session.sourcePath,
+            });
+            const provider = session.providerId;
+            const model = defaultModel(provider);
+            const levels = reasoningLevelsFor(provider, model);
+            set((state) => ({
+                messages: history.map((message, index) => mapHistoryMessage(session, message, index)),
+                provider,
+                model,
+                draft: loadDraft(provider),
+                reasoningEffort: levels.some((level) => level.id === state.reasoningEffort)
+                    ? state.reasoningEffort
+                    : (levels[levels.length - 1]?.id ?? 'high'),
+                sessionId: session.sessionId,
+                currentCwd: session.projectDir,
+                activeSession: session,
+                activeRequestId: null,
+                contextTokens: 0,
+                error: null,
+            }));
+        } catch (e) {
+            set({ error: String(e) });
+        }
+    },
+
+    startNewSession: async (cwd) => {
+        await abortActiveRequestIfNeeded(get, set);
+        set((state) => ({
+            messages: [],
+            sessionId: null,
+            activeSession: null,
+            currentCwd: cwd ?? state.currentCwd,
+            activeRequestId: null,
+            contextTokens: 0,
+            error: null,
+        }));
+    },
+
     abort: async () => {
         try {
             await invoke('chat_abort');
@@ -411,7 +515,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ activeRequestId: null });
     },
 
-    clear: () => set({ messages: [], sessionId: null, error: null, contextTokens: 0 }),
+    clear: async () => {
+        await abortActiveRequestIfNeeded(get, set);
+        set({ messages: [], sessionId: null, activeSession: null, error: null, contextTokens: 0 });
+    },
 
     answerAskUserQuestion: async (requestId, answers) => {
         try {

@@ -11,9 +11,11 @@ import ConversationSearch from '../components/chat/ConversationSearch';
 import MessageAnchorRail from '../components/chat/MessageAnchorRail';
 import ScrollControl from '../components/chat/ScrollControl';
 import StatusPanel from '../components/chat/StatusPanel';
+import ChatSessionSidebar from '../components/chat/ChatSessionSidebar';
 import {ChatComposer} from '../components/chat/composer/ChatComposer';
 import ModalDialog from '../components/common/ModalDialog';
 import {shouldRenderChatMessage} from '../utils/chatMessageFlow';
+import type {SessionMeta} from '../types/session';
 
 const BOTTOM_REVEAL_THRESHOLD = 160;
 
@@ -28,6 +30,8 @@ export default function ChatPage() {
     const {
         messages,
         provider,
+        currentCwd,
+        activeSession,
         daemonReady,
         daemonStatus,
         error,
@@ -35,6 +39,8 @@ export default function ChatPage() {
         pendingPlanApproval,
         init,
         clear,
+        loadSession,
+        startNewSession,
         answerAskUserQuestion,
         approvePlan,
     } = useChatStore();
@@ -110,8 +116,22 @@ export default function ChatPage() {
         setSearchQuery('');
         isNearBottomRef.current = true;
         setIsNearBottom(true);
-        clear();
+        void clear();
     };
+
+    const handleSessionSelect = useCallback((session: SessionMeta) => {
+        setSearchQuery('');
+        isNearBottomRef.current = true;
+        setIsNearBottom(true);
+        void loadSession(session);
+    }, [loadSession]);
+
+    const handleNewSession = useCallback((cwd?: string | null) => {
+        setSearchQuery('');
+        isNearBottomRef.current = true;
+        setIsNearBottom(true);
+        void startNewSession(cwd ?? currentCwd);
+    }, [currentCwd, startNewSession]);
 
     const scrollToBottom = () => {
         const scrollEl = scrollRef.current;
@@ -181,6 +201,13 @@ export default function ChatPage() {
 
             {/* 消息区：预留 cc-gui 风格的搜索、锚点和状态扩展槽 */}
             <div className="relative flex min-h-0 flex-1 overflow-hidden bg-base-200/20">
+                <ChatSessionSidebar
+                    activeSession={activeSession}
+                    currentCwd={currentCwd}
+                    onSessionSelect={handleSessionSelect}
+                    onNewSession={handleNewSession}
+                />
+
                 <MessageAnchorRail
                     hasMessages={hasMessages}
                     onScrollToTop={scrollToTop}
@@ -227,6 +254,7 @@ export default function ChatPage() {
             <ChatComposer
                 sdkMissing={sdkMissing}
                 onSdkMissing={() => setSdkModalOpen(true)}
+                cwd={currentCwd ?? undefined}
             />
 
             {/* SDK 依赖管理弹窗 */}

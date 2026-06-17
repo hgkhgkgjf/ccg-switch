@@ -124,12 +124,23 @@ Validation for Phase 4:
 
 Goal: define the next focused task for cc-gui-like input interaction.
 
-- [ ] Decide whether to implement composer enhancements in this task or split to a child task.
+- [x] Decide whether to implement composer enhancements in this task or split to a child task.
 - [ ] If split, create a Trellis child task for ChatInputBox parity.
 - [x] Include requirements for IME-safe submit, history navigation, slash/file/agent/prompt command entry, paste/drop, resize and send/abort state.
 - [x] Implement IME-safe submit guard in `ChatComposer`.
 - [x] Implement session-local draft history navigation with ArrowUp/ArrowDown.
 - [x] Implement paste/drop file context handling with visible drop feedback.
+- [x] Fix `@` workspace file completion payload normalization so Rust `rel_path` / `is_dir` does not render undefined candidates.
+- [x] Change `!` Prompt preset completion to insert preset content instead of only the preset name.
+- [x] Add first-pass Chat session management sidebar.
+  - [x] Browse projects with existing `get_dashboard_projects`.
+  - [x] Browse supported Claude/Codex sessions with existing `list_sessions`.
+  - [x] Load selected session history via `get_unified_session_messages`.
+  - [x] Continue selected sessions by reusing `sessionId`, provider and project cwd in `chat_send`.
+  - [x] Start a new chat using the selected project's cwd.
+- [x] Abort an active daemon request before loading history, starting a new chat, or clearing the current chat to avoid old stream events leaking into the next session.
+- [x] Add regression coverage for snake_case workspace file completion payloads.
+- [x] Add regression coverage for session transition abort behavior.
 
 ## Files likely to change
 
@@ -144,10 +155,15 @@ Source files:
 - `src/components/chat/MarkdownBlock.tsx`
 - `src/locales/zh.json`
 - `src/locales/en.json`
+- `src/stores/useChatStore.ts`
+- `src/stores/useChatStore.test.ts`
+- `src/components/chat/ChatSessionSidebar.tsx`
+- `src/components/chat/composer/useCompletions.ts`
+- `src/components/chat/composer/useCompletions.test.ts`
 
 Files to avoid unless necessary:
 
-- `src/stores/useChatStore.ts` - avoid protocol/state changes in UI shell phase.
+- `src/stores/useChatStore.ts` - avoid protocol/state changes in UI shell phase; touched in Phase 5 only for session loading/new chat cwd and active-request abort boundaries.
 - `src-tauri/src/**` - no backend change expected.
 - generated output directories such as `dist/` or `src-tauri/target/`.
 
@@ -162,6 +178,14 @@ Files to avoid unless necessary:
 - [x] No generated files edited.
 - [x] `npm run build` passes before completion.
 - [ ] `cargo check --manifest-path src-tauri/Cargo.toml` is run if any Rust/Tauri backend file changes.
+
+Latest validation notes:
+
+- [x] `npm test` - 3 files / 11 tests passed.
+- [x] `npm run build` - TypeScript and Vite production build passed.
+- [x] `git diff --check` - no whitespace errors; only Windows LF-to-CRLF warnings.
+- [x] Browser smoke check at `http://127.0.0.1:5173/#/chat` - chat page renders, session sidebar/input/status are visible, `@` input does not render `undefined`, no browser console errors observed.
+- [ ] Desktop Tauri verification with real session data - still needed for selecting an existing session and continuing a message against the daemon.
 
 ## Rollback notes
 
