@@ -70,6 +70,7 @@ export default function ChatSessionSidebar({
     const [sessions, setSessions] = useState<SessionMeta[]>([]);
     const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(currentCwd);
     const [projectQuery, setProjectQuery] = useState('');
+    const [sessionQuery, setSessionQuery] = useState('');
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
 
@@ -105,6 +106,7 @@ export default function ChatSessionSidebar({
     useEffect(() => {
         if (!currentCwd) return;
         setSelectedProjectPath(currentCwd);
+        setSessionQuery('');
         void loadSessions(currentCwd);
     }, [currentCwd, loadSessions]);
 
@@ -118,13 +120,30 @@ export default function ChatSessionSidebar({
         ));
     }, [projectQuery, projects]);
 
+    const filteredSessions = useMemo(() => {
+        const query = sessionQuery.trim().toLowerCase();
+        if (!query) return sessions;
+
+        return sessions.filter((session) => (
+            sessionTitle(session).toLowerCase().includes(query)
+            || session.sessionId.toLowerCase().includes(query)
+            || session.providerId.toLowerCase().includes(query)
+        ));
+    }, [sessionQuery, sessions]);
+
     const handleProjectSelect = (project: ProjectInfo) => {
         setSelectedProjectPath(project.path);
+        setSessionQuery('');
         void loadSessions(project.path);
     };
 
     const handleNewSession = () => {
         onNewSession(selectedProjectPath ?? currentCwd);
+    };
+
+    const handleRefreshSessions = () => {
+        if (!selectedProjectPath) return;
+        void loadSessions(selectedProjectPath);
     };
 
     return (
@@ -214,15 +233,26 @@ export default function ChatSessionSidebar({
                     </div>
                 )}
 
-                <div className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
-                    {t('chat.sessionPanel.sessions')}
+                <div className="flex items-center justify-between px-2 pb-1 pt-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
+                        {t('chat.sessionPanel.sessions')}
+                    </div>
+                    <button
+                        type="button"
+                        className="btn btn-ghost btn-xs btn-square"
+                        onClick={handleRefreshSessions}
+                        title={t('common.refresh')}
+                        disabled={!selectedProjectPath || loadingSessions}
+                    >
+                        <RefreshCw size={13} className={loadingSessions ? 'animate-spin' : ''}/>
+                    </button>
                 </div>
 
                 {!selectedProjectPath ? (
                     <div className="px-3 py-5 text-center text-xs text-base-content/40">
                         {t('chat.sessionPanel.selectProject')}
                     </div>
-                ) : loadingSessions ? (
+                ) : loadingSessions && sessions.length === 0 ? (
                     <div className="flex items-center justify-center py-6 text-base-content/40">
                         <RefreshCw size={16} className="animate-spin"/>
                     </div>
@@ -231,39 +261,64 @@ export default function ChatSessionSidebar({
                         {t('chat.sessionPanel.noSessions')}
                     </div>
                 ) : (
-                    <div className="space-y-0.5 px-2 pb-3">
-                        {sessions.map((session) => {
-                            const selected = activeSession?.sessionId === session.sessionId
-                                && activeSession?.sourcePath === session.sourcePath;
-                            return (
-                                <button
-                                    key={`${session.providerId}-${session.sourcePath}`}
-                                    type="button"
-                                    onClick={() => onSessionSelect(session)}
-                                    className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                                        selected
-                                            ? 'border-primary/35 bg-primary/10'
-                                            : 'border-transparent hover:bg-base-200'
-                                    }`}
-                                    title={session.sessionId}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <MessageSquare size={14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
-                                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                                            {sessionTitle(session)}
-                                        </span>
-                                        <span className="rounded bg-base-200 px-1.5 py-0.5 text-[10px] text-base-content/50">
-                                            {session.providerId}
-                                        </span>
-                                    </div>
-                                    <div className="mt-1 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
-                                        <span className="font-mono">{shortSessionId(session.sessionId)}</span>
-                                        <span>·</span>
-                                        <span>{formatShortDate(session.lastActiveAt)}</span>
-                                    </div>
-                                </button>
-                            );
-                        })}
+                    <div className="pb-3">
+                        <div className="px-2 pb-2">
+                            <label className="relative block">
+                                <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
+                                <input
+                                    type="text"
+                                    value={sessionQuery}
+                                    onChange={(event) => setSessionQuery(event.target.value)}
+                                    placeholder={t('chat.sessionPanel.searchSessions')}
+                                    className="input input-bordered input-xs w-full pl-7 text-xs"
+                                />
+                            </label>
+                        </div>
+
+                        {loadingSessions ? (
+                            <div className="flex items-center justify-center py-6 text-base-content/40">
+                                <RefreshCw size={16} className="animate-spin"/>
+                            </div>
+                        ) : filteredSessions.length === 0 ? (
+                            <div className="px-3 py-5 text-center text-xs text-base-content/40">
+                                {t('chat.sessionPanel.noMatchingSessions')}
+                            </div>
+                        ) : (
+                            <div className="space-y-0.5 px-2">
+                                {filteredSessions.map((session) => {
+                                    const selected = activeSession?.sessionId === session.sessionId
+                                        && activeSession?.sourcePath === session.sourcePath;
+                                    return (
+                                        <button
+                                            key={`${session.providerId}-${session.sourcePath}`}
+                                            type="button"
+                                            onClick={() => onSessionSelect(session)}
+                                            className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                                selected
+                                                    ? 'border-primary/35 bg-primary/10'
+                                                    : 'border-transparent hover:bg-base-200'
+                                            }`}
+                                            title={session.sessionId}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <MessageSquare size={14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
+                                                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                                                    {sessionTitle(session)}
+                                                </span>
+                                                <span className="rounded bg-base-200 px-1.5 py-0.5 text-[10px] text-base-content/50">
+                                                    {session.providerId}
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
+                                                <span className="font-mono">{shortSessionId(session.sessionId)}</span>
+                                                <span>·</span>
+                                                <span>{formatShortDate(session.lastActiveAt)}</span>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

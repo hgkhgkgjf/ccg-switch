@@ -128,9 +128,11 @@
             "projects": "项目",
             "sessions": "会话",
             "searchProjects": "搜索项目...",
+            "searchSessions": "搜索会话...",
             "selectProject": "选择项目查看会话",
             "noProjects": "暂无项目",
             "noSessions": "暂无会话",
+            "noMatchingSessions": "没有匹配的会话",
             "projectSessionCount": "{{count}} 个会话"
         },
         "enhancer": {

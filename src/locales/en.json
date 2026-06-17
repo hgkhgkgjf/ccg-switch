@@ -139,9 +139,11 @@
             "projects": "Projects",
             "sessions": "Sessions",
             "searchProjects": "Search projects...",
+            "searchSessions": "Search sessions...",
             "selectProject": "Select a project to view sessions",
             "noProjects": "No projects",
             "noSessions": "No sessions",
+            "noMatchingSessions": "No matching sessions",
             "projectSessionCount": "{{count}} sessions"
         },
         "enhancer": {

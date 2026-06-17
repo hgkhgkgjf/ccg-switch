@@ -135,6 +135,7 @@ Goal: define the next focused task for cc-gui-like input interaction.
 - [x] Add first-pass Chat session management sidebar.
   - [x] Browse projects with existing `get_dashboard_projects`.
   - [x] Browse supported Claude/Codex sessions with existing `list_sessions`.
+  - [x] Search and refresh the selected project's session list.
   - [x] Load selected session history via `get_unified_session_messages`.
   - [x] Continue selected sessions by reusing `sessionId`, provider and project cwd in `chat_send`.
   - [x] Start a new chat using the selected project's cwd.
