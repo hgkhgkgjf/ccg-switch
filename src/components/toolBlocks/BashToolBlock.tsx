@@ -1,17 +1,25 @@
 // BashToolBlock - Bash 命令执行工具块
 
-import { useState, memo } from 'react';
-import type { ToolResultBlock } from '../../types/chat';
-import type { ToolInput } from '../../types/tools';
-import { useIsToolDenied } from '../../hooks/useIsToolDenied';
-import { extractResultText, truncateContent } from '../../utils/toolPresentation';
-import { copyToClipboard } from '../../utils/bridge';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Terminal} from 'lucide-react';
+import type {ToolResultBlock} from '../../types/chat';
+import type {ToolInput} from '../../types/tools';
+import {useIsToolDenied} from '../../hooks/useIsToolDenied';
+import {
+    extractResultText,
+    summarizeBashHeaderResult,
+    summarizeCommand,
+    truncateContent,
+} from '../../utils/toolPresentation';
+import {copyToClipboard} from '../../utils/bridge';
 
 export interface BashToolBlockProps {
   name?: string;
   input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
+  compact?: boolean;
 }
 
 interface BashResult {
@@ -49,7 +57,9 @@ const BashToolBlock = memo(function BashToolBlock({
   input,
   result,
   toolId,
+  compact = false,
 }: BashToolBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isDenied = useIsToolDenied(toolId);
@@ -60,6 +70,8 @@ const BashToolBlock = memo(function BashToolBlock({
 
   // 提取命令
   const command = (input.command as string) || '';
+  const commandSummary = summarizeCommand(command);
+  const workdir = typeof input.workdir === 'string' ? input.workdir : '';
 
   // 状态计算
   const isCompleted = (result !== undefined && result !== null) || isDenied;
@@ -68,15 +80,18 @@ const BashToolBlock = memo(function BashToolBlock({
 
   // 解析结果
   const bashResult = result ? parseBashResult(result) : null;
+  const resultSummary = bashResult ? summarizeBashHeaderResult(bashResult) : '';
 
   // 复制功能
-  const handleCopyCommand = async () => {
+  const handleCopyCommand = async (event?: React.MouseEvent) => {
+    event?.stopPropagation();
     await copyToClipboard(command);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCopyOutput = async () => {
+  const handleCopyOutput = async (event?: React.MouseEvent) => {
+    event?.stopPropagation();
     if (bashResult) {
       const output = bashResult.stdout + (bashResult.stderr ? `\n\nStderr:\n${bashResult.stderr}` : '');
       await copyToClipboard(output);
@@ -84,6 +99,84 @@ const BashToolBlock = memo(function BashToolBlock({
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  const detailContent = (
+    <div className="task-content-wrapper">
+      <div className="tool-section">
+        <div className="tool-section-label">{t('tools.command')}:</div>
+        <div className="tool-command-meta">
+          <span className={`tool-command-chip ${commandSummary.accentClass}`}>
+            {commandSummary.label}
+          </span>
+          {workdir && (
+            <span className="tool-command-workdir">
+              {workdir}
+            </span>
+          )}
+        </div>
+        <div className="bash-command-block">
+          <code>{command}</code>
+        </div>
+      </div>
+
+      {bashResult && (
+        <div className="tool-section">
+          <div className="tool-section-label">{t('tools.exitCode')}:</div>
+          <div className={`bash-exit-code ${bashResult.exitCode === 0 ? 'success' : 'error'}`}>
+            {bashResult.exitCode}
+            {bashResult.exitCode === 0 ? ` (${t('tools.success')})` : ` (${t('tools.failed')})`}
+          </div>
+        </div>
+      )}
+
+      {bashResult && bashResult.stdout && (
+        <div className="tool-section">
+          <div className="tool-section-label">{t('tools.result')}:</div>
+          <div className="bash-output">
+            <pre className="bash-output-text">{truncateContent(bashResult.stdout, 10000)}</pre>
+          </div>
+        </div>
+      )}
+
+      {bashResult && bashResult.stderr && (
+        <div className="tool-section">
+          <div className="tool-section-label">{t('tools.errorOutput')}:</div>
+          <div className="bash-output bash-output-error">
+            <pre className="bash-output-text">{truncateContent(bashResult.stderr, 10000)}</pre>
+          </div>
+        </div>
+      )}
+
+      <div className="tool-actions">
+        <button
+          type="button"
+          className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          onClick={handleCopyCommand}
+        >
+          {copied ? t('tools.copied') : t('tools.copyCommand')}
+        </button>
+        {bashResult && (
+          <button
+            type="button"
+            className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+            onClick={handleCopyOutput}
+          >
+            {copied ? t('tools.copied') : t('tools.copyOutput')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div className="task-container task-container-compact">
+        <div className="task-details task-details-compact">
+          {detailContent}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="task-container">
@@ -93,76 +186,30 @@ const BashToolBlock = memo(function BashToolBlock({
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
-          <span className="bash-icon">$</span>
-          <span className="tool-title-text">Bash</span>
-          <span className="tool-title-summary bash-command" title={command}>
-            {command}
+          <Terminal className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.runCommand')}</span>
+          <span className={`tool-command-chip ${commandSummary.accentClass}`}>
+            {commandSummary.label}
           </span>
-          {isDenied && <span className="tool-title-summary text-error">• Denied</span>}
+          <span className="tool-title-summary bash-command" title={command}>
+            {commandSummary.summary}
+          </span>
+          {resultSummary && (
+            <span
+              className={`tool-title-secondary-summary ${isError ? 'tool-title-secondary-summary-error' : ''}`}
+              title={resultSummary}
+            >
+              {resultSummary}
+            </span>
+          )}
+          {isDenied && <span className="tool-title-summary text-error">• {t('tools.denied')}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
 
       {expanded && (
         <div className="task-details">
-          <div className="task-content-wrapper">
-            {/* 命令 */}
-            <div className="tool-section">
-              <div className="tool-section-label">Command:</div>
-              <div className="bash-command-block">
-                <code>{command}</code>
-              </div>
-            </div>
-
-            {/* Exit Code */}
-            {bashResult && (
-              <div className="tool-section">
-                <div className="tool-section-label">Exit Code:</div>
-                <div className={`bash-exit-code ${bashResult.exitCode === 0 ? 'success' : 'error'}`}>
-                  {bashResult.exitCode}
-                  {bashResult.exitCode === 0 ? ' (Success)' : ' (Failed)'}
-                </div>
-              </div>
-            )}
-
-            {/* Stdout */}
-            {bashResult && bashResult.stdout && (
-              <div className="tool-section">
-                <div className="tool-section-label">Output:</div>
-                <div className="bash-output">
-                  <pre className="bash-output-text">{truncateContent(bashResult.stdout, 10000)}</pre>
-                </div>
-              </div>
-            )}
-
-            {/* Stderr */}
-            {bashResult && bashResult.stderr && (
-              <div className="tool-section">
-                <div className="tool-section-label">Error Output:</div>
-                <div className="bash-output bash-output-error">
-                  <pre className="bash-output-text">{truncateContent(bashResult.stderr, 10000)}</pre>
-                </div>
-              </div>
-            )}
-
-            {/* 操作按钮 */}
-            <div className="tool-actions">
-              <button
-                className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
-                onClick={handleCopyCommand}
-              >
-                {copied ? '✓ Copied' : 'Copy Command'}
-              </button>
-              {bashResult && (
-                <button
-                  className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
-                  onClick={handleCopyOutput}
-                >
-                  {copied ? '✓ Copied' : 'Copy Output'}
-                </button>
-              )}
-            </div>
-          </div>
+          {detailContent}
         </div>
       )}
     </div>

@@ -1,6 +1,8 @@
 // Tauri 桥接函数
 
-import { invoke } from '@tauri-apps/api/core';
+import {invoke} from '@tauri-apps/api/core';
+import i18n from '../i18n';
+import {showToast} from '../components/common/ToastContainer';
 
 /**
  * 在编辑器中打开文件
@@ -11,17 +13,21 @@ import { invoke } from '@tauri-apps/api/core';
 export async function openFile(
   filePath: string,
   lineStart?: number,
-  lineEnd?: number
-): Promise<void> {
+  lineEnd?: number,
+  cwd?: string | null
+): Promise<boolean> {
   try {
     await invoke('open_file_in_editor', {
       filePath,
       lineStart,
       lineEnd,
+      cwd: cwd || undefined,
     });
+    return true;
   } catch (error) {
     console.error('Failed to open file:', error);
-    alert(`无法打开文件: ${error}`);
+    showToast(`${i18n.t('tools.openFileFailed')}: ${String(error)}`, 'error', 5000);
+    return false;
   }
 }
 

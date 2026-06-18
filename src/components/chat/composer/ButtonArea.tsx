@@ -1,32 +1,32 @@
-import { useTranslation } from 'react-i18next';
+import {useTranslation} from 'react-i18next';
 import {
-    Terminal,
-    MessageSquare,
-    ClipboardList,
     Bot,
-    Zap,
-    CircleDot,
     Circle,
     CircleDashed,
+    CircleDot,
+    ClipboardList,
     Flame,
-    Rocket,
     Lightbulb,
-    Sparkles,
-    Send,
-    Square,
     Loader2,
     type LucideIcon,
+    MessageSquare,
+    Rocket,
+    Send,
+    Sparkles,
+    Square,
+    Terminal,
+    Zap,
 } from 'lucide-react';
-import { SelectorDropdown, type SelectorOption } from './SelectorDropdown';
+import {SelectorDropdown, type SelectorOption} from './SelectorDropdown';
 import {
-    AVAILABLE_PROVIDERS,
     AVAILABLE_MODES,
-    modelsForProvider,
-    reasoningLevelsFor,
-    reasoningVisibleFor,
+    AVAILABLE_PROVIDERS,
     type ChatProviderId,
+    modelsForProvider,
     type PermissionMode,
     type ReasoningEffort,
+    reasoningLevelsFor,
+    reasoningVisibleFor,
 } from './constants';
 
 const MODE_ICONS: Record<string, LucideIcon> = {
@@ -51,7 +51,8 @@ interface ButtonAreaProps {
     reasoningEffort: ReasoningEffort;
     isLoading: boolean;
     isEnhancing: boolean;
-    hasInputContent: boolean;
+    canSubmit: boolean;
+    hasPromptText: boolean;
     onProviderChange: (p: ChatProviderId) => void;
     onModeChange: (m: PermissionMode) => void;
     onModelChange: (id: string) => void;
@@ -72,7 +73,8 @@ export function ButtonArea({
     reasoningEffort,
     isLoading,
     isEnhancing,
-    hasInputContent,
+    canSubmit,
+    hasPromptText,
     onProviderChange,
     onModeChange,
     onModelChange,
@@ -127,7 +129,7 @@ export function ButtonArea({
     const currentModel = models.find((m) => m.id === model);
 
     return (
-        <div className="flex items-center gap-1.5 flex-wrap px-1 pt-1.5">
+        <div className="flex flex-nowrap items-center gap-1 px-1 pt-1">
             {/* 左侧选择器组 */}
             <SelectorDropdown
                 value={provider}
@@ -169,12 +171,12 @@ export function ButtonArea({
             )}
 
             {/* 右侧工具按钮 */}
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1">
                 <button
                     type="button"
-                    className="flex items-center justify-center w-8 h-8 rounded-md text-base-content/60 hover:bg-base-200 hover:text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-200 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent"
                     onClick={onEnhance}
-                    disabled={!hasInputContent || isLoading || isEnhancing}
+                    disabled={!hasPromptText || isLoading || isEnhancing}
                     title={t('chat.enhancePrompt')}
                 >
                     {isEnhancing ? (
@@ -187,7 +189,7 @@ export function ButtonArea({
                 {isLoading ? (
                     <button
                         type="button"
-                        className="btn btn-sm btn-error gap-1"
+                        className="btn btn-xs btn-error gap-1"
                         onClick={onStop}
                         title={t('chat.stop')}
                     >
@@ -196,9 +198,9 @@ export function ButtonArea({
                 ) : (
                     <button
                         type="button"
-                        className="btn btn-sm btn-primary gap-1"
+                        className="btn btn-xs btn-primary gap-1"
                         onClick={onSubmit}
-                        disabled={!hasInputContent}
+                        disabled={!canSubmit}
                         title={t('chat.send')}
                     >
                         <Send size={14} />

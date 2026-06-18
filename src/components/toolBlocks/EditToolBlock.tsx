@@ -1,18 +1,23 @@
 // EditToolBlock - 文件编辑工具块
 
-import { useState, memo } from 'react';
-import type { ToolResultBlock } from '../../types/chat';
-import type { ToolInput } from '../../types/tools';
-import { useIsToolDenied } from '../../hooks/useIsToolDenied';
-import { collectEditToolItems, resolveToolTarget } from '../../utils/toolPresentation';
-import { getFileIcon } from '../../utils/fileIcons';
-import { openFile, copyToClipboard } from '../../utils/bridge';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {PencilLine} from 'lucide-react';
+import type {ToolResultBlock} from '../../types/chat';
+import type {ToolInput} from '../../types/tools';
+import {useIsToolDenied} from '../../hooks/useIsToolDenied';
+import {useChatStore} from '../../stores/useChatStore';
+import {collectEditToolItems, resolveToolTarget} from '../../utils/toolPresentation';
+import {getFileIcon} from '../../utils/fileIcons';
+import {copyToClipboard, openFile} from '../../utils/bridge';
+import EditDiffPreview from './EditDiffPreview';
 
 export interface EditToolBlockProps {
   name?: string;
   input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
+  compact?: boolean;
 }
 
 const EditToolBlock = memo(function EditToolBlock({
@@ -20,10 +25,13 @@ const EditToolBlock = memo(function EditToolBlock({
   input,
   result,
   toolId,
+  compact = false,
 }: EditToolBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isDenied = useIsToolDenied(toolId);
+  const currentCwd = useChatStore((state) => state.currentCwd);
 
   if (!input) {
     return null;
@@ -44,6 +52,9 @@ const EditToolBlock = memo(function EditToolBlock({
   const oldString = primaryItem?.oldString ?? (input.old_string as string) ?? '';
   const newString = primaryItem?.newString ?? (input.new_string as string) ?? '';
   const hasChanges = oldString || newString;
+  const additions = primaryItem?.additions ?? 0;
+  const deletions = primaryItem?.deletions ?? 0;
+  const diffPreviewLines = primaryItem?.diffPreviewLines ?? [];
 
   // 状态计算
   const isCompleted = (result !== undefined && result !== null) || isDenied;
@@ -59,16 +70,99 @@ const EditToolBlock = memo(function EditToolBlock({
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (openPath) {
-      openFile(openPath);
+      void openFile(openPath, primaryItem?.lineStart, primaryItem?.lineEnd, currentCwd);
     }
   };
 
   // 复制路径
-  const handleCopyPath = async () => {
+  const handleCopyPath = async (event?: React.MouseEvent) => {
+    event?.stopPropagation();
     await copyToClipboard(filePath);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const detailContent = (
+    <div className="task-content-wrapper">
+      {/* 文件路径 */}
+      <div className="tool-section">
+        <div className="tool-section-label">{t('tools.filePath')}:</div>
+        <div className="file-path-display">
+          <code>{filePath}</code>
+        </div>
+      </div>
+
+      {/* Diff 预览 */}
+      {hasChanges && (
+        <div className="tool-section">
+          <div className="tool-section-label">{t('tools.changes')}:</div>
+          <div className="diff-preview">
+            {oldString && (
+              <div className="diff-line removed">
+                <span className="diff-marker">-</span>
+                <span className="diff-content">{oldString}</span>
+              </div>
+            )}
+            {newString && (
+              <div className="diff-line added">
+                <span className="diff-marker">+</span>
+                <span className="diff-content">{newString}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 其他参数 */}
+      {Object.entries(input)
+        .filter(([key]) => !['file_path', 'path', 'target_file', 'old_string', 'new_string', 'command', 'workdir', 'description'].includes(key))
+        .map(([key, value]) => (
+          <div key={key} className="tool-section">
+            <div className="tool-section-label">{key}:</div>
+            <div className="tool-param-value">
+              {typeof value === 'object' && value !== null
+                ? JSON.stringify(value, null, 2)
+                : String(value)}
+            </div>
+          </div>
+        ))}
+
+      {/* 操作按钮 */}
+      <div className="tool-actions">
+        {openPath && (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            title={t('tools.openFile')}
+            aria-label={t('tools.openFile')}
+            onClick={(event) => {
+              event.stopPropagation();
+              void openFile(openPath, primaryItem?.lineStart, primaryItem?.lineEnd, currentCwd);
+            }}
+          >
+            {t('tools.openFile')}
+          </button>
+        )}
+        <button
+          type="button"
+          className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          onClick={handleCopyPath}
+        >
+          {copied ? t('tools.copied') : t('tools.copyPath')}
+        </button>
+      </div>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div className="task-container task-container-compact">
+        <div className="task-details task-details-compact">
+          {detailContent}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="task-container">
@@ -78,10 +172,10 @@ const EditToolBlock = memo(function EditToolBlock({
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
-          <span className="edit-icon">✏️</span>
-          <span className="tool-title-text">Edit</span>
+          <PencilLine className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.editFile')}</span>
           <span
-            className="tool-title-summary file-path-link clickable-file"
+            className="tool-title-summary file-path-link clickable-file edit-diff-hover-trigger"
             onClick={handleFileClick}
             title={filePath}
           >
@@ -91,77 +185,28 @@ const EditToolBlock = memo(function EditToolBlock({
                 dangerouslySetInnerHTML={{ __html: fileIconSvg }}
               />
             )}
-            {displayPath}
+            <span className="edit-diff-hover-label">{displayPath}</span>
+            {(additions > 0 || deletions > 0) && (
+              <span className="edit-item-stats">
+                <span className="edit-stat-added">+{additions}</span>
+                <span className="edit-stat-deleted">-{deletions}</span>
+              </span>
+            )}
+            <EditDiffPreview
+              filePath={displayPath}
+              additions={additions}
+              deletions={deletions}
+              lines={diffPreviewLines}
+            />
           </span>
-          {isDenied && <span className="tool-title-summary text-error">• Denied</span>}
+          {isDenied && <span className="tool-title-summary text-error">• {t('tools.denied')}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
 
       {expanded && (
         <div className="task-details">
-          <div className="task-content-wrapper">
-            {/* 文件路径 */}
-            <div className="tool-section">
-              <div className="tool-section-label">File Path:</div>
-              <div className="file-path-display">
-                <code>{filePath}</code>
-              </div>
-            </div>
-
-            {/* Diff 预览 */}
-            {hasChanges && (
-              <div className="tool-section">
-                <div className="tool-section-label">Changes:</div>
-                <div className="diff-preview">
-                  {oldString && (
-                    <div className="diff-line removed">
-                      <span className="diff-marker">-</span>
-                      <span className="diff-content">{oldString}</span>
-                    </div>
-                  )}
-                  {newString && (
-                    <div className="diff-line added">
-                      <span className="diff-marker">+</span>
-                      <span className="diff-content">{newString}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 其他参数 */}
-            {Object.entries(input)
-              .filter(([key]) => !['file_path', 'path', 'target_file', 'old_string', 'new_string', 'command', 'workdir', 'description'].includes(key))
-              .map(([key, value]) => (
-                <div key={key} className="tool-section">
-                  <div className="tool-section-label">{key}:</div>
-                  <div className="tool-param-value">
-                    {typeof value === 'object' && value !== null
-                      ? JSON.stringify(value, null, 2)
-                      : String(value)}
-                  </div>
-                </div>
-              ))}
-
-            {/* 操作按钮 */}
-            <div className="tool-actions">
-              {openPath && (
-                <button
-                  className="btn btn-sm btn-ghost"
-                  onClick={() => openFile(openPath)}
-                >
-                  Open File
-                </button>
-              )}
-              <button
-                className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
-                onClick={handleCopyPath}
-              >
-                {copied ? '✓ Copied' : 'Copy Path'}
-              </button>
-            </div>
-          </div>
+          {detailContent}
         </div>
       )}
     </div>

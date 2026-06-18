@@ -1,16 +1,9 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
-import {
-    ChevronRight,
-    Clock,
-    FolderOpen,
-    MessageSquare,
-    Plus,
-    RefreshCw,
-    Search,
-} from 'lucide-react';
-import type {SessionMeta} from '../../types/session';
+import {ChevronRight, Clock, FolderOpen, MessageSquare, Plus, RefreshCw, Search,} from 'lucide-react';
+import {getSessionSelectionKey, type SessionMeta} from '../../types/session';
+import {formatShortDate, getSessionProviderLabel, sessionTitle} from './chatSessionSidebarUtils';
 
 interface ProjectInfo {
     name: string;
@@ -22,6 +15,7 @@ interface ProjectInfo {
 interface ChatSessionSidebarProps {
     activeSession: SessionMeta | null;
     currentCwd: string | null;
+    pendingSessionKey: string | null;
     onSessionSelect: (session: SessionMeta) => void;
     onNewSession: (cwd?: string | null) => void;
 }
@@ -30,38 +24,10 @@ function isSupportedChatProvider(providerId: string): boolean {
     return providerId === 'claude' || providerId === 'codex';
 }
 
-function formatShortDate(value: number | string | null): string {
-    if (value === null) return '';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-
-    return new Intl.DateTimeFormat(undefined, {
-        month: 'numeric',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    }).format(date);
-}
-
-function shortSessionId(sessionId: string): string {
-    return sessionId.length <= 16
-        ? sessionId
-        : `${sessionId.slice(0, 7)}...${sessionId.slice(-5)}`;
-}
-
-function sessionTitle(session: SessionMeta): string {
-    const title = session.title?.trim();
-    if (title) return title;
-
-    const summary = session.summary?.trim();
-    if (summary) return summary;
-
-    return shortSessionId(session.sessionId);
-}
-
 export default function ChatSessionSidebar({
     activeSession,
     currentCwd,
+    pendingSessionKey,
     onSessionSelect,
     onNewSession,
 }: ChatSessionSidebarProps) {
@@ -130,6 +96,8 @@ export default function ChatSessionSidebar({
             || session.providerId.toLowerCase().includes(query)
         ));
     }, [sessionQuery, sessions]);
+
+    const activeSessionKey = activeSession ? getSessionSelectionKey(activeSession) : null;
 
     const handleProjectSelect = (project: ProjectInfo) => {
         setSelectedProjectPath(project.path);
@@ -211,10 +179,10 @@ export default function ChatSessionSidebar({
                                             key={project.path}
                                             type="button"
                                             onClick={() => handleProjectSelect(project)}
-                                            className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                            className={`w-full rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                                                 selected
-                                                    ? 'border-primary/30 bg-primary/10 text-base-content'
-                                                    : 'border-transparent hover:bg-base-200'
+                                                    ? 'border-primary/25 bg-primary/10 text-base-content'
+                                                    : 'border-transparent hover:bg-base-200/80'
                                             }`}
                                             title={project.path}
                                         >
@@ -225,7 +193,7 @@ export default function ChatSessionSidebar({
                                                 </span>
                                                 <ChevronRight size={13} className={selected ? 'text-primary' : 'text-base-content/25'}/>
                                             </div>
-                                            <div className="mt-1 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
+                                            <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
                                                 <Clock size={11}/>
                                                 <span>{t('chat.sessionPanel.projectSessionCount', {count: project.session_count})}</span>
                                             </div>
@@ -290,33 +258,58 @@ export default function ChatSessionSidebar({
                                 ) : (
                                     <div className="space-y-0.5 px-2">
                                         {filteredSessions.map((session) => {
-                                            const selected = activeSession?.sessionId === session.sessionId
-                                                && activeSession?.sourcePath === session.sourcePath;
+                                            const sessionKey = getSessionSelectionKey(session);
+                                            const isPending = pendingSessionKey === sessionKey;
+                                            const isActive = activeSessionKey === sessionKey;
+                                            const selected = isPending || (!pendingSessionKey && isActive);
+                                            const providerLabel = getSessionProviderLabel(t, session.providerId);
                                             return (
                                                 <button
-                                                    key={`${session.providerId}-${session.sourcePath}`}
+                                                    key={sessionKey}
                                                     type="button"
                                                     onClick={() => onSessionSelect(session)}
-                                                    className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                                    className={`w-full rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                                                         selected
-                                                            ? 'border-primary/35 bg-primary/10'
-                                                            : 'border-transparent hover:bg-base-200'
+                                                            ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
+                                                            : 'border-transparent hover:bg-base-200/80'
                                                     }`}
-                                                    title={session.sessionId}
+                                                    title={isPending ? t('common.loading') : session.sessionId}
                                                 >
                                                     <div className="flex items-center gap-2">
-                                                        <MessageSquare size={14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
+                                                        {isPending ? (
+                                                            <RefreshCw size={14} className="animate-spin text-primary"/>
+                                                        ) : (
+                                                            <MessageSquare size={14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
+                                                        )}
                                                         <span className="min-w-0 flex-1 truncate text-xs font-medium">
                                                             {sessionTitle(session)}
                                                         </span>
-                                                        <span className="rounded bg-base-200 px-1.5 py-0.5 text-[10px] text-base-content/50">
-                                                            {session.providerId}
+                                                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${
+                                                            selected
+                                                                ? 'bg-primary/12 text-primary/80'
+                                                                : 'bg-base-200 text-base-content/50'
+                                                        }`}>
+                                                            {providerLabel}
                                                         </span>
                                                     </div>
-                                                    <div className="mt-1 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
-                                                        <span className="font-mono">{shortSessionId(session.sessionId)}</span>
-                                                        <span>·</span>
-                                                        <span>{formatShortDate(session.lastActiveAt)}</span>
+                                                    <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
+                                                        {isPending && (
+                                                            <>
+                                                                <span className="shrink-0 text-primary/80">{t('common.loading')}</span>
+                                                                <span className="shrink-0">·</span>
+                                                            </>
+                                                        )}
+                                                        {session.summary?.trim() && session.summary.trim() !== sessionTitle(session) ? (
+                                                            <span className="min-w-0 flex-1 truncate">
+                                                                {session.summary.trim()}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="min-w-0 flex-1 truncate font-mono">
+                                                                {session.sessionId}
+                                                            </span>
+                                                        )}
+                                                        <span className="shrink-0">·</span>
+                                                        <span className="shrink-0">{formatShortDate(session.lastActiveAt)}</span>
                                                     </div>
                                                 </button>
                                             );

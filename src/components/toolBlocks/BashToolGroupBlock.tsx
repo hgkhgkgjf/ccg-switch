@@ -1,8 +1,11 @@
 // BashToolGroupBlock - Bash 工具分组块
 
-import { useState, memo } from 'react';
-import type { ToolUseBlock, ToolResultBlock } from '../../types/chat';
-import { getGroupStatus } from '../../utils/toolGrouping';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ChevronDown, ChevronRight, Terminal} from 'lucide-react';
+import type {ToolResultBlock, ToolUseBlock} from '../../types/chat';
+import {getGroupStatus} from '../../utils/toolGrouping';
+import {summarizeBashGroupHeader, summarizeCommand, summarizeGroupBashItemResult} from '../../utils/toolPresentation';
 import BashToolBlock from './BashToolBlock';
 
 export interface BashToolGroupBlockProps {
@@ -14,10 +17,12 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
   blocks,
   findToolResult,
 }: BashToolGroupBlockProps) {
+  const { t } = useTranslation();
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
 
   // 计算整体状态
   const status = getGroupStatus(blocks, findToolResult);
+  const headerSummary = summarizeBashGroupHeader(blocks, findToolResult);
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
@@ -44,10 +49,18 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
       {/* 分组标题 */}
       <div className="task-header task-group-header">
         <div className="task-title-section">
-          <span className="bash-icon">$</span>
-          <span className="tool-title-text">Bash</span>
-          <span className="tool-title-summary">
-            {blocks.length} {blocks.length === 1 ? 'command' : 'commands'}
+          <Terminal className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.runCommand')}</span>
+          <span className="tool-command-chip tool-command-run">{blocks.length}</span>
+          {headerSummary.primarySummary && (
+            <span className="tool-title-summary" title={headerSummary.primarySummary}>
+              {headerSummary.primarySummary}
+            </span>
+          )}
+          <span className="tool-title-secondary-summary" title={t('tools.commandCount', { count: headerSummary.totalCount })}>
+            {headerSummary.completedCount > 0 ? t('tools.success') : t('tools.pending')}
+            {headerSummary.errorCount > 0 ? ` · ${headerSummary.errorCount} ${t('tools.failed')}` : ''}
+            {headerSummary.pendingCount > 0 ? ` · ${headerSummary.pendingCount} ${t('tools.pending')}` : ''}
           </span>
         </div>
         <div className={`tool-status-indicator ${status}`} />
@@ -58,6 +71,8 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
         {blocks.map((block, index) => {
           const result = findToolResult(block.id);
           const command = (block.input.command as string) || '';
+          const commandSummary = summarizeCommand(command);
+          const resultSummary = summarizeGroupBashItemResult(result);
           const isExpanded = expandedIndices.has(index);
 
           // 单个工具状态
@@ -74,17 +89,25 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
               >
                 <div className="task-group-item-title">
                   <span className="task-group-item-number">{index + 1}.</span>
-                  <span className="task-group-item-command" title={command}>
-                    {command}
+                  <span className={`tool-command-chip ${commandSummary.accentClass}`}>
+                    {commandSummary.label}
                   </span>
+                  <span className="task-group-item-command" title={command}>
+                    {commandSummary.summary}
+                  </span>
+                  {resultSummary && (
+                    <span className={`task-group-item-secondary ${isError ? 'error' : ''}`} title={resultSummary}>
+                      {resultSummary}
+                    </span>
+                  )}
                 </div>
                 <div className="task-group-item-status">
-                  <span className={`badge badge-sm ${itemStatus === 'error' ? 'badge-error' : itemStatus === 'completed' ? 'badge-success' : 'badge-warning'}`}>
-                    {itemStatus === 'error' ? 'Failed' : itemStatus === 'completed' ? 'Success' : 'Pending'}
+                  <span className={`tool-state-pill ${itemStatus}`}>
+                    {itemStatus === 'error' ? t('tools.failed') : itemStatus === 'completed' ? t('tools.success') : t('tools.pending')}
                   </span>
-                  <span className="task-group-item-chevron">
-                    {isExpanded ? '▼' : '▶'}
-                  </span>
+                  {isExpanded
+                    ? <ChevronDown className="task-group-item-chevron-icon" aria-hidden="true" />
+                    : <ChevronRight className="task-group-item-chevron-icon" aria-hidden="true" />}
                 </div>
               </div>
 
@@ -96,6 +119,7 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
                     input={block.input}
                     result={result}
                     toolId={block.id}
+                    compact
                   />
                 </div>
               )}
@@ -107,16 +131,18 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
       {/* 分组操作 */}
       <div className="task-group-actions">
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(true)}
         >
-          Expand All
+          {t('tools.expandAll')}
         </button>
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(false)}
         >
-          Collapse All
+          {t('tools.collapseAll')}
         </button>
       </div>
     </div>

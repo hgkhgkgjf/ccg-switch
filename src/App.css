@@ -265,3 +265,177 @@ a {
   border-color: rgba(0, 255, 0, 0.3);
   color: #00ff00;
 }
+
+/* Chat message flow */
+.chat-message-row {
+  overflow-wrap: anywhere;
+}
+
+.assistant-message-flow {
+  border-bottom: 1px solid oklch(var(--bc) / 0.055);
+}
+
+.assistant-message-flow:last-child {
+  border-bottom: 0;
+}
+
+.assistant-message-content {
+  font-size: 13.5px;
+  line-height: 1.62;
+  font-weight: 400;
+}
+
+.assistant-message-flow .markdown-block {
+  font-size: 13.5px;
+  line-height: 1.62;
+  font-weight: 400;
+}
+
+.assistant-message-flow .markdown-block h1,
+.assistant-message-flow .markdown-block h2,
+.assistant-message-flow .markdown-block h3,
+.assistant-message-flow .markdown-block h4,
+.assistant-message-flow .markdown-block h5,
+.assistant-message-flow .markdown-block h6 {
+  margin-top: 0.85em;
+  margin-bottom: 0.35em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.assistant-message-flow .markdown-block h1 {
+  font-size: 1.16em;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.assistant-message-flow .markdown-block h2 {
+  font-size: 1.1em;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.assistant-message-flow .markdown-block h3,
+.assistant-message-flow .markdown-block h4,
+.assistant-message-flow .markdown-block h5,
+.assistant-message-flow .markdown-block h6 {
+  font-size: 1.04em;
+}
+
+.assistant-message-flow .markdown-block p {
+  margin-bottom: 0.75em;
+}
+
+.assistant-message-flow .markdown-block p:last-child,
+.user-message-bubble .markdown-block p:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-message-flow .markdown-block pre {
+  margin: 0.65em 0;
+  max-width: 100%;
+}
+
+.assistant-message-meta {
+  color: oklch(var(--bc) / 0.46);
+}
+
+.user-message-bubble {
+  overflow-wrap: anywhere;
+}
+
+.user-message-content,
+.user-message-bubble .markdown-block {
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+.user-message-bubble .markdown-block h1,
+.user-message-bubble .markdown-block h2,
+.user-message-bubble .markdown-block h3,
+.user-message-bubble .markdown-block h4,
+.user-message-bubble .markdown-block h5,
+.user-message-bubble .markdown-block h6 {
+  margin-top: 0.45em;
+  margin-bottom: 0.25em;
+  padding-bottom: 0;
+  border-bottom: 0;
+  font-size: 1em;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.user-message-bubble .markdown-block p {
+  margin-bottom: 0.65em;
+}
+
+.user-message-bubble .markdown-block ul,
+.user-message-bubble .markdown-block ol {
+  margin-bottom: 0.65em;
+  padding-left: 1.35em;
+}
+
+.user-message-bubble .markdown-block pre {
+  margin: 0.55em 0;
+  max-width: 100%;
+}
+
+.assistant-message-flow .thinking-block {
+  margin: 4px 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.assistant-message-flow .thinking-block > button {
+  width: auto;
+  padding: 3px 0;
+  border-radius: 4px;
+  color: oklch(var(--bc) / 0.5);
+}
+
+.assistant-message-flow .thinking-block > button:hover {
+  background: transparent;
+  color: oklch(var(--bc) / 0.66);
+}
+
+.assistant-message-flow .thinking-block > button svg {
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+
+.assistant-message-flow .thinking-block > button span {
+  font-size: 13px;
+  color: inherit;
+}
+
+.assistant-message-flow .thinking-block > [id] {
+  margin-top: 4px;
+  border-top: 0;
+  border-left: 2px solid oklch(var(--bc) / 0.12);
+  padding: 4px 0 4px 12px;
+  color: oklch(var(--bc) / 0.58);
+}
+
+.assistant-message-flow .thinking-block > [id] .markdown-block {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: inherit;
+}
+
+@media (max-width: 640px) {
+  .user-message-bubble {
+    max-width: 92%;
+  }
+
+  .assistant-message-flow {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .assistant-message-content {
+    padding-right: 0;
+  }
+}

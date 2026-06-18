@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Check } from 'lucide-react';
+import {type ReactNode, useEffect, useRef, useState} from 'react';
+import {Check, ChevronDown, ChevronUp} from 'lucide-react';
 
 export interface SelectorOption<T extends string> {
     id: T;
@@ -74,7 +74,7 @@ export function SelectorDropdown<T extends string>({
                     e.stopPropagation();
                     setOpen((v) => !v);
                 }}
-                className={`flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium transition-colors
+                className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors
                     ${
                         highlight
                             ? 'bg-warning/15 text-warning hover:bg-warning/25'
@@ -82,7 +82,7 @@ export function SelectorDropdown<T extends string>({
                     }`}
             >
                 {buttonIcon}
-                <span className="max-w-[8rem] truncate">{buttonLabel ?? current?.label}</span>
+                <span className="max-w-[7rem] truncate">{buttonLabel ?? current?.label}</span>
                 {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
 

@@ -3,19 +3,28 @@ import {
     type ClipboardEvent,
     type DragEvent,
     type KeyboardEvent,
+    type PointerEvent,
     useCallback,
+    useEffect,
     useRef,
     useState,
 } from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
 import {useChatStore} from '../../../stores/useChatStore';
+import type {ChatAttachment} from '../../../types/chat';
 import {ContextBar} from './ContextBar';
 import {ButtonArea} from './ButtonArea';
 import {CompletionMenu} from './CompletionMenu';
 import {PromptEnhancerDialog} from './PromptEnhancerDialog';
 import {useCompletions} from './useCompletions';
 import {type ChatProviderId, contextWindowFor} from './constants';
+import {
+    clampComposerHeight,
+    COMPOSER_MAX_HEIGHT,
+    COMPOSER_MIN_HEIGHT,
+    getComposerHeightFromDrag,
+} from '../../../utils/chatUiBehavior';
 
 interface ChatComposerProps {
     /** 当前 provider 对应 SDK 是否缺失（缺失时拦截发送，提示安装） */
@@ -23,6 +32,73 @@ interface ChatComposerProps {
     onSdkMissing: () => void;
     /** 工作目录（@ 文件补全用） */
     cwd?: string;
+}
+
+type FileWithPath = File & {
+    path?: string;
+};
+
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+]);
+
+const IMAGE_EXTENSION_MEDIA_TYPES: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+    gif: 'image/gif',
+};
+
+function inferImageMediaType(file: File): string | null {
+    if (SUPPORTED_IMAGE_MEDIA_TYPES.has(file.type)) {
+        return file.type;
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    return extension ? IMAGE_EXTENSION_MEDIA_TYPES[extension] ?? null : null;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                resolve(reader.result);
+            } else {
+                reject(new Error('Unsupported file reader result'));
+            }
+        };
+        reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function buildImageAttachment(file: File): Promise<ChatAttachment | null> {
+    const mediaType = inferImageMediaType(file);
+    if (!mediaType) {
+        return null;
+    }
+
+    const dataUrl = await readFileAsDataUrl(file);
+    const [, data = ''] = dataUrl.split(',', 2);
+    if (!data) return null;
+
+    const fileWithPath = file as FileWithPath;
+    return {
+        fileName: file.name || 'image',
+        mediaType,
+        data,
+        path: fileWithPath.path,
+        size: file.size,
+    };
+}
+
+function fileDisplayName(name: string): string {
+    return name.split(/[/\\]/).pop() || name;
 }
 
 /**
@@ -52,8 +128,12 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const composingRef = useRef(false);
     const draftHistoryRef = useRef<string[]>([]);
     const historyCursorRef = useRef<number | null>(null);
-    const [activeFile, setActiveFile] = useState<string | undefined>();
+    const resizeCleanupRef = useRef<(() => void) | null>(null);
+    const manualResizeRef = useRef(false);
+    const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
     const [isDraggingFile, setIsDraggingFile] = useState(false);
+    const [isResizingComposer, setIsResizingComposer] = useState(false);
+    const [textareaHeight, setTextareaHeight] = useState(COMPOSER_MIN_HEIGHT);
     const [statusPanelExpanded, setStatusPanelExpanded] = useState(true);
 
     // Prompt 增强弹窗状态
@@ -68,45 +148,102 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const percentage = maxTokens > 0 ? (contextTokens / maxTokens) * 100 : 0;
 
     // 自适应高度
-    const autosize = useCallback(() => {
+    const applyTextareaHeight = useCallback((height: number) => {
+        const nextHeight = clampComposerHeight(height);
+        setTextareaHeight(nextHeight);
+        const el = textareaRef.current;
+        if (el) {
+            el.style.height = `${nextHeight}px`;
+        }
+    }, []);
+
+    const autosize = useCallback((preferredHeight = textareaHeight) => {
         const el = textareaRef.current;
         if (!el) return;
         el.style.height = 'auto';
-        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+        applyTextareaHeight(Math.max(el.scrollHeight, preferredHeight));
+    }, [applyTextareaHeight, textareaHeight]);
+
+    useEffect(() => () => {
+        resizeCleanupRef.current?.();
     }, []);
+
+    const handleResizePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        const startClientY = event.clientY;
+        const startHeight = textareaHeight;
+        const previousCursor = document.body.style.cursor;
+        const previousUserSelect = document.body.style.userSelect;
+
+        resizeCleanupRef.current?.();
+        setIsResizingComposer(true);
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+
+        const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+            moveEvent.preventDefault();
+            const nextHeight = getComposerHeightFromDrag(
+                startHeight,
+                startClientY,
+                moveEvent.clientY,
+            );
+            manualResizeRef.current = true;
+            applyTextareaHeight(nextHeight);
+        };
+
+        const cleanup = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', cleanup);
+            window.removeEventListener('pointercancel', cleanup);
+            document.body.style.cursor = previousCursor;
+            document.body.style.userSelect = previousUserSelect;
+            setIsResizingComposer(false);
+            resizeCleanupRef.current = null;
+        };
+
+        resizeCleanupRef.current = cleanup;
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', cleanup, {once: true});
+        window.addEventListener('pointercancel', cleanup, {once: true});
+    };
 
     const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
         const value = e.target.value;
         setDraft(value);
         completions.onTextChange(value, e.target.selectionStart ?? value.length);
-        requestAnimationFrame(autosize);
+        requestAnimationFrame(() => autosize());
     };
 
     const handleSend = async () => {
         const text = draft.trim();
-        if (!text || isStreaming) return;
+        if ((!text && attachments.length === 0) || isStreaming) return;
         if (sdkMissing) {
             onSdkMissing();
             return;
         }
-        // 把文件上下文作为前缀附加（@file 简化版）
-        const finalText = activeFile ? `@${activeFile}\n${text}` : text;
+        const sendingAttachments = attachments;
+        const attachmentLines = sendingAttachments.map((attachment) => (
+            t('chat.imageAttachment', {name: fileDisplayName(attachment.fileName)})
+        ));
+        const displayText = attachmentLines.length > 0
+            ? [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
+            : text;
 
         // 先清空 UI（立即生效）
-        setActiveFile(undefined);
-        if (draftHistoryRef.current[draftHistoryRef.current.length - 1] !== text) {
+        setAttachments([]);
+        if (text && draftHistoryRef.current[draftHistoryRef.current.length - 1] !== text) {
             draftHistoryRef.current = [...draftHistoryRef.current.slice(-49), text];
         }
         historyCursorRef.current = null;
 
         // 发送消息（store 内部会清空 draft）
-        await send(finalText, { cwd });
+        await send(text, { cwd, attachments: sendingAttachments, displayText });
 
         // 确保 textarea 高度重置
         requestAnimationFrame(() => {
             const el = textareaRef.current;
             if (el) {
-                el.style.height = 'auto';
+                autosize(manualResizeRef.current ? textareaHeight : COMPOSER_MIN_HEIGHT);
                 el.focus();
             }
         });
@@ -184,15 +321,22 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         }
     };
 
-    const handleAddAttachment = (files: FileList) => {
-        // 简化版：取第一个文件名作为文件上下文芯片。
-        const first = files[0];
-        if (first) setActiveFile(first.name);
+    const handleAddAttachment = async (files: FileList) => {
+        const imageFiles = Array.from(files).filter((file) => inferImageMediaType(file) !== null);
+        if (imageFiles.length === 0) return;
+
+        const nextAttachments = (await Promise.all(
+            imageFiles.map((file) => buildImageAttachment(file).catch(() => null)),
+        )).filter((attachment): attachment is ChatAttachment => attachment !== null);
+
+        if (nextAttachments.length > 0) {
+            setAttachments((current) => [...current, ...nextAttachments]);
+        }
     };
 
     const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
         if (e.clipboardData.files.length > 0) {
-            handleAddAttachment(e.clipboardData.files);
+            void handleAddAttachment(e.clipboardData.files);
         }
     };
 
@@ -222,7 +366,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
 
         e.preventDefault();
         setIsDraggingFile(false);
-        handleAddAttachment(e.dataTransfer.files);
+        void handleAddAttachment(e.dataTransfer.files);
         textareaRef.current?.focus();
     };
 
@@ -251,112 +395,132 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const applyEnhanced = () => {
         if (enhancedText) {
             setDraft(enhancedText);
-            requestAnimationFrame(autosize);
+            requestAnimationFrame(() => autosize());
         }
         setEnhancerOpen(false);
     };
 
     return (
-        <div className="border-t border-base-300 px-3 py-2">
-            {/* 顶部上下文栏 */}
-            <ContextBar
-                activeFile={activeFile}
-                percentage={percentage}
-                usedTokens={contextTokens}
-                maxTokens={maxTokens}
-                onClearFile={() => setActiveFile(undefined)}
-                onAddAttachment={handleAddAttachment}
-                statusPanelExpanded={statusPanelExpanded}
-                onToggleStatusPanel={() => setStatusPanelExpanded((v) => !v)}
-            />
-
-            {/* 输入框 + 补全菜单 */}
-            <div
-                className={`relative rounded-lg transition-colors ${
-                    isDraggingFile ? 'bg-primary/5 ring-2 ring-primary/30' : ''
-                }`}
-                onDragEnter={handleDragEnter}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-            >
-                {completions.isOpen && (
-                    <CompletionMenu
-                        items={completions.items}
-                        activeIndex={completions.activeIndex}
-                        loading={completions.loading}
-                        emptyText={t('chat.completion.empty')}
-                        onSelect={(i) => {
-                            const el = textareaRef.current;
-                            if (!el) return;
-                            const result = completions.applySelection(i, el.value);
-                            if (result) {
-                                setDraft(result.text);
-                                requestAnimationFrame(() => {
-                                    el.focus();
-                                    el.setSelectionRange(result.caret, result.caret);
-                                    autosize();
-                                });
-                            }
-                        }}
-                        onHover={completions.setActiveIndex}
-                    />
-                )}
-                <textarea
-                    ref={textareaRef}
-                    className="textarea textarea-bordered w-full resize-none min-h-[52px] max-h-[200px] leading-relaxed"
-                    rows={2}
-                    placeholder={t('chat.richPlaceholder')}
-                    value={draft}
-                    onChange={handleChange}
-                    onCompositionStart={() => {
-                        composingRef.current = true;
+        <div className="bg-base-200/20 px-3 pb-4 pt-2 sm:px-5">
+            <div className="mx-auto w-full max-w-2xl rounded-xl border border-base-300 bg-base-100/95 p-2 shadow-lg shadow-base-300/30 backdrop-blur">
+                {/* 顶部上下文栏 */}
+                <ContextBar
+                    attachments={attachments}
+                    percentage={percentage}
+                    usedTokens={contextTokens}
+                    maxTokens={maxTokens}
+                    onRemoveAttachment={(index) => {
+                        setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
                     }}
-                    onCompositionEnd={() => {
-                        composingRef.current = false;
-                    }}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
+                    onAddAttachment={handleAddAttachment}
+                    statusPanelExpanded={statusPanelExpanded}
+                    onToggleStatusPanel={() => setStatusPanelExpanded((v) => !v)}
                 />
-                {isDraggingFile && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-dashed border-primary bg-primary/10 text-xs font-medium text-primary backdrop-blur-[1px]">
-                        {t('chat.dropFileHint')}
-                    </div>
-                )}
-                {!draft.trim() && draftHistoryRef.current.length > 0 && !isDraggingFile && (
-                    <div className="mt-1 px-1 text-[11px] text-base-content/35">
-                        {t('chat.historyHint')}
-                    </div>
-                )}
+
+                {/* 输入框 + 补全菜单 */}
+                <div
+                    className={`relative rounded-lg transition-colors ${
+                        isDraggingFile ? 'bg-primary/5 ring-2 ring-primary/30' : ''
+                    }`}
+                    onDragEnter={handleDragEnter}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                >
+                    {completions.isOpen && (
+                        <CompletionMenu
+                            items={completions.items}
+                            activeIndex={completions.activeIndex}
+                            loading={completions.loading}
+                            emptyText={t('chat.completion.empty')}
+                            onSelect={(i) => {
+                                const el = textareaRef.current;
+                                if (!el) return;
+                                const result = completions.applySelection(i, el.value);
+                                if (result) {
+                                    setDraft(result.text);
+                                    requestAnimationFrame(() => {
+                                        el.focus();
+                                        el.setSelectionRange(result.caret, result.caret);
+                                        autosize();
+                                    });
+                                }
+                            }}
+                            onHover={completions.setActiveIndex}
+                        />
+                    )}
+                    <button
+                        type="button"
+                        className={`absolute left-1/2 top-0 z-10 flex h-5 w-20 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-full text-base-content/35 transition-colors hover:bg-base-200 hover:text-base-content/60 focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+                            isResizingComposer ? 'bg-base-200 text-primary' : ''
+                        }`}
+                        title={t('chat.resizeComposer')}
+                        aria-label={t('chat.resizeComposer')}
+                        onPointerDown={handleResizePointerDown}
+                    >
+                        <span className="h-1 w-10 rounded-full bg-current" />
+                    </button>
+                    <textarea
+                        ref={textareaRef}
+                        className="textarea textarea-bordered min-h-[36px] w-full resize-none overflow-y-auto py-1.5 text-sm leading-5"
+                        rows={1}
+                        placeholder={t('chat.richPlaceholder')}
+                        value={draft}
+                        style={{
+                            height: `${textareaHeight}px`,
+                            maxHeight: `${COMPOSER_MAX_HEIGHT}px`,
+                        }}
+                        onChange={handleChange}
+                        onCompositionStart={() => {
+                            composingRef.current = true;
+                        }}
+                        onCompositionEnd={() => {
+                            composingRef.current = false;
+                        }}
+                        onKeyDown={handleKeyDown}
+                        onPaste={handlePaste}
+                    />
+                    {isDraggingFile && (
+                        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-dashed border-primary bg-primary/10 text-xs font-medium text-primary backdrop-blur-[1px]">
+                            {t('chat.dropFileHint')}
+                        </div>
+                    )}
+                    {!draft.trim() && draftHistoryRef.current.length > 0 && !isDraggingFile && (
+                        <div className="mt-1 px-1 text-[11px] text-base-content/35">
+                            {t('chat.historyHint')}
+                        </div>
+                    )}
+                </div>
+
+                {/* 底部控制工具栏 */}
+                <ButtonArea
+                    provider={provider as ChatProviderId}
+                    permissionMode={permissionMode}
+                    model={model}
+                    reasoningEffort={reasoningEffort}
+                    isLoading={isStreaming}
+                    isEnhancing={enhancing}
+                    canSubmit={draft.trim().length > 0 || attachments.length > 0}
+                    hasPromptText={draft.trim().length > 0}
+                    onProviderChange={(p) => setProvider(p)}
+                    onModeChange={setPermissionMode}
+                    onModelChange={setModel}
+                    onReasoningChange={setReasoningEffort}
+                    onEnhance={handleEnhance}
+                    onSubmit={handleSend}
+                    onStop={abort}
+                />
+
+                <PromptEnhancerDialog
+                    isOpen={enhancerOpen}
+                    isLoading={enhancing}
+                    originalPrompt={draft}
+                    enhancedPrompt={enhancedText}
+                    onUseEnhanced={applyEnhanced}
+                    onKeepOriginal={() => setEnhancerOpen(false)}
+                    onClose={() => setEnhancerOpen(false)}
+                />
             </div>
-
-            {/* 底部控制工具栏 */}
-            <ButtonArea
-                provider={provider as ChatProviderId}
-                permissionMode={permissionMode}
-                model={model}
-                reasoningEffort={reasoningEffort}
-                isLoading={isStreaming}
-                isEnhancing={enhancing}
-                hasInputContent={draft.trim().length > 0}
-                onProviderChange={(p) => setProvider(p)}
-                onModeChange={setPermissionMode}
-                onModelChange={setModel}
-                onReasoningChange={setReasoningEffort}
-                onEnhance={handleEnhance}
-                onSubmit={handleSend}
-                onStop={abort}
-            />
-
-            <PromptEnhancerDialog
-                isOpen={enhancerOpen}
-                isLoading={enhancing}
-                originalPrompt={draft}
-                enhancedPrompt={enhancedText}
-                onUseEnhanced={applyEnhanced}
-                onKeepOriginal={() => setEnhancerOpen(false)}
-                onClose={() => setEnhancerOpen(false)}
-            />
         </div>
     );
 }

@@ -130,6 +130,20 @@ Goal: define the next focused task for cc-gui-like input interaction.
 - [x] Implement IME-safe submit guard in `ChatComposer`.
 - [x] Implement session-local draft history navigation with ArrowUp/ArrowDown.
 - [x] Implement paste/drop file context handling with visible drop feedback.
+- [x] Replace fake `@filename` attachment prompts with real image attachment payloads.
+  - [x] Read PNG/JPEG/WebP/GIF files from paste/drop/file picker into `ChatAttachment`.
+  - [x] Keep Tauri local file paths when the WebView exposes them.
+  - [x] Allow attachment-only sends with a provider-safe fallback prompt.
+  - [x] Route Claude images through `sendWithAttachments`.
+  - [x] Route Codex local paths through SDK `local_image`, and persist Codex base64 images in the bridge before sending.
+- [x] Compact the composer default layout.
+  - [x] Remove empty file-context placeholder text from the top context bar.
+  - [x] Make the textarea default to one row and cap growth at a lower max height.
+  - [x] Keep toolbar controls on a single compact row at desktop widths.
+  - [x] Keep the composer inside the central conversation column and center it with a bounded max width so it does not span across the session sidebar/status panel.
+  - [x] Add a visible resize handle and make drag resize the textarea's actual rendered height, not only its max height.
+- [x] Replace click-only reveal-earlier flow with scroll-top auto paging that preserves viewport position after older messages are prepended.
+- [x] Extend edit tool summaries with per-file `+/-` counts and hover diff previews backed by shared structured preview lines.
 - [x] Fix `@` workspace file completion payload normalization so Rust `rel_path` / `is_dir` does not render undefined candidates.
 - [x] Change `!` Prompt preset completion to insert preset content instead of only the preset name.
 - [x] Add first-pass Chat session management sidebar.
@@ -188,6 +202,10 @@ Latest validation notes:
 - [x] `git diff --check` - no whitespace errors; only Windows LF-to-CRLF warnings.
 - [x] Browser smoke check at `http://127.0.0.1:5173/#/chat` - chat page renders, session sidebar/input/status are visible, `@` input does not render `undefined`, no browser console errors observed.
 - [x] Browser layout smoke check after sidebar split - project/session panes render as separate scroll sections; plain Vite browser cannot load real Tauri session data and logs expected `invoke` runtime errors outside the desktop shell.
+- [x] Assistant message flow visual pass - `MessageItem` now keeps user messages as compact right-aligned bubbles while assistant messages render in a transparent transcript flow; Markdown heading sizes are capped in user bubbles, and thinking/tool blocks are visually reduced inside assistant flow.
+- [x] `npm run build` after assistant flow visual pass - TypeScript and Vite production build passed.
+- [x] Composer/image attachment pass - `npm test -- src/stores/useChatStore.test.ts` passed 8 tests; `npm run build` passed; direct Node bridge verification confirmed Codex base64 images persist to a temp file and become `local_image`.
+- [x] Composer resize + edit hover diff + history autoload pass - `npm test -- src/utils/chatUiBehavior.test.ts src/utils/toolPresentation.test.ts` passed 13 tests; `npm run build` passed; browser smoke on `http://127.0.0.1:5173/#/chat` confirmed the resize handle renders, textarea height grows from `44px` to `134px` on drag, and no horizontal overflow appears in the centered layout.
 - [ ] Desktop Tauri verification with real session data - still needed for selecting an existing session and continuing a message against the daemon.
 
 ## Rollback notes

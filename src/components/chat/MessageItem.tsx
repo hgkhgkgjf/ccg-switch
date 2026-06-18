@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {AlertTriangle, Bot, Check, Copy, User} from 'lucide-react';
+import {AlertTriangle, Check, Copy, User} from 'lucide-react';
 import type {ChatMessage, ContentBlock, TextBlock, ThinkingBlock} from '../../types/chat';
 import {cn} from '../../utils/cn';
 import {findToolResult, getRenderableContentBlocks, shouldRenderChatMessage,} from '../../utils/chatMessageFlow';
@@ -109,88 +109,155 @@ export default function MessageItem({
         }
     };
 
+    const canCopy = copyText.trim().length > 0;
+
+    const copyButton = (
+        <button
+            type="button"
+            className={cn(
+                'btn btn-ghost btn-xs min-h-0 h-7 px-2 transition-opacity',
+                isAssistant
+                    ? 'absolute right-1 top-1 opacity-0 group-hover:opacity-100 focus:opacity-100'
+                    : 'opacity-70 hover:opacity-100 focus:opacity-100',
+                copied && 'opacity-100 text-success',
+            )}
+            title={copied ? t('chat.message.copied') : t('chat.message.copy')}
+            aria-label={copied ? t('chat.message.copied') : t('chat.message.copy')}
+            onClick={handleCopy}
+            disabled={!canCopy}
+        >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <span className="hidden sm:inline">{copied ? t('chat.message.copied') : t('chat.message.copy')}</span>
+        </button>
+    );
+
+    const messageContent = (
+        <div
+            className={cn(
+                'min-w-0 text-sm font-normal leading-relaxed text-base-content',
+                isAssistant ? 'assistant-message-content space-y-1.5 pr-9' : 'space-y-2',
+                isUser && 'user-message-content',
+            )}
+        >
+            {hasBlocks ? (
+                <ContentBlockRenderer
+                    blocks={blocks}
+                    findToolResult={(toolId) => findToolResult(messages, toolId, messageIndex)}
+                    expandThinkingBlockIndex={expandedThinkingBlockIndex}
+                    compact={isAssistant}
+                />
+            ) : message.content ? (
+                <MarkdownBlock content={message.content} isStreaming={message.streaming} />
+            ) : isEmptyStreamingPlaceholder ? (
+                <StreamingPlaceholder />
+            ) : isUser ? (
+                <span className="italic text-base-content/40">{t('chat.message.emptyUser')}</span>
+            ) : null}
+
+            {message.error && (
+                <div className="flex items-start gap-2 rounded-lg border border-error/20 bg-error/10 px-3 py-2 text-sm text-error">
+                    <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                    <span>{message.error}</span>
+                </div>
+            )}
+        </div>
+    );
+
+    if (isUser) {
+        return (
+            <article
+                className={cn(
+                    'chat-message-row user-message-row group mx-auto flex w-full max-w-4xl justify-end px-3 py-2',
+                    isSearchMatch && 'rounded-lg bg-primary/5 ring-1 ring-primary/15',
+                )}
+            >
+                <div
+                    className={cn(
+                        'user-message-bubble max-w-[78%] rounded-2xl rounded-br-md border border-orange-100 bg-orange-50/75 px-3.5 py-2.5 shadow-sm sm:max-w-[760px]',
+                        'dark:border-orange-500/20 dark:bg-orange-500/10',
+                        message.error && 'border-error/30 bg-error/5 dark:border-error/40 dark:bg-error/10',
+                    )}
+                >
+                    <header className="mb-1.5 flex items-center justify-between gap-2 text-xs text-base-content/50">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-orange-500 text-white shadow-sm">
+                                <User size={12} />
+                            </span>
+                            <span className="font-medium text-base-content/65">{roleLabel}</span>
+                            <span>{time}</span>
+                        </div>
+                        {copyButton}
+                    </header>
+
+                    {messageContent}
+
+                    {message.error && (
+                        <footer className="mt-2">
+                            <MessageMeta durationMs={message.durationMs} usage={message.usage} />
+                        </footer>
+                    )}
+                </div>
+            </article>
+        );
+    }
+
+    if (isAssistant) {
+        return (
+            <article
+                className={cn(
+                    'chat-message-row assistant-message-flow group relative mx-auto w-full max-w-4xl px-4 py-2.5 transition-colors',
+                    isSearchMatch && 'rounded-lg bg-primary/5 ring-1 ring-primary/15',
+                    message.error && 'rounded-lg bg-error/5 ring-1 ring-error/20',
+                )}
+            >
+                {canCopy && copyButton}
+
+                {message.streaming && (
+                    <div className="mb-1 inline-flex items-center gap-1.5 text-xs text-success/75">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success/80" />
+                        {t('chat.message.streamingConnected')}
+                    </div>
+                )}
+
+                {messageContent}
+
+                {!message.streaming && (
+                    <footer className="assistant-message-meta mt-1">
+                        <MessageMeta durationMs={message.durationMs} usage={message.usage} compact />
+                    </footer>
+                )}
+            </article>
+        );
+    }
+
     return (
         <article
             className={cn(
-                'group relative mx-auto w-full max-w-4xl overflow-hidden rounded-xl border px-4 py-3 pl-5 shadow-sm transition-all hover:border-base-content/20 hover:shadow-md',
-                isUser
-                    ? 'border-orange-100 bg-orange-50/60 dark:border-orange-500/20 dark:bg-orange-500/10'
-                    : 'border-gray-100 bg-white/95 dark:border-base-200 dark:bg-base-100/95',
+                'chat-message-row group relative mx-auto w-full max-w-4xl overflow-hidden rounded-xl border border-gray-100 bg-white/95 px-4 py-3 pl-5 shadow-sm transition-all hover:border-base-content/20 hover:shadow-md',
+                'dark:border-base-200 dark:bg-base-100/95',
                 isSearchMatch && 'border-primary/35 bg-primary/5 shadow-md ring-1 ring-primary/15',
                 message.error && 'border-error/30 bg-error/5 dark:border-error/40 dark:bg-error/10',
             )}
         >
             <div
                 className={cn(
-                    'absolute inset-y-0 left-0 w-1',
-                    isUser ? 'bg-orange-400/70' : 'bg-base-content/10',
+                    'absolute inset-y-0 left-0 w-1 bg-base-content/10',
                     message.error && 'bg-error/70',
                 )}
             />
 
             <header className="mb-2 flex items-start justify-between gap-3 text-xs text-base-content/50">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span
-                        className={cn(
-                            'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full shadow-sm',
-                            isUser
-                                ? 'bg-orange-500 text-white'
-                                : 'bg-base-200 text-base-content/70 dark:bg-base-300',
-                        )}
-                    >
-                        {isUser ? <User size={14} /> : <Bot size={14} />}
-                    </span>
                     <span className="font-medium text-base-content/70">{roleLabel}</span>
                     <span>{time}</span>
-                    {isAssistant && message.streaming && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
-                            {t('chat.message.streamingConnected')}
-                        </span>
-                    )}
                 </div>
 
-                <button
-                    type="button"
-                    className={cn(
-                        'btn btn-ghost btn-xs min-h-0 h-7 px-2 opacity-0 transition-opacity',
-                        'group-hover:opacity-100 focus:opacity-100',
-                        copied && 'opacity-100 text-success',
-                    )}
-                    title={copied ? t('chat.message.copied') : t('chat.message.copy')}
-                    aria-label={copied ? t('chat.message.copied') : t('chat.message.copy')}
-                    onClick={handleCopy}
-                    disabled={!copyText.trim()}
-                >
-                    {copied ? <Check size={14} /> : <Copy size={14} />}
-                    <span className="hidden sm:inline">{copied ? t('chat.message.copied') : t('chat.message.copy')}</span>
-                </button>
+                {canCopy && copyButton}
             </header>
 
-            <div className="min-w-0 space-y-2 text-sm leading-relaxed text-base-content">
-                {hasBlocks ? (
-                    <ContentBlockRenderer
-                        blocks={blocks}
-                        findToolResult={(toolId) => findToolResult(messages, toolId, messageIndex)}
-                        expandThinkingBlockIndex={expandedThinkingBlockIndex}
-                    />
-                ) : message.content ? (
-                    <MarkdownBlock content={message.content} isStreaming={message.streaming} />
-                ) : isEmptyStreamingPlaceholder ? (
-                    <StreamingPlaceholder />
-                ) : isUser ? (
-                    <span className="italic text-base-content/40">{t('chat.message.emptyUser')}</span>
-                ) : null}
+            {messageContent}
 
-                {message.error && (
-                    <div className="flex items-start gap-2 rounded-lg border border-error/20 bg-error/10 px-3 py-2 text-sm text-error">
-                        <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
-                        <span>{message.error}</span>
-                    </div>
-                )}
-            </div>
-
-            {isAssistant && !message.streaming && (
+            {!message.streaming && (
                 <footer className="mt-2">
                     <MessageMeta durationMs={message.durationMs} usage={message.usage} />
                 </footer>

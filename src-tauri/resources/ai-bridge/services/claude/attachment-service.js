@@ -4,11 +4,11 @@
  */
 
 import fs from 'fs';
-import { mkdir, writeFile, readdir, stat as statAsync, unlink } from 'fs/promises';
+import {mkdir, readdir, stat as statAsync, unlink, writeFile} from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { modelSupportsVision } from '../../utils/model-utils.js';
+import {modelSupportsVision} from '../../utils/model-utils.js';
 
 // Image temp directory shared across the daemon's lifetime.
 const TEMP_IMAGE_SUBDIR = 'cc-gui-images';
@@ -119,7 +119,7 @@ export async function loadAttachments(stdinData) {
  * @param {string} fileName - Original file name (optional)
  * @returns {string|null} Absolute path to the saved file, or null on failure
  */
-async function saveImageToTemp(base64Data, mediaType, fileName) {
+export async function saveImageToTemp(base64Data, mediaType, fileName) {
   try {
     if (!base64Data || typeof base64Data !== 'string') {
       return null;

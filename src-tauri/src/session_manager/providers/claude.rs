@@ -3,9 +3,12 @@ use super::utils::{
     sanitize_session_text, truncate_text,
 };
 use crate::session_manager::{SessionMeta, UnifiedSessionMessage};
+use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+const TOOL_RESULT_CONTENT: &str = "[tool_result]";
 
 /// 按项目路径扫描 Claude 会话（只扫描匹配的项目目录）
 pub fn scan_claude_sessions_for_project(project_path: &str) -> Vec<SessionMeta> {
@@ -167,14 +170,17 @@ pub fn load_claude_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessa
             None => continue,
         };
 
-        let raw_text = match extract_message_text(message_content) {
-            Some(text) => text,
-            None => continue,
-        };
+        let has_structured_content = has_structured_history_content(message_content);
+        let raw_text = extract_message_text(message_content).unwrap_or_default();
         let clean_text = sanitize_session_text(&raw_text);
-        if clean_text.is_empty() {
+        if clean_text.is_empty() && !has_structured_content {
             continue;
         }
+        let content = if clean_text.is_empty() && has_tool_result_content(message_content) {
+            TOOL_RESULT_CONTENT.to_string()
+        } else {
+            clean_text
+        };
 
         let ts = json
             .get("timestamp")
@@ -183,12 +189,49 @@ pub fn load_claude_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessa
 
         messages.push(UnifiedSessionMessage {
             role: msg_type.to_string(),
-            content: clean_text,
+            content,
             ts,
+            raw: if has_structured_content { Some(json) } else { None },
         });
     }
 
     Ok(messages)
+}
+
+pub fn load_claude_subagent_messages(
+    session_id: &str,
+    source_path: &str,
+    agent_id: Option<&str>,
+    description: Option<&str>,
+) -> Result<Vec<UnifiedSessionMessage>, String> {
+    let subagents_dir = resolve_subagents_dir(source_path, session_id)
+        .ok_or_else(|| "Subagent history directory not found".to_string())?;
+    let history_file = find_subagent_history_file(&subagents_dir, agent_id, description)
+        .ok_or_else(|| "Subagent history file not found".to_string())?;
+    load_claude_messages(&history_file.to_string_lossy())
+}
+
+fn has_content_block_type(content: &serde_json::Value, target_type: &str) -> bool {
+    content
+        .as_array()
+        .map(|items| {
+            items.iter().any(|item| {
+                item.get("type")
+                    .and_then(|v| v.as_str())
+                    == Some(target_type)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_structured_history_content(content: &serde_json::Value) -> bool {
+    has_content_block_type(content, "thinking")
+        || has_content_block_type(content, "tool_use")
+        || has_content_block_type(content, "tool_result")
+}
+
+fn has_tool_result_content(content: &serde_json::Value) -> bool {
+    has_content_block_type(content, "tool_result")
 }
 
 /// 递归收集目录下所有 .jsonl 文件
@@ -211,6 +254,115 @@ fn collect_jsonl_inner(dir: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SubagentMeta {
+    #[serde(default)]
+    description: Option<String>,
+}
+
+fn resolve_subagents_dir(source_path: &str, session_id: &str) -> Option<PathBuf> {
+    let source = Path::new(source_path);
+    if source.is_file() {
+        let parent = source.parent()?;
+        let sibling = parent.join(session_id).join("subagents");
+        if sibling.is_dir() {
+            return Some(sibling);
+        }
+        let direct = parent.join("subagents");
+        if direct.is_dir() {
+            return Some(direct);
+        }
+    }
+
+    let home = home_dir()?;
+    let projects_dir = home.join(".claude").join("projects");
+    let project_dir = if source.is_file() {
+        source.parent()?.to_path_buf()
+    } else {
+        find_project_dir(&projects_dir, source_path)?
+    };
+    let candidate = project_dir.join(session_id).join("subagents");
+    if candidate.is_dir() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn read_optional_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(|entry| entry.as_str())
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn extract_agent_id_from_subagent_file(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().take(40).flatten() {
+        let json: serde_json::Value = serde_json::from_str(&line).ok()?;
+        if let Some(agent_id) = read_optional_string(&json, &["agentId", "agent_id"]) {
+            return Some(agent_id);
+        }
+    }
+    None
+}
+
+fn load_subagent_meta(meta_path: &Path) -> Option<SubagentMeta> {
+    let file = fs::File::open(meta_path).ok()?;
+    serde_json::from_reader(file).ok()
+}
+
+fn find_subagent_history_file(
+    subagents_dir: &Path,
+    agent_id: Option<&str>,
+    description: Option<&str>,
+) -> Option<PathBuf> {
+    let mut candidates = fs::read_dir(subagents_dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("agent-"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+
+    if let Some(agent_id) = agent_id.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(path) = candidates.iter().find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.contains(agent_id))
+                .unwrap_or(false)
+                || extract_agent_id_from_subagent_file(path).as_deref() == Some(agent_id)
+        }) {
+            return Some(path.clone());
+        }
+    }
+
+    if let Some(description) = description.map(str::trim).filter(|value| !value.is_empty()) {
+        let normalized = description.to_lowercase();
+        if let Some(path) = candidates.iter().find(|path| {
+            load_subagent_meta(&path.with_extension("meta.json"))
+                .and_then(|meta| meta.description)
+                .map(|value| value.trim().to_lowercase() == normalized)
+                .unwrap_or(false)
+        }) {
+            return Some(path.clone());
+        }
+    }
+
+    None
 }
 
 /// 从 .jsonl 前 20 行提取 cwd 字段
@@ -300,4 +452,125 @@ fn extract_title_and_summary(path: &Path) -> (Option<String>, Option<String>) {
     }
 
     (title, summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_temp_session(content: impl AsRef<[u8]>) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ccg-switch-claude-{suffix}.jsonl"));
+        fs::write(&path, content).expect("write temp claude session");
+        path
+    }
+
+    fn write_temp_dir() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ccg-switch-claude-dir-{suffix}"));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[test]
+    fn load_claude_messages_preserves_structured_blocks() {
+        let path = write_temp_session(
+            r#"{"type":"assistant","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"thinking","thinking":"inspect first"}]}}"#
+                .to_owned()
+                + "\n"
+                + r#"{"type":"assistant","timestamp":"2026-06-17T08:00:01.000Z","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"src/App.tsx"}}]}}"#
+                + "\n"
+                + r#"{"type":"user","timestamp":"2026-06-17T08:00:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"file contents","is_error":false}]}}"#,
+        );
+
+        let messages = load_claude_messages(&path.to_string_lossy()).expect("load messages");
+        fs::remove_file(path).ok();
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].content, "");
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["type"],
+            "thinking"
+        );
+        assert_eq!(
+            messages[1].raw.as_ref().unwrap()["message"]["content"][0]["name"],
+            "Read"
+        );
+        assert_eq!(messages[2].content, TOOL_RESULT_CONTENT);
+        assert_eq!(
+            messages[2].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"],
+            "tool-1"
+        );
+    }
+
+    #[test]
+    fn load_claude_subagent_messages_finds_file_by_agent_id() {
+        let root = write_temp_dir();
+        let parent = root.join("parent-session.jsonl");
+        fs::write(&parent, "").expect("write parent session");
+        let subagents = root.join("session-1").join("subagents");
+        fs::create_dir_all(&subagents).expect("create subagents dir");
+        let history = subagents.join("agent-a12c75a82930fb687.jsonl");
+        fs::write(
+            &history,
+            r#"{"type":"assistant","timestamp":"2026-06-17T08:00:00.000Z","agentId":"agent-a12c75a82930fb687","message":{"content":[{"type":"text","text":"subagent trace"}]}}"#,
+        )
+        .expect("write subagent history");
+
+        let messages = load_claude_subagent_messages(
+            "session-1",
+            &parent.to_string_lossy(),
+            Some("agent-a12c75a82930fb687"),
+            None,
+        )
+        .expect("load subagent messages");
+
+        fs::remove_dir_all(root).ok();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "subagent trace");
+    }
+
+    #[test]
+    fn load_claude_subagent_messages_finds_file_by_meta_description() {
+        let root = write_temp_dir();
+        let parent = root.join("parent-session.jsonl");
+        fs::write(&parent, "").expect("write parent session");
+        let subagents = root.join("session-1").join("subagents");
+        fs::create_dir_all(&subagents).expect("create subagents dir");
+        let history = subagents.join("agent-lookup.jsonl");
+        fs::write(
+            &history,
+            r#"{"type":"assistant","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"thinking","thinking":"inspect backend"}]}}"#,
+        )
+        .expect("write subagent history");
+        fs::write(
+            history.with_extension("meta.json"),
+            r#"{"description":"逆向JetBrains插件后端Java"}"#,
+        )
+        .expect("write subagent meta");
+
+        let messages = load_claude_subagent_messages(
+            "session-1",
+            &parent.to_string_lossy(),
+            None,
+            Some("逆向JetBrains插件后端Java"),
+        )
+        .expect("load subagent messages by meta");
+
+        fs::remove_dir_all(root).ok();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["type"],
+            "thinking"
+        );
+    }
 }

@@ -36,3 +36,23 @@ pub async fn get_unified_session_messages(
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn get_claude_subagent_session_messages(
+    sessionId: String,
+    sourcePath: String,
+    agentId: Option<String>,
+    description: Option<String>,
+) -> Result<Vec<UnifiedSessionMessage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::load_claude_subagent_messages(
+            &sessionId,
+            &sourcePath,
+            agentId.as_deref(),
+            description.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}

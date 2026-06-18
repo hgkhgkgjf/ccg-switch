@@ -1,9 +1,18 @@
 // SearchToolGroupBlock - 搜索工具分组块（Grep/Glob）
 
-import { useState, memo } from 'react';
-import type { ToolUseBlock, ToolResultBlock } from '../../types/chat';
-import { getGroupStatus } from '../../utils/toolGrouping';
-import { extractResultText } from '../../utils/toolPresentation';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ChevronDown, ChevronRight, Search} from 'lucide-react';
+import type {ToolResultBlock, ToolUseBlock} from '../../types/chat';
+import {getGroupStatus} from '../../utils/toolGrouping';
+import {
+    extractResultText,
+    summarizeSearchGroupHeader,
+    summarizeSearchInput,
+    summarizeSearchResultText,
+} from '../../utils/toolPresentation';
+import {openFile} from '../../utils/bridge';
+import {useChatStore} from '../../stores/useChatStore';
 import GenericToolBlock from './GenericToolBlock';
 
 export interface SearchToolGroupBlockProps {
@@ -11,45 +20,18 @@ export interface SearchToolGroupBlockProps {
   findToolResult: (toolId: string) => ToolResultBlock | null | undefined;
 }
 
-interface SearchSummary {
-  pattern: string;
-  matchCount: number;
-  fileCount: number;
-}
-
-/**
- * 简单解析搜索结果（从 result 中提取匹配数）
- */
-function parseSearchResult(result: ToolResultBlock | null | undefined): SearchSummary {
-  if (!result) {
-    return { pattern: '', matchCount: 0, fileCount: 0 };
-  }
-
-  const text = extractResultText(result);
-
-  // 尝试从文本中提取匹配数（简化版）
-  // 格式: "Found X matches in Y files"
-  const matchesMatch = text.match(/(\d+)\s+matches?/i);
-  const filesMatch = text.match(/(\d+)\s+files?/i);
-
-  const matchCount = matchesMatch ? parseInt(matchesMatch[1], 10) : 0;
-  const fileCount = filesMatch ? parseInt(filesMatch[1], 10) : 0;
-
-  return {
-    pattern: '',
-    matchCount,
-    fileCount,
-  };
-}
-
 const SearchToolGroupBlock = memo(function SearchToolGroupBlock({
   blocks,
   findToolResult,
 }: SearchToolGroupBlockProps) {
+  const { t } = useTranslation();
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
+  const currentCwd = useChatStore((state) => state.currentCwd);
 
   // 计算整体状态
   const status = getGroupStatus(blocks, findToolResult);
+  const firstPattern = summarizeSearchInput(blocks[0]?.input ?? {});
+  const summaryHint = firstPattern || t('tools.searchQuery', {count: blocks.length});
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
@@ -76,11 +58,12 @@ const SearchToolGroupBlock = memo(function SearchToolGroupBlock({
       {/* 分组标题 */}
       <div className="task-header task-group-header">
         <div className="task-title-section">
-          <span className="search-icon">🔍</span>
-          <span className="tool-title-text">Search</span>
-          <span className="tool-title-summary">
-            {blocks.length} {blocks.length === 1 ? 'query' : 'queries'}
+          <Search className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.search')}</span>
+          <span className="tool-command-chip tool-command-search">
+            {t('tools.searchFind')}
           </span>
+          {summaryHint && <span className="tool-title-summary" title={summaryHint}>{summaryHint}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
@@ -89,9 +72,15 @@ const SearchToolGroupBlock = memo(function SearchToolGroupBlock({
       <div className="task-group-list">
         {blocks.map((block, index) => {
           const result = findToolResult(block.id);
-          const pattern = (block.input.pattern as string) || (block.input.query as string) || '';
-          const summary = parseSearchResult(result);
+          const pattern = summarizeSearchInput(block.input);
+          const summary = result ? summarizeSearchResultText(extractResultText(result)) : {
+            matchCount: 0,
+            fileCount: 0,
+            files: [],
+          };
+          const header = summarizeSearchGroupHeader(block.name, pattern, summary);
           const isExpanded = expandedIndices.has(index);
+          const firstFile = summary.files[0];
 
           // 单个工具状态
           const isCompleted = result !== undefined && result !== null;
@@ -107,34 +96,71 @@ const SearchToolGroupBlock = memo(function SearchToolGroupBlock({
               >
                 <div className="task-group-item-title">
                   <span className="task-group-item-number">{index + 1}.</span>
-                  <span className="task-group-item-pattern" title={pattern}>
-                    "{pattern}"
+                  <span className="tool-command-chip tool-command-search">
+                    {block.name.toLowerCase().includes('glob') ? t('tools.searchGlob') : t('tools.searchFind')}
                   </span>
-                </div>
-                <div className="task-group-item-status">
-                  {summary.matchCount > 0 && (
-                    <span className="task-group-item-badge">
-                      {summary.matchCount} {summary.matchCount === 1 ? 'match' : 'matches'}
-                      {summary.fileCount > 0 && ` in ${summary.fileCount} ${summary.fileCount === 1 ? 'file' : 'files'}`}
+                  <span className="task-group-item-pattern" title={header.primarySummary}>
+                    {header.primarySummary || block.name}
+                  </span>
+                  {firstFile && (
+                    <button
+                      type="button"
+                      className="task-group-item-file-muted search-file-link"
+                      title={summary.files.map((file) => file.path).join('\n')}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void openFile(firstFile.path, firstFile.lineStart, undefined, currentCwd);
+                      }}
+                    >
+                      {firstFile.path}
+                    </button>
+                  )}
+                  {header.secondarySummary && (
+                    <span className="task-group-item-secondary" title={header.secondarySummary}>
+                      {header.secondarySummary}
                     </span>
                   )}
-                  <span className={`badge badge-sm ${itemStatus === 'error' ? 'badge-error' : itemStatus === 'completed' ? 'badge-success' : 'badge-warning'}`}>
-                    {itemStatus === 'error' ? 'Failed' : itemStatus === 'completed' ? 'Success' : 'Pending'}
+                </div>
+                <div className="task-group-item-status">
+                  <span className={`tool-state-pill ${itemStatus}`}>
+                    {itemStatus === 'error' ? t('tools.failed') : itemStatus === 'completed' ? t('tools.success') : t('tools.pending')}
                   </span>
-                  <span className="task-group-item-chevron">
-                    {isExpanded ? '▼' : '▶'}
-                  </span>
+                  {isExpanded
+                    ? <ChevronDown className="task-group-item-chevron-icon" aria-hidden="true" />
+                    : <ChevronRight className="task-group-item-chevron-icon" aria-hidden="true" />}
                 </div>
               </div>
 
               {/* 展开的内容 */}
               {isExpanded && (
                 <div className="task-group-item-content">
+                  {summary.files.length > 0 && (
+                    <div className="search-result-files">
+                      {summary.files.map((file) => (
+                        <button
+                          key={`${file.path}:${file.lineStart ?? ''}`}
+                          type="button"
+                          className="search-result-file-row"
+                          title={file.path}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void openFile(file.path, file.lineStart, undefined, currentCwd);
+                          }}
+                        >
+                          <span className="search-result-file-path">{file.path}</span>
+                          {file.lineStart && (
+                            <span className="search-result-file-line">L{file.lineStart}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <GenericToolBlock
                     name={block.name}
                     input={block.input}
                     result={result}
                     toolId={block.id}
+                    compact
                   />
                 </div>
               )}
@@ -146,16 +172,18 @@ const SearchToolGroupBlock = memo(function SearchToolGroupBlock({
       {/* 分组操作 */}
       <div className="task-group-actions">
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(true)}
         >
-          Expand All
+          {t('tools.expandAll')}
         </button>
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(false)}
         >
-          Collapse All
+          {t('tools.collapseAll')}
         </button>
       </div>
     </div>

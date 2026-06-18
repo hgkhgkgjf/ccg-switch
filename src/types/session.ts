@@ -1,3 +1,5 @@
+import type {MessageRaw} from './chat';
+
 export interface SessionMeta {
     providerId: 'claude' | 'codex' | 'gemini';
     sessionId: string;
@@ -14,6 +16,13 @@ export interface UnifiedSessionMessage {
     role: string;
     content: string;
     ts?: string;
+    raw?: MessageRaw | null;
+}
+
+export function getSessionSelectionKey(
+    session: Pick<SessionMeta, 'providerId' | 'sourcePath'>,
+): string {
+    return `${session.providerId}::${session.sourcePath}`;
 }
 
 export type ProviderFilter = 'all' | 'claude' | 'codex' | 'gemini';

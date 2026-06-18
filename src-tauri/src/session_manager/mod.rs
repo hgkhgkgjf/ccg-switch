@@ -27,6 +27,8 @@ pub struct UnifiedSessionMessage {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 /// 按项目路径扫描会话，合并所有 provider 并按 last_active_at 降序排序
@@ -101,4 +103,13 @@ pub fn load_messages(
         "gemini" => providers::gemini::load_gemini_messages(source_path),
         _ => Err(format!("Unknown provider: {}", provider_id)),
     }
+}
+
+pub fn load_claude_subagent_messages(
+    session_id: &str,
+    source_path: &str,
+    agent_id: Option<&str>,
+    description: Option<&str>,
+) -> Result<Vec<UnifiedSessionMessage>, String> {
+    providers::claude::load_claude_subagent_messages(session_id, source_path, agent_id, description)
 }

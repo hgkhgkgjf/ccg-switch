@@ -7,6 +7,7 @@ interface ThinkingBlockProps {
     content: string;
     defaultExpanded?: boolean;
     title?: string;
+    compact?: boolean;
 }
 
 /**
@@ -17,6 +18,7 @@ export default function ThinkingBlock({
     content,
     defaultExpanded = false,
     title,
+    compact = false,
 }: ThinkingBlockProps) {
     const { t } = useTranslation();
     const panelId = useId();
@@ -35,20 +37,26 @@ export default function ThinkingBlock({
     };
 
     return (
-        <div className="thinking-block my-2 rounded-lg border border-base-300 bg-base-200/30">
+        <div
+            className={compact
+                ? 'thinking-block my-1.5 rounded-md border border-base-300/70 bg-base-200/20'
+                : 'thinking-block my-2 rounded-lg border border-base-300 bg-base-200/30'}
+        >
             <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg p-3 text-left transition-colors hover:bg-base-200/50"
+                className={compact
+                    ? 'flex w-full items-center gap-1.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-base-200/40'
+                    : 'flex w-full items-center gap-2 rounded-lg p-3 text-left transition-colors hover:bg-base-200/50'}
                 onClick={handleToggle}
                 aria-expanded={expanded}
                 aria-controls={panelId}
             >
-                <MessageCircle size={16} className="text-base-content/60 flex-shrink-0" />
-                <span className="text-sm text-base-content/70 flex-1">
+                <MessageCircle size={compact ? 14 : 16} className="text-base-content/60 flex-shrink-0" />
+                <span className={compact ? 'flex-1 text-[11.5px] text-base-content/65' : 'flex-1 text-sm text-base-content/70'}>
                     {title ?? t('chat.thinking.title')}
                 </span>
                 <ChevronDown
-                    size={16}
+                    size={compact ? 14 : 16}
                     className={`text-base-content/60 transition-transform duration-200 flex-shrink-0 ${
                         expanded ? 'rotate-180' : ''
                     }`}
@@ -56,7 +64,12 @@ export default function ThinkingBlock({
             </button>
 
             {expanded && (
-                <div id={panelId} className="border-t border-base-300 px-3 pb-3 pt-1 animate-fadeIn">
+                <div
+                    id={panelId}
+                    className={compact
+                        ? 'border-t border-base-300/70 px-2.5 pb-2.5 pt-1 animate-fadeIn'
+                        : 'border-t border-base-300 px-3 pb-3 pt-1 animate-fadeIn'}
+                >
                     <MarkdownBlock content={content} />
                 </div>
             )}

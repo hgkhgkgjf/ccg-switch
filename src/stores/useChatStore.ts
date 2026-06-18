@@ -2,6 +2,7 @@ import {create} from 'zustand';
 import {invoke} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import {
+    ChatAttachment,
     ChatDaemonEvent,
     ChatDoneEvent,
     ChatMessage,
@@ -11,7 +12,7 @@ import {
     MessageRaw,
     TokenUsage,
 } from '../types/chat';
-import type {SessionMeta, UnifiedSessionMessage} from '../types/session';
+import {getSessionSelectionKey, type SessionMeta, type UnifiedSessionMessage} from '../types/session';
 import {AskUserQuestionRequest, PlanApprovalRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
 import {CLAUDE_MODELS, CODEX_MODELS, reasoningLevelsFor,} from '../components/chat/composer/constants';
@@ -22,6 +23,7 @@ const MODEL_KEY_PREFIX = 'ccg-chat-model:';
 const REASONING_KEY = 'ccg-chat-reasoning';
 const HANDOFF_CONTEXT_MAX_MESSAGES = 24;
 const HANDOFF_CONTEXT_MAX_CHARS = 12_000;
+const ATTACHMENT_ONLY_MESSAGE = 'Please analyze the attached image(s).';
 
 function loadDraft(provider: ChatProviderId): string {
     try {
@@ -81,6 +83,8 @@ interface ChatState {
     currentCwd: string | null;
     /** 当前从历史中载入的会话元信息 */
     activeSession: SessionMeta | null;
+    /** 当前正在切换/加载中的历史会话 key */
+    pendingSessionKey: string | null;
     /** provider 切换后，下一次无原生 session 的发送需要携带的历史来源 */
     handoffContextProvider: ChatProvider | null;
     /** 事件监听器是否已注册 */
@@ -101,7 +105,12 @@ interface ChatState {
     setModel: (id: string) => void;
     setReasoningEffort: (e: ReasoningEffort) => void;
     setDraft: (text: string) => void;
-    send: (text: string, opts?: { cwd?: string; model?: string }) => Promise<void>;
+    send: (text: string, opts?: {
+        cwd?: string;
+        model?: string;
+        attachments?: ChatAttachment[];
+        displayText?: string;
+    }) => Promise<void>;
     loadSession: (session: SessionMeta) => Promise<void>;
     startNewSession: (cwd?: string | null) => Promise<void>;
     abort: () => Promise<void>;
@@ -111,6 +120,7 @@ interface ChatState {
 }
 
 let unlisteners: UnlistenFn[] = [];
+let latestSessionLoadToken = 0;
 
 function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -165,6 +175,7 @@ function mapHistoryMessage(
         id: `history-${session.providerId}-${session.sessionId}-${index}`,
         role: normalizeHistoryRole(message.role),
         content: message.content,
+        raw: message.raw ?? undefined,
         createdAt,
     };
 }
@@ -243,6 +254,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     sessionId: null,
     currentCwd: null,
     activeSession: null,
+    pendingSessionKey: null,
     handoffContextProvider: null,
     initialized: false,
     error: null,
@@ -393,9 +405,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     setProvider: (p) => {
         const currentProvider = get().provider;
+        latestSessionLoadToken += 1;
         // 如果 provider 没有变化，不重新加载草稿
         if (currentProvider === p) {
-            set({ provider: p });
+            set({ provider: p, pendingSessionKey: null });
             return;
         }
 
@@ -409,6 +422,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             draft: loadDraft(provider),
             sessionId: null,
             activeSession: null,
+            pendingSessionKey: null,
             handoffContextProvider: state.messages.some(hasHandoffContent) ? currentProvider : null,
             reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
                 ? state.reasoningEffort
@@ -454,23 +468,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     send: async (text, opts) => {
         const trimmed = text.trim();
-        if (!trimmed) return;
+        const attachments = opts?.attachments?.filter((attachment) => (
+            attachment.fileName.trim().length > 0
+        )) ?? [];
+        const hasAttachments = attachments.length > 0;
+        if (!trimmed && !hasAttachments) return;
+        const messageText = trimmed || ATTACHMENT_ONLY_MESSAGE;
         const stateBeforeSend = get();
         const outboundMessage = stateBeforeSend.handoffContextProvider
             && stateBeforeSend.handoffContextProvider !== stateBeforeSend.provider
             && !stateBeforeSend.sessionId
             ? buildProviderHandoffMessage(
-                trimmed,
+                messageText,
                 stateBeforeSend.messages,
                 stateBeforeSend.handoffContextProvider,
                 stateBeforeSend.provider,
             )
-            : trimmed;
+            : messageText;
+        const displayText = opts?.displayText?.trim() || messageText;
 
         const userMsg: ChatMessage = {
             id: newId(),
             role: 'user',
-            content: trimmed,
+            content: displayText,
             createdAt: Date.now(),
         };
         const assistantMsg: ChatMessage = {
@@ -504,10 +524,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
             streaming: true,
         };
 
+        if (hasAttachments) {
+            params.attachments = provider === 'codex'
+                ? attachments.map((attachment) => (
+                    attachment.path
+                        ? { type: 'local_image', path: attachment.path }
+                        : attachment
+                ))
+                : attachments;
+        }
+
         try {
             const requestId = await invoke<string>('chat_send', {
                 provider,
-                command: 'send',
+                command: provider === 'claude' && hasAttachments ? 'sendWithAttachments' : 'send',
                 params,
             });
             set({ activeRequestId: requestId });
@@ -529,12 +559,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
         }
 
+        const pendingSessionKey = getSessionSelectionKey(session);
+        const loadToken = ++latestSessionLoadToken;
+        set({
+            pendingSessionKey,
+            error: null,
+        });
+
         try {
             await abortActiveRequestIfNeeded(get, set);
             const history = await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
                 providerId: session.providerId,
                 sourcePath: session.sourcePath,
             });
+            if (loadToken !== latestSessionLoadToken) {
+                return;
+            }
             const provider = session.providerId;
             const model = defaultModel(provider);
             const levels = reasoningLevelsFor(provider, model);
@@ -549,22 +589,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 sessionId: session.sessionId,
                 currentCwd: session.projectDir,
                 activeSession: session,
+                pendingSessionKey: null,
                 handoffContextProvider: null,
                 activeRequestId: null,
                 contextTokens: 0,
                 error: null,
             }));
         } catch (e) {
-            set({ error: String(e) });
+            if (loadToken !== latestSessionLoadToken) {
+                return;
+            }
+            set({
+                error: String(e),
+                pendingSessionKey: null,
+            });
         }
     },
 
     startNewSession: async (cwd) => {
+        latestSessionLoadToken += 1;
         await abortActiveRequestIfNeeded(get, set);
         set((state) => ({
             messages: [],
             sessionId: null,
             activeSession: null,
+            pendingSessionKey: null,
             handoffContextProvider: null,
             currentCwd: cwd ?? state.currentCwd,
             activeRequestId: null,
@@ -583,11 +632,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     clear: async () => {
+        latestSessionLoadToken += 1;
         await abortActiveRequestIfNeeded(get, set);
         set({
             messages: [],
             sessionId: null,
             activeSession: null,
+            pendingSessionKey: null,
             handoffContextProvider: null,
             error: null,
             contextTokens: 0,

@@ -1,17 +1,18 @@
-import { useRef } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Paperclip, X, Layers, ChevronDown, File as FileIcon } from 'lucide-react';
-import { TokenIndicator } from './TokenIndicator';
+import {useRef} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ChevronDown, Image as ImageIcon, Layers, Paperclip, X} from 'lucide-react';
+import type {ChatAttachment} from '../../../types/chat';
+import {TokenIndicator} from './TokenIndicator';
 
 interface ContextBarProps {
-    /** 当前选中的文件上下文（@file 选中后） */
-    activeFile?: string;
+    /** 当前图片附件 */
+    attachments: ChatAttachment[];
     /** token 用量百分比 0-100 */
     percentage: number;
     usedTokens?: number;
     maxTokens?: number;
-    onClearFile?: () => void;
-    onAddAttachment: (files: FileList) => void;
+    onRemoveAttachment: (index: number) => void;
+    onAddAttachment: (files: FileList) => void | Promise<void>;
     /** 状态面板是否展开 */
     statusPanelExpanded?: boolean;
     onToggleStatusPanel?: () => void;
@@ -22,11 +23,11 @@ interface ContextBarProps {
  * 移植自 jcc-gui ContextBar，用 lucide + DaisyUI 重写。
  */
 export function ContextBar({
-    activeFile,
+    attachments,
     percentage,
     usedTokens,
     maxTokens,
-    onClearFile,
+    onRemoveAttachment,
     onAddAttachment,
     statusPanelExpanded = true,
     onToggleStatusPanel,
@@ -34,10 +35,8 @@ export function ContextBar({
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const fileName = activeFile ? activeFile.split(/[/\\]/).pop() || activeFile : '';
-
     return (
-        <div className="flex items-center gap-2 px-1 pb-1.5">
+        <div className="flex items-center gap-1.5 px-1 pb-1">
             {/* 附件 */}
             <button
                 type="button"
@@ -51,10 +50,11 @@ export function ContextBar({
                 ref={fileInputRef}
                 type="file"
                 multiple
+                accept="image/*"
                 className="hidden"
                 onChange={(e) => {
                     if (e.target.files && e.target.files.length > 0) {
-                        onAddAttachment(e.target.files);
+                        void onAddAttachment(e.target.files);
                     }
                     e.target.value = '';
                 }}
@@ -69,29 +69,30 @@ export function ContextBar({
 
             <div className="w-px h-4 bg-base-300" />
 
-            {/* 文件上下文芯片 */}
-            {activeFile ? (
-                <div
-                    className="flex items-center gap-1 h-6 pl-1.5 pr-1 rounded-md bg-base-200 text-xs text-base-content/80 max-w-[14rem]"
-                    title={activeFile}
-                >
-                    <FileIcon size={12} className="shrink-0" />
-                    <span className="truncate" dir="ltr">
-                        {fileName}
-                    </span>
-                    <button
-                        type="button"
-                        className="shrink-0 hover:text-error"
-                        onClick={onClearFile}
-                        title={t('chat.removeFileContext')}
-                    >
-                        <X size={12} />
-                    </button>
+            {attachments.length > 0 && (
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                    {attachments.map((attachment, index) => (
+                        <div
+                            key={`${attachment.fileName}-${index}`}
+                            className="flex h-6 min-w-0 max-w-[11rem] items-center gap-1 rounded-md bg-base-200 pl-1.5 pr-1 text-xs text-base-content/80"
+                            title={attachment.fileName}
+                        >
+                            <ImageIcon size={12} className="shrink-0 text-primary" />
+                            <span className="truncate" dir="ltr">
+                                {attachment.fileName}
+                            </span>
+                            <button
+                                type="button"
+                                className="shrink-0 rounded-sm hover:text-error focus:outline-none focus:ring-1 focus:ring-error/50"
+                                onClick={() => onRemoveAttachment(index)}
+                                title={t('chat.removeAttachment')}
+                                aria-label={t('chat.removeAttachment')}
+                            >
+                                <X size={12} />
+                            </button>
+                        </div>
+                    ))}
                 </div>
-            ) : (
-                <span className="text-[11px] text-base-content/30 select-none">
-                    {t('chat.noFileContext')}
-                </span>
             )}
 
             {/* 右侧：状态面板开关 */}

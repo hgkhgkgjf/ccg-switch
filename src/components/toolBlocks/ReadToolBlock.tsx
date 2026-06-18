@@ -1,18 +1,22 @@
 // ReadToolBlock - 文件读取工具块
 
-import { useState, memo } from 'react';
-import type { ToolResultBlock } from '../../types/chat';
-import type { ToolInput } from '../../types/tools';
-import { useIsToolDenied } from '../../hooks/useIsToolDenied';
-import { resolveToolTarget, getToolLineInfo, formatLineRange } from '../../utils/toolPresentation';
-import { getFileIcon, getFolderIcon } from '../../utils/fileIcons';
-import { openFile, copyToClipboard } from '../../utils/bridge';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {FileSearch} from 'lucide-react';
+import type {ToolResultBlock} from '../../types/chat';
+import type {ToolInput} from '../../types/tools';
+import {useIsToolDenied} from '../../hooks/useIsToolDenied';
+import {useChatStore} from '../../stores/useChatStore';
+import {formatLineRange, getToolDisplayStatus, getToolLineInfo, resolveToolTarget} from '../../utils/toolPresentation';
+import {getFileIcon, getFolderIcon} from '../../utils/fileIcons';
+import {copyToClipboard, openFile} from '../../utils/bridge';
 
 export interface ReadToolBlockProps {
   name?: string;
   input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
+  compact?: boolean;
 }
 
 const ReadToolBlock = memo(function ReadToolBlock({
@@ -20,10 +24,13 @@ const ReadToolBlock = memo(function ReadToolBlock({
   input,
   result,
   toolId,
+  compact = false,
 }: ReadToolBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isDenied = useIsToolDenied(toolId);
+  const currentCwd = useChatStore((state) => state.currentCwd);
 
   if (!input) {
     return null;
@@ -31,18 +38,15 @@ const ReadToolBlock = memo(function ReadToolBlock({
 
   // 解析文件路径
   const target = resolveToolTarget(input);
-  const lineInfo = getToolLineInfo(input);
+  const lineInfo = getToolLineInfo(input, target);
   const filePath = target?.rawPath || '';
 
   // 状态计算
-  const isCompleted = (result !== undefined && result !== null) || isDenied;
-  const isError = isDenied || (isCompleted && result?.is_error === true);
-  const status = isError ? 'error' : isCompleted ? 'completed' : 'pending';
+  const status = getToolDisplayStatus(result, isDenied);
 
   // 文件图标
-  const isDirectory = target?.isDirectory ?? false;
   const fileIconSvg = target
-    ? isDirectory
+    ? target.isDirectory
       ? getFolderIcon(target.cleanFileName)
       : getFileIcon(target.cleanFileName.split('.').pop() || '', target.cleanFileName)
     : '';
@@ -51,16 +55,86 @@ const ReadToolBlock = memo(function ReadToolBlock({
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (target?.isFile) {
-      openFile(target.openPath, lineInfo.start, lineInfo.end);
+      void openFile(target.openPath, lineInfo.start, lineInfo.end, currentCwd);
     }
   };
 
   // 复制路径
-  const handleCopyPath = async () => {
+  const handleCopyPath = async (event?: React.MouseEvent) => {
+    event?.stopPropagation();
     await copyToClipboard(filePath);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const detailContent = (
+    <div className="task-content-wrapper">
+      <div className="tool-section">
+        <div className="tool-section-label">{t('tools.filePath')}:</div>
+        <div className="file-path-display">
+          <code>{filePath}</code>
+        </div>
+      </div>
+
+      {lineInfo.start && (
+        <div className="tool-section">
+          <div className="tool-section-label">{t('tools.lines')}:</div>
+          <div className="line-range-display">
+            {lineInfo.end && lineInfo.end !== lineInfo.start
+              ? `${lineInfo.start} - ${lineInfo.end}`
+              : lineInfo.start}
+          </div>
+        </div>
+      )}
+
+      {Object.entries(input)
+        .filter(([key]) => !['file_path', 'path', 'target_file', 'offset', 'limit', 'line', 'start_line', 'end_line', 'command', 'workdir', 'description'].includes(key))
+        .map(([key, value]) => (
+          <div key={key} className="tool-section">
+            <div className="tool-section-label">{key}:</div>
+            <div className="tool-param-value">
+              {typeof value === 'object' && value !== null
+                ? JSON.stringify(value, null, 2)
+                : String(value)}
+            </div>
+          </div>
+        ))}
+
+      <div className="tool-actions">
+        {target?.isFile && (
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            title={t('tools.openFile')}
+            aria-label={t('tools.openFile')}
+            onClick={(event) => {
+              event.stopPropagation();
+              void openFile(target.openPath, lineInfo.start, lineInfo.end, currentCwd);
+            }}
+          >
+            {t('tools.openFile')}
+          </button>
+        )}
+        <button
+          type="button"
+          className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          onClick={handleCopyPath}
+        >
+          {copied ? t('tools.copied') : t('tools.copyPath')}
+        </button>
+      </div>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div className="task-container task-container-compact">
+        <div className="task-details task-details-compact">
+          {detailContent}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="task-container">
@@ -70,11 +144,11 @@ const ReadToolBlock = memo(function ReadToolBlock({
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
-          <span className="codicon codicon-file-code tool-title-icon" />
-          <span className="tool-title-text">Read</span>
+          <FileSearch className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.read')}</span>
           <span
-            className={`tool-title-summary file-path-link ${!isDirectory ? 'clickable-file' : ''}`}
-            onClick={!isDirectory ? handleFileClick : undefined}
+            className={`tool-title-summary file-path-link ${target?.isFile ? 'clickable-file' : ''}`}
+            onClick={target?.isFile ? handleFileClick : undefined}
             title={filePath}
           >
             {fileIconSvg && (
@@ -90,66 +164,14 @@ const ReadToolBlock = memo(function ReadToolBlock({
               {formatLineRange(lineInfo)}
             </span>
           )}
-          {isDenied && <span className="tool-title-summary text-error">• Denied</span>}
+          {isDenied && <span className="tool-title-summary text-error">• {t('tools.denied')}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
 
       {expanded && (
         <div className="task-details">
-          <div className="task-content-wrapper">
-            {/* 文件信息 */}
-            <div className="tool-section">
-              <div className="tool-section-label">File Path:</div>
-              <div className="file-path-display">
-                <code>{filePath}</code>
-              </div>
-            </div>
-
-            {/* 行号范围 */}
-            {lineInfo.start && (
-              <div className="tool-section">
-                <div className="tool-section-label">Lines:</div>
-                <div className="line-range-display">
-                  {lineInfo.end && lineInfo.end !== lineInfo.start
-                    ? `${lineInfo.start} - ${lineInfo.end}`
-                    : lineInfo.start}
-                </div>
-              </div>
-            )}
-
-            {/* 其他参数 */}
-            {Object.entries(input)
-              .filter(([key]) => !['file_path', 'path', 'target_file', 'offset', 'limit', 'line', 'start_line', 'end_line', 'command', 'workdir', 'description'].includes(key))
-              .map(([key, value]) => (
-                <div key={key} className="tool-section">
-                  <div className="tool-section-label">{key}:</div>
-                  <div className="tool-param-value">
-                    {typeof value === 'object' && value !== null
-                      ? JSON.stringify(value, null, 2)
-                      : String(value)}
-                  </div>
-                </div>
-              ))}
-
-            {/* 操作按钮 */}
-            <div className="tool-actions">
-              {target?.isFile && (
-                <button
-                  className="btn btn-sm btn-ghost"
-                  onClick={() => openFile(target.openPath, lineInfo.start, lineInfo.end)}
-                >
-                  Open File
-                </button>
-              )}
-              <button
-                className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
-                onClick={handleCopyPath}
-              >
-                {copied ? '✓ Copied' : 'Copy Path'}
-              </button>
-            </div>
-          </div>
+          {detailContent}
         </div>
       )}
     </div>

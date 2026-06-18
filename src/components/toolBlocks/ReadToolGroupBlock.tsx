@@ -1,10 +1,14 @@
 // ReadToolGroupBlock - Read 工具分组块
 
-import { useState, memo } from 'react';
-import type { ToolUseBlock, ToolResultBlock } from '../../types/chat';
-import { getGroupStatus } from '../../utils/toolGrouping';
-import { resolveToolTarget } from '../../utils/toolPresentation';
-import { getFileIcon, getFolderIcon } from '../../utils/fileIcons';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {ChevronDown, ChevronRight, FileSearch} from 'lucide-react';
+import type {ToolResultBlock, ToolUseBlock} from '../../types/chat';
+import {getGroupStatus} from '../../utils/toolGrouping';
+import {getToolLineInfo, resolveToolTarget, summarizeReadGroupHeader} from '../../utils/toolPresentation';
+import {getFileIcon, getFolderIcon} from '../../utils/fileIcons';
+import {openFile} from '../../utils/bridge';
+import {useChatStore} from '../../stores/useChatStore';
 import ReadToolBlock from './ReadToolBlock';
 
 export interface ReadToolGroupBlockProps {
@@ -16,10 +20,13 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
   blocks,
   findToolResult,
 }: ReadToolGroupBlockProps) {
+  const { t } = useTranslation();
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
+  const currentCwd = useChatStore((state) => state.currentCwd);
 
   // 计算整体状态
   const status = getGroupStatus(blocks, findToolResult);
+  const header = summarizeReadGroupHeader(blocks);
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
@@ -46,10 +53,15 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
       {/* 分组标题 */}
       <div className="task-header task-group-header">
         <div className="task-title-section">
-          <span className="codicon codicon-file-code tool-title-icon" />
-          <span className="tool-title-text">Read</span>
-          <span className="tool-title-summary">
-            {blocks.length} {blocks.length === 1 ? 'file' : 'files'}
+          <FileSearch className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{t('tools.read')}</span>
+          {header.primarySummary && (
+            <span className="tool-title-summary" title={header.primarySummary}>
+              {header.primarySummary}
+            </span>
+          )}
+          <span className="tool-title-secondary-summary" title={header.secondarySummary}>
+            {header.secondarySummary}
           </span>
         </div>
         <div className={`tool-status-indicator ${status}`} />
@@ -60,7 +72,13 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
         {blocks.map((block, index) => {
           const result = findToolResult(block.id);
           const target = resolveToolTarget(block.input);
+          const lineInfo = getToolLineInfo(block.input, target);
           const filePath = target?.displayPath || '';
+          const lineSummary = lineInfo.start
+            ? lineInfo.end && lineInfo.end !== lineInfo.start
+              ? `L${lineInfo.start}-${lineInfo.end}`
+              : `L${lineInfo.start}`
+            : '';
           const isExpanded = expandedIndices.has(index);
 
           // 文件图标
@@ -91,17 +109,29 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
                       dangerouslySetInnerHTML={{ __html: fileIconSvg }}
                     />
                   )}
-                  <span className="task-group-item-file" title={filePath}>
+                  <span
+                    className={`task-group-item-file ${target?.isFile ? 'clickable-file' : ''}`}
+                    title={target?.rawPath ?? filePath}
+                    onClick={target?.isFile ? (event) => {
+                      event.stopPropagation();
+                      void openFile(target.openPath, lineInfo.start, lineInfo.end, currentCwd);
+                    } : undefined}
+                  >
                     {filePath}
                   </span>
+                  {lineSummary && (
+                    <span className="task-group-item-secondary" title={lineSummary}>
+                      {lineSummary}
+                    </span>
+                  )}
                 </div>
                 <div className="task-group-item-status">
-                  <span className={`badge badge-sm ${itemStatus === 'error' ? 'badge-error' : itemStatus === 'completed' ? 'badge-success' : 'badge-warning'}`}>
-                    {itemStatus === 'error' ? 'Failed' : itemStatus === 'completed' ? 'Success' : 'Pending'}
+                  <span className={`tool-state-pill ${itemStatus}`}>
+                    {itemStatus === 'error' ? t('tools.failed') : itemStatus === 'completed' ? t('tools.success') : t('tools.pending')}
                   </span>
-                  <span className="task-group-item-chevron">
-                    {isExpanded ? '▼' : '▶'}
-                  </span>
+                  {isExpanded
+                    ? <ChevronDown className="task-group-item-chevron-icon" aria-hidden="true" />
+                    : <ChevronRight className="task-group-item-chevron-icon" aria-hidden="true" />}
                 </div>
               </div>
 
@@ -113,6 +143,7 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
                     input={block.input}
                     result={result}
                     toolId={block.id}
+                    compact
                   />
                 </div>
               )}
@@ -124,16 +155,18 @@ const ReadToolGroupBlock = memo(function ReadToolGroupBlock({
       {/* 分组操作 */}
       <div className="task-group-actions">
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(true)}
         >
-          Expand All
+          {t('tools.expandAll')}
         </button>
         <button
+          type="button"
           className="btn btn-sm btn-ghost"
           onClick={() => toggleAll(false)}
         >
-          Collapse All
+          {t('tools.collapseAll')}
         </button>
       </div>
     </div>

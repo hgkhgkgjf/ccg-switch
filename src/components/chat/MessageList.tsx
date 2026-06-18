@@ -1,11 +1,14 @@
-import {useEffect, useMemo, useState} from 'react';
+import {type RefObject, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import type {ChatMessage, ContentBlock} from '../../types/chat';
 import {getRenderableContentBlocks, shouldRenderChatMessage} from '../../utils/chatMessageFlow';
+import {
+    getCollapsedMessageWindow,
+    getScrollTopAfterPrepend,
+    REVEAL_PAGE_SIZE,
+    shouldAutoRevealEarlierMessages,
+} from '../../utils/chatUiBehavior';
 import MessageItem from './MessageItem';
-
-const VISIBLE_MESSAGE_WINDOW = 15;
-const REVEAL_PAGE_SIZE = 30;
 
 interface RenderableMessage {
     message: ChatMessage;
@@ -15,6 +18,7 @@ interface RenderableMessage {
 interface MessageListProps {
     messages: ChatMessage[];
     searchQuery?: string;
+    scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }
 
 function getBlockSearchText(block: ContentBlock): string {
@@ -40,9 +44,18 @@ function getMessageSearchText(message: ChatMessage): string {
         .toLowerCase();
 }
 
-export default function MessageList({ messages, searchQuery = '' }: MessageListProps) {
+export default function MessageList({
+    messages,
+    searchQuery = '',
+    scrollContainerRef,
+}: MessageListProps) {
     const { t } = useTranslation();
     const [revealedCount, setRevealedCount] = useState(0);
+    const revealAnchorRef = useRef<{
+        previousScrollHeight: number;
+        previousScrollTop: number;
+    } | null>(null);
+    const revealPendingRef = useRef(false);
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
     const renderableMessages = useMemo<RenderableMessage[]>(() => (
@@ -59,25 +72,89 @@ export default function MessageList({ messages, searchQuery = '' }: MessageListP
         ));
     }, [normalizedSearchQuery, renderableMessages]);
 
-    const totalEarlierMessages = Math.max(0, filteredMessages.length - VISIBLE_MESSAGE_WINDOW);
     const isSearching = normalizedSearchQuery.length > 0;
-    const collapsedCount = isSearching ? 0 : Math.max(0, totalEarlierMessages - revealedCount);
-    const visibleMessages = isSearching ? filteredMessages : filteredMessages.slice(collapsedCount);
+    const {
+        totalEarlierMessages,
+        collapsedCount,
+        nextRevealCount,
+        visibleStartIndex,
+    } = useMemo(() => getCollapsedMessageWindow({
+        filteredCount: filteredMessages.length,
+        revealedCount,
+        isSearching,
+    }), [filteredMessages.length, isSearching, revealedCount]);
+    const visibleMessages = filteredMessages.slice(visibleStartIndex);
     const lastRenderableIndex = renderableMessages.length > 0
         ? renderableMessages[renderableMessages.length - 1].originalIndex
         : undefined;
-    const nextRevealCount = Math.min(REVEAL_PAGE_SIZE, collapsedCount);
 
     useEffect(() => {
         setRevealedCount((current) => Math.min(current, totalEarlierMessages));
     }, [totalEarlierMessages]);
 
-    const handleRevealEarlier = () => {
-        setRevealedCount((current) => Math.min(totalEarlierMessages, current + REVEAL_PAGE_SIZE));
-    };
+    const revealEarlierMessages = useCallback((scrollEl?: HTMLDivElement | null) => {
+        if (collapsedCount <= 0) return;
+
+        if (scrollEl) {
+            revealAnchorRef.current = {
+                previousScrollHeight: scrollEl.scrollHeight,
+                previousScrollTop: scrollEl.scrollTop,
+            };
+        }
+
+        revealPendingRef.current = true;
+        setRevealedCount((current) => {
+            const next = Math.min(totalEarlierMessages, current + REVEAL_PAGE_SIZE);
+            if (next === current) {
+                revealPendingRef.current = false;
+                revealAnchorRef.current = null;
+            }
+            return next;
+        });
+    }, [collapsedCount, totalEarlierMessages]);
+
+    useEffect(() => {
+        const scrollEl = scrollContainerRef?.current;
+        const anchor = revealAnchorRef.current;
+        if (!scrollEl || !anchor) {
+            revealPendingRef.current = false;
+            return;
+        }
+
+        requestAnimationFrame(() => {
+            scrollEl.scrollTop = getScrollTopAfterPrepend({
+                previousScrollTop: anchor.previousScrollTop,
+                previousScrollHeight: anchor.previousScrollHeight,
+                nextScrollHeight: scrollEl.scrollHeight,
+            });
+            revealAnchorRef.current = null;
+            revealPendingRef.current = false;
+        });
+    }, [scrollContainerRef, visibleMessages.length]);
+
+    useEffect(() => {
+        const scrollEl = scrollContainerRef?.current;
+        if (!scrollEl) return;
+
+        const handleScroll = () => {
+            if (revealPendingRef.current) return;
+            if (!shouldAutoRevealEarlierMessages({
+                scrollTop: scrollEl.scrollTop,
+                collapsedCount,
+                isSearching,
+            })) {
+                return;
+            }
+
+            revealEarlierMessages(scrollEl);
+        };
+
+        scrollEl.addEventListener('scroll', handleScroll, {passive: true});
+        return () => scrollEl.removeEventListener('scroll', handleScroll);
+    }, [collapsedCount, isSearching, revealEarlierMessages, scrollContainerRef]);
 
     return (
-        <div className="space-y-4 pb-6">
+        <div className="space-y-1 pb-6">
             {normalizedSearchQuery && (
                 <div className="mx-auto w-full max-w-4xl rounded-lg border border-base-300 bg-base-100/80 px-3 py-2 text-xs text-base-content/60 shadow-sm">
                     {filteredMessages.length > 0
@@ -88,13 +165,12 @@ export default function MessageList({ messages, searchQuery = '' }: MessageListP
 
             {collapsedCount > 0 && (
                 <div className="mx-auto flex w-full max-w-4xl justify-center py-1">
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-sm rounded-full border border-base-300 bg-base-100/85 px-4 text-base-content/60 shadow-sm backdrop-blur hover:border-base-content/20 hover:text-base-content"
-                        onClick={handleRevealEarlier}
+                    <div
+                        className="rounded-full border border-base-300 bg-base-100/80 px-3 py-1 text-[11px] text-base-content/50 shadow-sm backdrop-blur"
+                        title={t('chat.message.showEarlier', { count: nextRevealCount, total: collapsedCount })}
                     >
                         {t('chat.message.showEarlier', { count: nextRevealCount, total: collapsedCount })}
-                    </button>
+                    </div>
                 </div>
             )}
 

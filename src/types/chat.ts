@@ -22,6 +22,15 @@ export interface ChatMessage {
     usage?: TokenUsage;
 }
 
+/** 用户输入区附件。图片附件使用 base64 数据传给 bridge，必要时由 bridge 落盘。 */
+export interface ChatAttachment {
+    fileName: string;
+    mediaType: string;
+    data?: string;
+    path?: string;
+    size?: number;
+}
+
 /** Token 用量（对应 daemon [USAGE] 标签的 JSON） */
 export interface TokenUsage {
     input_tokens: number;

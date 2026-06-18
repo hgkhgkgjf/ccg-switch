@@ -793,6 +793,7 @@ pub fn run() {
             session_commands::list_sessions,
             session_commands::get_project_provider_map,
             session_commands::get_unified_session_messages,
+            session_commands::get_claude_subagent_session_messages,
             open_in_terminal,
             launch_resume_session,
             open_external,

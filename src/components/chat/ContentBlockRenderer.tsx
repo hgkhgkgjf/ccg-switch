@@ -22,6 +22,7 @@ interface ContentBlockRendererProps {
     blocks: ContentBlock[];
     findToolResult: (toolId: string) => ToolResultBlock | null | undefined;
     expandThinkingBlockIndex?: number;
+    compact?: boolean;
 }
 
 /**
@@ -33,6 +34,7 @@ export default function ContentBlockRenderer({
     blocks,
     findToolResult,
     expandThinkingBlockIndex,
+    compact = false,
 }: ContentBlockRendererProps) {
     const { t } = useTranslation();
     // 应用分组算法
@@ -73,6 +75,14 @@ export default function ContentBlockRenderer({
                     />
                 );
 
+            case 'search':
+                return (
+                    <SearchToolGroupBlock
+                        blocks={[block]}
+                        findToolResult={findToolResult}
+                    />
+                );
+
             case 'agent':
                 // Agent 工具：检查是否是 Task/spawn_agent
                 if (block.name.toLowerCase().includes('task') ||
@@ -109,7 +119,7 @@ export default function ContentBlockRenderer({
     };
 
     return (
-        <div className="space-y-2">
+        <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
             {groupedBlocks.map((grouped, index) => {
                 if (grouped.type === 'single') {
                     const block = grouped.block;
@@ -130,6 +140,7 @@ export default function ContentBlockRenderer({
                                     content={block.thinking}
                                     defaultExpanded={grouped.originalIndex === expandThinkingBlockIndex}
                                     title={t('chat.thinking.title')}
+                                    compact={compact}
                                 />
                             );
 

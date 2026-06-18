@@ -415,6 +415,310 @@ let perm_dir = app.path().app_data_dir()?.join("permissions");
 
 ---
 
+## Scenario: Unified Session History Raw Blocks
+
+### 1. Scope / Trigger
+
+- Trigger: `get_unified_session_messages` loads historical Claude/Codex/Gemini
+  sessions for the Chat page.
+- This is a cross-layer command contract. The frontend transcript renderer
+  needs structured `thinking`, `tool_use`, and `tool_result` blocks; plain text
+  `content` alone is not enough to reconstruct tool UI safely.
+
+### 2. Signatures
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnifiedSessionMessage {
+    pub role: String,
+    pub content: String,
+    pub ts: Option<String>,
+    pub raw: Option<serde_json::Value>,
+}
+```
+
+```ts
+interface UnifiedSessionMessage {
+    role: string;
+    content: string;
+    ts?: string | null;
+    raw?: MessageRaw | null;
+}
+```
+
+### 3. Contracts
+
+- `raw` is optional for providers that cannot supply structured blocks, but
+  Claude and Codex history loaders must preserve or synthesize it whenever the
+  source history includes structured content.
+- Claude JSONL history preserves the original message JSON in `raw`.
+- Codex native `response_item.payload` is adapted into the same frontend
+  `MessageRaw.message.content[]` shape:
+  - message text items -> `text`
+  - reasoning summaries/content -> `thinking`
+  - `function_call` -> `tool_use`
+  - `function_call_output` -> `tool_result`
+- Messages that contain only `thinking`, `tool_use`, or `tool_result` must not
+  be dropped just because visible text is empty.
+- User `tool_result` history messages use visible `content === "[tool_result]"`
+  and keep the real result inside `raw` so the frontend can hide the internal
+  protocol row while still resolving tool status.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Claude line has `message.content[]` with only `tool_use` | Return a `UnifiedSessionMessage` with `raw`, even if visible text is empty. |
+| Claude line has user `tool_result` | Return `content === "[tool_result]"` and preserve raw content. |
+| Codex line has `reasoning` payload | Convert it to a `thinking` block in `raw`. |
+| Codex line has `function_call` | Convert it to a `tool_use` block with `id`, `name`, and `input`. |
+| Codex line has `function_call_output` | Convert it to a `tool_result` block with `tool_use_id`, `content`, and `is_error`. |
+| Provider cannot supply raw structure | Return `raw: None` / `raw?: null`; frontend falls back to text. |
+| Invalid history payload | Skip or normalize the bad record without panicking. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: loading a Claude history shows thinking, read/search/run/edit tool
+  blocks, and completed/error status from later `tool_result` rows.
+- Base: plain text history still maps to visible text messages and can omit
+  `raw`.
+- Bad: flattening `message.content[]` into one long text string; the UI can no
+  longer render tool blocks or hide internal tool results.
+
+### 6. Tests Required
+
+- Rust unit test: Claude provider preserves `thinking`, `tool_use`, and
+  `tool_result` raw blocks.
+- Rust unit test: Codex provider converts `reasoning`, `function_call`, and
+  `function_call_output` into unified raw content blocks.
+- Frontend unit test: `loadSession()` maps `UnifiedSessionMessage.raw` back to
+  `ChatMessage.raw` and `findToolResult()` resolves the later result block.
+- Build check: `npm run build` and `cargo check --manifest-path
+  src-tauri/Cargo.toml` must pass because this spans Rust serde and TypeScript
+  store/rendering contracts.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+UnifiedSessionMessage {
+    role,
+    content: flatten_text_only(&message),
+    ts,
+}
+```
+
+#### Correct
+
+```rust
+UnifiedSessionMessage {
+    role,
+    content: visible_text_or_protocol_marker(&message),
+    ts,
+    raw: Some(original_or_adapted_message_raw),
+}
+```
+
+---
+
+## Scenario: Editor Open File Command
+
+### 1. Scope / Trigger
+
+- Trigger: tool blocks render clickable file paths and `Open File` actions for
+  Read/Edit/Generic file tools in live and historical chats.
+- This is a cross-layer command contract because frontend tool inputs often
+  contain project-relative paths, while the Rust backend must launch an editor
+  with an absolute Windows-compatible path.
+
+### 2. Signatures
+
+```ts
+async function openFile(
+    filePath: string,
+    lineStart?: number,
+    lineEnd?: number,
+    cwd?: string | null,
+): Promise<void>;
+```
+
+```rust
+#[tauri::command]
+pub async fn open_file_in_editor(
+    file_path: String,
+    line_start: Option<u32>,
+    line_end: Option<u32>,
+    cwd: Option<String>,
+) -> Result<(), String>;
+```
+
+### 3. Contracts
+
+- Frontend callers must pass the current project `cwd` when the tool path may
+  be relative.
+- Backend resolves relative `file_path` against `cwd` only when `cwd` is an
+  absolute path; otherwise it falls back to the provided `file_path`.
+- Backend normalizes Windows slash-drive paths such as `/c/project/file.ts` to
+  `C:\project\file.ts`.
+- Backend normalizes WSL mount paths such as `/mnt/c/project/file.ts` to
+  `C:\project\file.ts` on Windows.
+- Frontend and backend both strip editor suffixes before launch:
+  `file.ts:12` and `file.ts:12:3` open `file.ts` at line `12`; `file.ts:12-20`
+  opens the file with start line `12` and may preserve `20` as an end-line hint
+  for UI display.
+- Backend accepts `file://` / `file:///C:/...` inputs as a defensive fallback
+  for file links copied from browser-style contexts.
+- Backend opens editors in this order:
+  1. PATH launchers (`code`, `cursor`, `idea`, `webstorm`, and related `.cmd`
+     / `.exe` names)
+  2. common VS Code/Cursor install paths
+  3. JetBrains Toolbox scripts and app executables
+  4. `Program Files\JetBrains` app executables
+  5. OS default file opener as a final fallback
+- VS Code/Cursor-style editors receive `--goto <path>:<line>:1`; JetBrains
+  editors receive `--line <line> <path>`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| `filePath` is relative and `cwd` is absolute | Join `cwd + filePath` before launch. |
+| `filePath` is absolute | Use it directly; do not prepend `cwd`. |
+| `filePath` is `/c/...` on Windows | Convert to `C:\...` before launch. |
+| `filePath` is `/mnt/c/...` on Windows | Convert to `C:\...` before launch. |
+| `filePath` has `:line`, `:line:column`, or `:line-endLine` suffix | Strip the suffix before editor launch and use the parsed start line when `lineStart` is absent. |
+| `filePath` has a `file://` prefix | Strip the URL prefix before normalization. |
+| Editor is installed through JetBrains Toolbox but not on PATH | Discover the executable under Toolbox roots and launch it. |
+| No known editor can be spawned | Try OS default opener. |
+| OS default opener also fails | Return `Err("Failed to open file in editor: ...")`. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: clicking `src/pages/ChatPage.tsx` in a loaded history session opens
+  `C:\guodevelop\ccg-switch\src\pages\ChatPage.tsx` in the available editor.
+- Base: clicking an absolute `C:\...` path works without `cwd`.
+- Bad: sending a relative path to `code --goto` from the Tauri process working
+  directory; the editor opens nothing or the wrong file.
+
+### 6. Tests Required
+
+- Rust unit test: relative paths resolve against `cwd`.
+- Rust unit test: slash-drive Windows paths normalize to `C:\...`.
+- Rust unit test: WSL `/mnt/c/...` paths normalize to `C:\...`.
+- Rust unit test: editor `:line:column` suffixes are stripped before path
+  resolution and the line is reused when no explicit `lineStart` is provided.
+- Rust unit test: nested Toolbox executables are discoverable with bounded
+  recursion.
+- Frontend unit test: `resolveToolTarget()` strips `:line:column` from
+  clickable paths while retaining the parsed start line.
+- Frontend unit test: search output parsing extracts clickable files and line
+  numbers from both relative and Windows result rows.
+- Frontend build check: `npm run build` must pass so all `openFile(...)` call
+  sites stay aligned with the bridge signature.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+openFile(target.openPath);
+```
+
+```rust
+Command::new("code").args(["--goto", &file_path]).spawn()?;
+```
+
+#### Correct
+
+```ts
+openFile(target.openPath, lineInfo.start, lineInfo.end, currentCwd);
+```
+
+```rust
+let resolved_path = resolve_file_path(&file_path, cwd.as_deref());
+let args = editor_args(candidate.mode, &resolved_path, &goto, line_start);
+Command::new(candidate.program).args(args).spawn()?;
+```
+
+---
+
+## Scenario: Chat Image Attachment Payloads
+
+### 1. Scope / Trigger
+
+- Trigger: the Chat composer accepts pasted, dropped, or file-picker images and
+  sends them to Claude/Codex through `chat_send`.
+- This is a cross-layer command contract. The visible attachment chip is not the
+  payload; the image bytes or local path must survive from React state to the
+  Node bridge.
+
+### 2. Signatures
+
+```ts
+interface ChatAttachment {
+    fileName: string;
+    mediaType: string;
+    data?: string; // base64 without data: prefix
+    path?: string; // Tauri/WebView local path when available
+    size?: number;
+}
+```
+
+```ts
+await invoke<string>('chat_send', {
+    provider,
+    command: provider === 'claude' && hasAttachments ? 'sendWithAttachments' : 'send',
+    params: {
+        message,
+        attachments,
+        // session/thread/cwd/model fields omitted here
+    },
+});
+```
+
+### 3. Contracts
+
+- The composer reads supported image files (`image/png`, `image/jpeg`,
+  `image/webp`, `image/gif`) into base64 `ChatAttachment.data`; if the WebView
+  exposes a local `path`, preserve it too.
+- The composer may show `[Image: name]` / `[图片: name]` in the visible user
+  message, but it must never prepend `@filename` as a substitute for the image
+  payload.
+- `useChatStore.send()` accepts attachment-only sends. When text is empty it
+  sends the internal fallback prompt `Please analyze the attached image(s).`
+  while keeping the visible user message as the attachment chip text.
+- Claude image sends use command `sendWithAttachments`; the Claude bridge builds
+  native vision blocks for vision-capable models and temp-file references for
+  non-vision models.
+- Codex sends keep local paths as `{ type: "local_image", path }`.
+- If Codex receives base64 image data without a local path, the Node bridge must
+  save the image to the shared temp image directory and convert it to
+  `{ type: "local_image", path }` before calling the Codex SDK.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| User sends text + PNG | Visible message shows text plus image label; provider payload includes real attachment data/path. |
+| User sends image only | `chat_send` is still invoked with fallback message and attachment payload. |
+| Claude provider has image attachment | `command === "sendWithAttachments"` and `params.attachments[]` contains `fileName`, `mediaType`, `data`. |
+| Codex provider has local image path | Store maps it to `{ type: "local_image", path }`. |
+| Codex provider has only base64 | Node bridge persists it to temp and passes a `local_image` path to the SDK. |
+| Unsupported file type is dropped by the composer | It must not create a misleading chip or `@filename` prompt prefix. |
+
+### 5. Tests Required
+
+- Frontend unit test: Claude attachments call `sendWithAttachments`.
+- Frontend unit test: Codex local paths map to `local_image`.
+- Frontend unit test: Codex base64 attachments remain in `params.attachments`
+  and attachment-only sends still invoke `chat_send`.
+- Bridge verification: `normalizeCodexImageAttachments()` persists base64 image
+  data and returns a `local_image` path.
+
+---
+
 ## 参考
 
 - Tauri 事件文档: https://v2.tauri.app/develop/inter-process-communication/

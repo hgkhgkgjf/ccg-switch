@@ -5,9 +5,17 @@ interface StatusPanelProps {
     provider: string;
     messageCount: number;
     daemonReady: boolean;
+    anchorCount?: number;
+    activeAnchorLabel?: string;
 }
 
-export default function StatusPanel({ provider, messageCount, daemonReady }: StatusPanelProps) {
+export default function StatusPanel({
+    provider,
+    messageCount,
+    daemonReady,
+    anchorCount = 0,
+    activeAnchorLabel,
+}: StatusPanelProps) {
     const { t } = useTranslation();
 
     return (
@@ -26,6 +34,15 @@ export default function StatusPanel({ provider, messageCount, daemonReady }: Sta
                         <span>{t('chat.layout.messageCount')}</span>
                         <span className="font-medium text-base-content/70">{messageCount}</span>
                     </div>
+                    <div className="flex items-center justify-between gap-2">
+                        <span>{t('chat.layout.anchorRail')}</span>
+                        <span className="font-medium text-base-content/70">{anchorCount}</span>
+                    </div>
+                    {activeAnchorLabel && (
+                        <div className="pt-1 text-[11px] leading-tight text-base-content/45" title={activeAnchorLabel}>
+                            {activeAnchorLabel}
+                        </div>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                         <span>{t('chat.ready')}</span>
                         <span className={daemonReady ? 'font-medium text-success' : 'font-medium text-warning'}>

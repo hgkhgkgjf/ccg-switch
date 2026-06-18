@@ -1,8 +1,11 @@
 use super::utils::{home_dir, sanitize_session_text, truncate_text};
 use crate::session_manager::{SessionMeta, UnifiedSessionMessage};
 use regex::Regex;
+use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader};
+
+const TOOL_RESULT_CONTENT: &str = "[tool_result]";
 
 /// 按项目路径扫描 Codex 会话（扫描全部文件但只返回匹配项目的会话）
 pub fn scan_codex_sessions_for_project(project_path: &str) -> Vec<SessionMeta> {
@@ -181,36 +184,127 @@ pub fn load_codex_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessag
             None => continue,
         };
 
-        let payload_type = payload.get("type").and_then(|v| v.as_str());
-        if payload_type != Some("message") {
-            continue;
-        }
-
-        let role = payload
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-
-        let content = match payload.get("content") {
-            Some(c) => extract_codex_content(c),
-            None => continue,
-        };
-
-        if content.is_empty() {
-            continue;
-        }
-
         let ts = json
             .get("timestamp")
             .or_else(|| json.get("ts"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        messages.push(UnifiedSessionMessage {
-            role: normalize_role(role).to_string(),
-            content,
-            ts,
-        });
+        let payload_type = payload.get("type").and_then(|v| v.as_str());
+        match payload_type {
+            Some("message") => {
+                let role = payload
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let role = normalize_role(role);
+
+                let blocks = match payload.get("content") {
+                    Some(c) => codex_message_content_blocks(c),
+                    None => Vec::new(),
+                };
+                let content = extract_text_from_blocks(&blocks);
+                if content.is_empty() && blocks.is_empty() {
+                    continue;
+                }
+
+                messages.push(UnifiedSessionMessage {
+                    role: role.to_string(),
+                    content,
+                    ts: ts.clone(),
+                    raw: if blocks.is_empty() {
+                        None
+                    } else {
+                        Some(message_raw(role, blocks, ts))
+                    },
+                });
+            }
+            Some("reasoning") => {
+                let thinking = extract_codex_reasoning(payload);
+                if thinking.is_empty() {
+                    continue;
+                }
+
+                messages.push(UnifiedSessionMessage {
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                    ts: ts.clone(),
+                    raw: Some(message_raw(
+                        "assistant",
+                        vec![json!({
+                            "type": "thinking",
+                            "thinking": thinking,
+                        })],
+                        ts,
+                    )),
+                });
+            }
+            Some("function_call") => {
+                let tool_id = payload
+                    .get("call_id")
+                    .or_else(|| payload.get("id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("codex-tool-{}", messages.len()));
+                let name = payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("function_call");
+                let input = parse_codex_arguments(payload.get("arguments"));
+
+                messages.push(UnifiedSessionMessage {
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                    ts: ts.clone(),
+                    raw: Some(message_raw(
+                        "assistant",
+                        vec![json!({
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": name,
+                            "input": input,
+                        })],
+                        ts,
+                    )),
+                });
+            }
+            Some("function_call_output") => {
+                let tool_id = payload
+                    .get("call_id")
+                    .or_else(|| payload.get("id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("codex-tool-result-{}", messages.len()));
+                let output = extract_codex_output(payload);
+                let is_error = payload
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or_else(|| {
+                        payload
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .map(|status| status.eq_ignore_ascii_case("failed"))
+                            .unwrap_or(false)
+                    });
+
+                messages.push(UnifiedSessionMessage {
+                    role: "user".to_string(),
+                    content: TOOL_RESULT_CONTENT.to_string(),
+                    ts: ts.clone(),
+                    raw: Some(message_raw(
+                        "user",
+                        vec![json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": output,
+                            "is_error": is_error,
+                        })],
+                        ts,
+                    )),
+                });
+            }
+            _ => continue,
+        }
     }
 
     Ok(messages)
@@ -235,6 +329,148 @@ fn extract_codex_content(content: &serde_json::Value) -> String {
     }
 
     String::new()
+}
+
+fn text_from_value(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+
+    for key in ["text", "content", "output"] {
+        if let Some(text) = value.get(key).and_then(|v| v.as_str()) {
+            return Some(text.to_string());
+        }
+    }
+
+    None
+}
+
+fn codex_message_content_blocks(content: &Value) -> Vec<Value> {
+    if let Some(text) = content.as_str() {
+        let clean = sanitize_session_text(text);
+        if clean.is_empty() {
+            return Vec::new();
+        }
+        return vec![json!({"type": "text", "text": clean})];
+    }
+
+    let Some(items) = content.as_array() else {
+        return Vec::new();
+    };
+
+    items
+        .iter()
+        .filter_map(|item| {
+            let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if !matches!(item_type, "text" | "input_text" | "output_text") {
+                return None;
+            }
+            let text = text_from_value(item)?;
+            let clean = sanitize_session_text(&text);
+            if clean.is_empty() {
+                None
+            } else {
+                Some(json!({"type": "text", "text": clean}))
+            }
+        })
+        .collect()
+}
+
+fn extract_text_from_blocks(blocks: &[Value]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| {
+            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                block.get("text").and_then(|v| v.as_str())
+            } else {
+                None
+            }
+        })
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn extract_codex_reasoning(payload: &Value) -> String {
+    if let Some(text) = payload.get("content").and_then(text_from_value) {
+        return sanitize_session_text(&text);
+    }
+
+    payload
+        .get("summary")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(text_from_value)
+                .map(|text| sanitize_session_text(&text))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+fn parse_codex_arguments(arguments: Option<&Value>) -> Value {
+    let Some(arguments) = arguments else {
+        return json!({});
+    };
+
+    if let Some(raw) = arguments.as_str() {
+        if raw.trim().is_empty() {
+            return json!({});
+        }
+        return match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(map)) => Value::Object(map),
+            Ok(parsed) => json!({"arguments": parsed}),
+            Err(_) => json!({"arguments": raw}),
+        };
+    }
+
+    if arguments.is_object() {
+        return arguments.clone();
+    }
+
+    json!({"arguments": arguments})
+}
+
+fn extract_codex_output(payload: &Value) -> String {
+    let value = payload.get("output").or_else(|| payload.get("content"));
+    let Some(value) = value else {
+        return String::new();
+    };
+
+    if let Some(text) = text_from_value(value) {
+        return text;
+    }
+
+    if let Some(items) = value.as_array() {
+        let text = items
+            .iter()
+            .filter_map(text_from_value)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() {
+            return text;
+        }
+    }
+
+    value.to_string()
+}
+
+fn message_raw(role: &str, blocks: Vec<Value>, ts: Option<String>) -> Value {
+    let mut raw = json!({
+        "type": role,
+        "message": {
+            "content": blocks,
+        },
+    });
+
+    if let Some(ts) = ts {
+        raw["timestamp"] = json!(ts);
+    }
+
+    raw
 }
 
 /// 规范化角色名称
@@ -315,5 +551,58 @@ fn collect_jsonl_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf
         } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
             files.push(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_temp_session(content: impl AsRef<[u8]>) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ccg-switch-codex-{suffix}.jsonl"));
+        fs::write(&path, content).expect("write temp codex session");
+        path
+    }
+
+    #[test]
+    fn load_codex_messages_converts_native_items_to_structured_blocks() {
+        let path = write_temp_session(
+            r#"{"type":"response_item","timestamp":"2026-06-17T08:00:00.000Z","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"inspect first"}],"content":null}}"#
+                .to_owned()
+                + "\n"
+                + r#"{"type":"response_item","timestamp":"2026-06-17T08:00:01.000Z","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"git status\"}","call_id":"call-1"}}"#
+                + "\n"
+                + r#"{"type":"response_item","timestamp":"2026-06-17T08:00:02.000Z","payload":{"type":"function_call_output","call_id":"call-1","output":"clean"}}"#,
+        );
+
+        let messages = load_codex_messages(&path.to_string_lossy()).expect("load messages");
+        fs::remove_file(path).ok();
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, "assistant");
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["type"],
+            "thinking"
+        );
+        assert_eq!(
+            messages[1].raw.as_ref().unwrap()["message"]["content"][0]["type"],
+            "tool_use"
+        );
+        assert_eq!(
+            messages[1].raw.as_ref().unwrap()["message"]["content"][0]["input"]["command"],
+            "git status"
+        );
+        assert_eq!(messages[2].role, "user");
+        assert_eq!(messages[2].content, TOOL_RESULT_CONTENT);
+        assert_eq!(
+            messages[2].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"],
+            "call-1"
+        );
     }
 }

@@ -1,43 +1,19 @@
-// AgentGroupBlock - 子代理调用工具块（占位符版本）
+// AgentGroupBlock - 子代理调用工具块
 
-import { useState, memo } from 'react';
-import type { ToolResultBlock } from '../../types/chat';
-import { useIsToolDenied } from '../../hooks/useIsToolDenied';
-import { extractResultText } from '../../utils/toolPresentation';
+import {memo, useState} from 'react';
+import {useTranslation} from 'react-i18next';
+import {Bot} from 'lucide-react';
+import type {ToolResultBlock} from '../../types/chat';
+import type {ToolInput} from '../../types/tools';
+import {useIsToolDenied} from '../../hooks/useIsToolDenied';
+import {extractAgentToolMeta, getToolDisplayStatus, summarizeAgentToolHeader,} from '../../utils/toolPresentation';
+import SubagentHistoryPanel from './SubagentHistoryPanel';
 
 export interface AgentGroupBlockProps {
   name?: string;
-  input?: Record<string, unknown>;
+  input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
-}
-
-/**
- * 解析 Agent 元数据
- */
-function parseAgentMeta(input: Record<string, unknown>, result?: ToolResultBlock | null) {
-  const description = (input.description as string) || (input.prompt as string) || '';
-  const subagentType = (input.subagent_type as string) || (input.name as string) || '';
-  const model = (input.model as string) || '';
-  const reasoningEffort = (input.reasoning_effort as string) || (input.reasoningEffort as string) || '';
-
-  // 尝试从结果中提取 agent_id
-  let agentId = (input.agent_id as string) || (input.agentId as string) || '';
-  if (!agentId && result) {
-    const text = extractResultText(result);
-    const match = text.match(/\b([0-9a-f]{8}-[0-9a-f-]{27})\b/i);
-    if (match) {
-      agentId = match[1];
-    }
-  }
-
-  return {
-    description,
-    subagentType,
-    model,
-    reasoningEffort,
-    agentId,
-  };
 }
 
 const AgentGroupBlock = memo(function AgentGroupBlock({
@@ -46,6 +22,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   result,
   toolId,
 }: AgentGroupBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const isDenied = useIsToolDenied(toolId);
 
@@ -53,19 +30,10 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
     return null;
   }
 
-  const meta = parseAgentMeta(input, result);
-
-  // 状态计算
-  const isCompleted = (result !== undefined && result !== null) || isDenied;
-  const isError = isDenied || (isCompleted && result?.is_error === true);
-  const status = isError ? 'error' : isCompleted ? 'completed' : 'pending';
-
-  // 缩短 agent_id 显示
-  const shortAgentId = meta.agentId
-    ? meta.agentId.length > 8
-      ? `${meta.agentId.slice(0, 8)}…`
-      : meta.agentId
-    : '';
+  const meta = extractAgentToolMeta(input, result);
+  const header = summarizeAgentToolHeader(meta, result, 'agent');
+  const status = getToolDisplayStatus(result, isDenied);
+  const hasVisibleMeta = header.hasVisibleMeta;
 
   return (
     <div className="task-container">
@@ -75,18 +43,27 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
-          <span className="agent-icon">🤖</span>
-          <span className="tool-title-text">{name || 'Agent'}</span>
-          {meta.subagentType && (
-            <span className="tool-title-summary">{meta.subagentType}</span>
+          <Bot className="tool-title-lucide" aria-hidden="true" />
+          <span className="tool-title-text">{name || t('tools.agent')}</span>
+          <span className="tool-command-chip tool-command-plan">
+            {t('tools.agent')}
+          </span>
+          {header.primarySummary && !expanded && (
+            <span className="tool-title-summary task-summary-text" title={header.primarySummary}>
+              {header.primarySummary}
+            </span>
           )}
-          {meta.model && (
-            <span className="tool-title-summary">· {meta.model}</span>
+          {header.secondarySummary && (
+            <span className="tool-title-secondary-summary" title={header.secondarySummary}>
+              {header.secondarySummary}
+            </span>
           )}
-          {shortAgentId && (
-            <span className="tool-title-summary agent-id-badge">{shortAgentId}</span>
+          {header.runtimeSummary && (
+            <span className="tool-title-summary tool-title-runtime-summary" title={header.runtimeSummary}>
+              {header.runtimeSummary}
+            </span>
           )}
-          {isDenied && <span className="tool-title-summary text-error">• Denied</span>}
+          {isDenied && <span className="tool-title-summary text-error">• {t('tools.denied')}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />
       </div>
@@ -94,51 +71,50 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
       {expanded && (
         <div className="task-details">
           <div className="task-content-wrapper">
-            {/* 描述 */}
             {meta.description && (
               <div className="tool-section">
-                <div className="tool-section-label">Description:</div>
+                <div className="tool-section-label">{t('tools.description')}:</div>
                 <div className="agent-description">{meta.description}</div>
               </div>
             )}
 
-            {/* Agent ID */}
             {meta.agentId && (
               <div className="tool-section">
-                <div className="tool-section-label">Agent ID:</div>
+                <div className="tool-section-label">{t('tools.agentId')}:</div>
                 <div className="agent-id-full">
                   <code>{meta.agentId}</code>
                 </div>
               </div>
             )}
 
-            {/* Model */}
             {meta.model && (
               <div className="tool-section">
-                <div className="tool-section-label">Model:</div>
+                <div className="tool-section-label">{t('tools.model')}:</div>
                 <div className="agent-model">{meta.model}</div>
               </div>
             )}
 
-            {/* Reasoning Effort */}
             {meta.reasoningEffort && (
               <div className="tool-section">
-                <div className="tool-section-label">Reasoning Effort:</div>
+                <div className="tool-section-label">{t('tools.reasoningEffort')}:</div>
                 <div className="agent-reasoning">{meta.reasoningEffort}</div>
               </div>
             )}
 
-            {/* 子代理历史占位符 */}
-            <div className="tool-section">
-              <div className="agent-history-placeholder">
-                <div className="agent-history-placeholder-text">
-                  📋 Subagent History (click to load)
-                </div>
-                <div className="agent-history-placeholder-note">
-                  完整实现需要会话历史管理任务 (06-16-session-history-management)
-                </div>
+            {meta.prompt && meta.prompt !== meta.description && (
+              <div className="tool-section">
+                <div className="tool-section-label">{t('tools.prompt')}:</div>
+                <div className="task-field-content task-prompt">{meta.prompt}</div>
               </div>
-            </div>
+            )}
+
+            <SubagentHistoryPanel
+              agentId={meta.agentId}
+              description={meta.description}
+              enabled={expanded}
+              hasVisibleMeta={hasVisibleMeta}
+              result={result}
+            />
           </div>
         </div>
       )}

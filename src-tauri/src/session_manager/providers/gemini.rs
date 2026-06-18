@@ -348,7 +348,12 @@ pub fn load_gemini_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessa
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        result.push(UnifiedSessionMessage { role, content, ts });
+        result.push(UnifiedSessionMessage {
+            role,
+            content,
+            ts,
+            raw: None,
+        });
     }
 
     Ok(result)

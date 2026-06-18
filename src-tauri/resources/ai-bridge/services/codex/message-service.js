@@ -17,19 +17,67 @@
  * @author Crafted with geek spirit
  */
 
-import { CodexPermissionMapper } from '../../utils/permission-mapper.js';
-import { getMcpServerTools as getMcpServerToolsImpl } from '../claude/mcp-status/index.js';
+import {CodexPermissionMapper} from '../../utils/permission-mapper.js';
+import {getMcpServerTools as getMcpServerToolsImpl} from '../claude/mcp-status/index.js';
+import {saveImageToTemp} from '../claude/attachment-service.js';
 import {
-  logDebug, logInfo, logWarn,
-  ensureCodexSdk,
-  normalizeCodexPermissionMode,
-  resolveSandboxModeOverride,
-  resolveApprovalPolicyOverride,
-  buildCodexCliEnvironment,
-  buildErrorPayload
+    buildCodexCliEnvironment,
+    buildErrorPayload,
+    ensureCodexSdk,
+    logDebug,
+    logWarn,
+    normalizeCodexPermissionMode,
+    resolveApprovalPolicyOverride,
+    resolveSandboxModeOverride
 } from './codex-utils.js';
-import { collectAgentsInstructions } from './codex-agents-loader.js';
-import { createInitialEventState, processCodexEventStream } from './codex-event-handler.js';
+import {collectAgentsInstructions} from './codex-agents-loader.js';
+import {createInitialEventState, processCodexEventStream} from './codex-event-handler.js';
+
+// ---------------------------------------------------------------------------
+// Attachment helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert frontend image attachments into Codex SDK local_image blocks.
+ *
+ * Codex accepts local file paths for image input. Tauri file picker/drop can
+ * provide a path, while clipboard images and some WebView sources only provide
+ * base64 data. In the latter case, persist the image to the same bounded temp
+ * directory used by Claude fallback handling, then pass the temp path to Codex.
+ *
+ * @param {Array} attachments
+ * @returns {Promise<Array>}
+ */
+export async function normalizeCodexImageAttachments(attachments = []) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+
+  const normalized = [];
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== 'object') {
+      continue;
+    }
+
+    if (attachment.type === 'local_image' && typeof attachment.path === 'string' && attachment.path.trim() !== '') {
+      normalized.push({ type: 'local_image', path: attachment.path });
+      continue;
+    }
+
+    const mediaType = typeof attachment.mediaType === 'string' ? attachment.mediaType : '';
+    const imageData = typeof attachment.data === 'string' ? attachment.data : '';
+    if (mediaType.startsWith('image/') && imageData) {
+      const tempPath = await saveImageToTemp(imageData, mediaType, attachment.fileName);
+      if (tempPath) {
+        normalized.push({ type: 'local_image', path: tempPath });
+      } else {
+        logWarn('Codex', 'Failed to persist base64 image attachment:', attachment.fileName || 'unnamed');
+      }
+    }
+  }
+
+  return normalized;
+}
 
 // ---------------------------------------------------------------------------
 // sendMessage
@@ -226,14 +274,13 @@ export async function sendMessage(
     // 6. Build Input and Start Streaming
     // ============================================================
 
+    const imageAttachments = await normalizeCodexImageAttachments(attachments);
     let runInput;
-    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+    if (imageAttachments.length > 0) {
       runInput = [{ type: 'text', text: finalMessage }];
-      for (const attachment of attachments) {
-        if (attachment && attachment.type === 'local_image' && attachment.path) {
-          runInput.push({ type: 'local_image', path: attachment.path });
-          console.log('[DEBUG] Added local_image attachment:', attachment.path);
-        }
+      for (const attachment of imageAttachments) {
+        runInput.push(attachment);
+        console.log('[DEBUG] Added local_image attachment:', attachment.path);
       }
       console.log('[DEBUG] Using array input format with', runInput.length, 'entries');
     } else {

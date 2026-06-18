@@ -1,11 +1,13 @@
-import { Clock } from 'lucide-react';
-import type { TokenUsage } from '../../types/chat';
+import {Clock} from 'lucide-react';
+import type {TokenUsage} from '../../types/chat';
 
 interface MessageMetaProps {
     /** 本轮耗时（毫秒） */
     durationMs?: number;
     /** token 用量 */
     usage?: TokenUsage;
+    /** 是否按 assistant 流式尾注风格展示 */
+    compact?: boolean;
 }
 
 /** 格式化耗时：mm:ss 或 h:mm:ss */
@@ -30,7 +32,7 @@ function formatTokenCount(count: number): string {
 /**
  * 消息元数据 - 显示耗时和 token 用量（assistant 消息流式结束后）
  */
-export default function MessageMeta({ durationMs, usage }: MessageMetaProps) {
+export default function MessageMeta({ durationMs, usage, compact = false }: MessageMetaProps) {
     if (durationMs === undefined && !usage) return null;
 
     // 计算总输入 token（非缓存输入 + 缓存写 + 缓存读）
@@ -41,16 +43,24 @@ export default function MessageMeta({ durationMs, usage }: MessageMetaProps) {
     const hasTokens = totalInput > 0 || output > 0;
 
     return (
-        <div className="flex items-center gap-1.5 mt-1.5 text-xs text-base-content/50">
+        <div
+            className={
+                compact
+                    ? 'inline-flex items-center gap-1 text-[11px] leading-none text-base-content/42'
+                    : 'flex items-center gap-1.5 mt-1.5 text-xs text-base-content/50'
+            }
+        >
             {durationMs !== undefined && (
                 <>
-                    <Clock size={12} />
-                    <span>本次耗时</span>
-                    <span className="font-medium">{formatDuration(durationMs)}</span>
+                    <Clock size={compact ? 10 : 12} className={compact ? 'opacity-70' : ''} />
+                    <span>{compact ? '耗时' : '本次耗时'}</span>
+                    <span className={compact ? 'font-medium text-base-content/60' : 'font-medium'}>
+                        {formatDuration(durationMs)}
+                    </span>
                 </>
             )}
             {durationMs !== undefined && hasTokens && (
-                <span className="opacity-50">·</span>
+                <span className="opacity-40">·</span>
             )}
             {hasTokens && (
                 <span
@@ -60,7 +70,7 @@ export default function MessageMeta({ durationMs, usage }: MessageMetaProps) {
                             : undefined
                     }
                 >
-                    输入 {formatTokenCount(totalInput)} / 输出 {formatTokenCount(output)}
+                    {compact ? 'tokens' : '输入'} {formatTokenCount(totalInput)} / {compact ? 'out' : '输出'} {formatTokenCount(output)}
                 </span>
             )}
         </div>

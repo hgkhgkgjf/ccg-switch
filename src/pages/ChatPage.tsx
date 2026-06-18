@@ -32,6 +32,7 @@ export default function ChatPage() {
         provider,
         currentCwd,
         activeSession,
+        pendingSessionKey,
         daemonReady,
         daemonStatus,
         error,
@@ -100,6 +101,25 @@ export default function ChatPage() {
     const renderableMessageCount = useMemo(
         () => messages.filter((message) => shouldRenderChatMessage(message)).length,
         [messages],
+    );
+    const anchorCount = useMemo(
+        () => messages.filter((message) => message.role === 'user' && shouldRenderChatMessage(message)).length,
+        [messages],
+    );
+    const activeAnchorLabel = useMemo(
+        () => {
+            const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user' && shouldRenderChatMessage(message));
+            if (!latestUserMessage) return undefined;
+
+            const rawText = typeof latestUserMessage.content === 'string'
+                ? latestUserMessage.content.trim()
+                : '';
+            if (rawText) {
+                return rawText.length > 64 ? `${rawText.slice(0, 64)}...` : rawText;
+            }
+            return t('chat.layout.anchorRail');
+        },
+        [messages, t],
     );
 
     const handleSearchChange = useCallback((value: string) => {
@@ -204,12 +224,15 @@ export default function ChatPage() {
                 <ChatSessionSidebar
                     activeSession={activeSession}
                     currentCwd={currentCwd}
+                    pendingSessionKey={pendingSessionKey}
                     onSessionSelect={handleSessionSelect}
                     onNewSession={handleNewSession}
                 />
 
                 <MessageAnchorRail
                     hasMessages={hasMessages}
+                    anchorCount={anchorCount}
+                    activeAnchorLabel={activeAnchorLabel}
                     onScrollToTop={scrollToTop}
                     onScrollToBottom={scrollToBottom}
                 />
@@ -227,12 +250,23 @@ export default function ChatPage() {
                                 <p className="text-sm">{t('chat.empty')}</p>
                             </div>
                         )}
-                        <MessageList messages={messages} searchQuery={searchQuery} />
+                        <MessageList
+                            messages={messages}
+                            searchQuery={searchQuery}
+                            scrollContainerRef={scrollRef}
+                        />
                     </div>
 
                     <ScrollControl
                         visible={hasMessages && !isNearBottom}
                         onScrollToBottom={scrollToBottom}
+                    />
+
+                    {/* 发送控制台：约束在中间对话列，避免横跨会话栏/状态栏 */}
+                    <ChatComposer
+                        sdkMissing={sdkMissing}
+                        onSdkMissing={() => setSdkModalOpen(true)}
+                        cwd={currentCwd ?? undefined}
                     />
                 </div>
 
@@ -240,6 +274,8 @@ export default function ChatPage() {
                     provider={provider}
                     messageCount={renderableMessageCount}
                     daemonReady={daemonReady}
+                    anchorCount={anchorCount}
+                    activeAnchorLabel={activeAnchorLabel}
                 />
             </div>
 
@@ -249,13 +285,6 @@ export default function ChatPage() {
                     <div className="alert alert-error py-2 text-sm">{error}</div>
                 </div>
             )}
-
-            {/* 发送控制台（顶部上下文栏 + 富输入 + 底部工具栏） */}
-            <ChatComposer
-                sdkMissing={sdkMissing}
-                onSdkMissing={() => setSdkModalOpen(true)}
-                cwd={currentCwd ?? undefined}
-            />
 
             {/* SDK 依赖管理弹窗 */}
             <ModalDialog
