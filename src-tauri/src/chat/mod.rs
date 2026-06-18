@@ -17,14 +17,16 @@
 
 mod daemon_client;
 mod manager;
+mod permission_watcher;
 mod protocol;
 mod resources;
 mod sdk_installer;
-mod permission_watcher;
+mod slash_commands;
 
 pub use manager::ChatManager;
-pub use sdk_installer::SdkStatus;
 pub use permission_watcher::{
-    write_ask_user_question_response, write_plan_approval_response,
+    write_ask_user_question_response, write_plan_approval_response, write_tool_permission_response,
 };
 pub use resources::permission_dir;
+pub use sdk_installer::SdkStatus;
+pub use slash_commands::list_slash_commands;

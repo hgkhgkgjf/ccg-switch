@@ -4,8 +4,11 @@ import {getToolType} from '../types/tools';
 import {
     collectEditToolItems,
     extractAgentToolMeta,
+    extractResultText,
+    formatToolResultDisplayText,
     getAgentToolExtraParams,
     getToolLineInfo,
+    mergeEditToolItemsByFile,
     resolveToolTarget,
     shortenToolIdentifier,
     summarizeAgentToolHeader,
@@ -171,6 +174,64 @@ describe('tool presentation', () => {
         ]);
     });
 
+    it('merges repeated edit rows for the same file while preserving total stats and preview lines', () => {
+        const blocks: ToolUseBlock[] = [
+            {
+                type: 'tool_use',
+                id: 'patch-1',
+                name: 'apply_patch',
+                input: {
+                    patch: [
+                        '*** Begin Patch',
+                        '*** Update File: src/styles/toolBlocks.css',
+                        '@@ -10,2 +10,4 @@',
+                        ' keep',
+                        '-old padding',
+                        '+new padding',
+                        '+new border',
+                        '+new shadow',
+                        '*** End Patch',
+                    ].join('\n'),
+                },
+            },
+            {
+                type: 'tool_use',
+                id: 'patch-2',
+                name: 'apply_patch',
+                input: {
+                    patch: [
+                        '*** Begin Patch',
+                        '*** Update File: src\\styles\\toolBlocks.css',
+                        '@@ -30,3 +30,2 @@',
+                        ' keep again',
+                        '-old hover',
+                        '-old color',
+                        '+new hover',
+                        '*** End Patch',
+                    ].join('\n'),
+                },
+            },
+        ];
+
+        const items = collectEditToolItems(blocks, () => completedResult);
+        const merged = mergeEditToolItemsByFile(items);
+
+        expect(items).toHaveLength(2);
+        expect(merged).toHaveLength(1);
+        expect(merged[0]).toMatchObject({
+            displayPath: 'src/styles/toolBlocks.css',
+            openPath: 'src/styles/toolBlocks.css',
+            additions: 4,
+            deletions: 3,
+            lineStart: 10,
+            lineEnd: 32,
+            isCompleted: true,
+            isError: false,
+        });
+        expect(merged[0].diffPreviewLines.some((line) => line.text === 'new border')).toBe(true);
+        expect(merged[0].diffPreviewLines.some((line) => line.text === 'old color')).toBe(true);
+    });
+
     it('extracts clickable files and line numbers from search output', () => {
         const summary = summarizeSearchResultText([
             'src/pages/ChatPage.tsx:122:7:openFile(target.openPath)',
@@ -196,6 +257,100 @@ describe('tool presentation', () => {
         expect(summary.files).toEqual([
             {path: 'C:\\guodevelop\\ccg-switch\\src\\utils\\bridge.ts', lineStart: 18},
         ]);
+    });
+
+    it('formats MCP text-block JSON output into readable multiline tool results', () => {
+        const rawOutput = [
+            'Wall time: 0.0035 seconds.',
+            'Output:',
+            JSON.stringify([
+                {
+                    type: 'text',
+                    text: '**src/components/chat/MessageAnchorRail.tsx**\n\n```tsx\n1\timport {useMemo} from "react";\n2\tconst value = 1;\n```',
+                },
+            ]),
+        ].join('\n');
+
+        const formatted = formatToolResultDisplayText(rawOutput);
+
+        expect(formatted).toContain('Wall time: 0.0035 seconds.');
+        expect(formatted).toContain('Output:\n**src/components/chat/MessageAnchorRail.tsx**');
+        expect(formatted).toContain('1\timport {useMemo} from "react";');
+        expect(formatted).not.toContain('\\n2\\tconst value');
+        expect(summarizeToolResultText(formatted)).toBe('**src/components/chat/MessageAnchorRail.tsx**…');
+    });
+
+    it('formats MCP wrapper objects and escaped codegraph newlines into readable output', () => {
+        const formatted = formatToolResultDisplayText(JSON.stringify({
+            content: [
+                {
+                    type: 'text',
+                    text: '**src/utils/toolPresentation.ts**\\n\\n```typescript\\n1\\tconst value = 1;\\n2\\tconst next = value + 1;\\n```',
+                },
+            ],
+        }));
+
+        expect(formatted).toContain('**src/utils/toolPresentation.ts**\n\n```typescript');
+        expect(formatted).toContain('1\tconst value = 1;');
+        expect(formatted).toContain('2\tconst next = value + 1;');
+        expect(formatted).not.toContain('\\n2\\tconst next');
+    });
+
+    it('extracts text from MCP wrapper object results without exposing raw JSON', () => {
+        const text = extractResultText({
+            content: {
+                content: [
+                    {
+                        type: 'text',
+                        text: 'line 1\\nline 2',
+                    },
+                ],
+            },
+        });
+
+        expect(text).toBe('line 1\nline 2');
+    });
+
+    it('extracts multiline text from MCP array block results', () => {
+        const text = extractResultText({
+            content: [
+                {
+                    type: 'text',
+                    text: 'first line\\nsecond line',
+                },
+                {
+                    type: 'text',
+                    text: 'third line',
+                },
+            ],
+        });
+
+        expect(text).toBe('first line\nsecond line\nthird line');
+    });
+
+    it('falls back to pretty JSON for unknown structured tool result content', () => {
+        const text = extractResultText({
+            content: {
+                status: 'ok',
+                count: 2,
+            },
+        });
+
+        expect(text).toBe(JSON.stringify({status: 'ok', count: 2}, null, 2));
+    });
+
+    it('keeps malformed mixed tool result arrays readable', () => {
+        const text = extractResultText({
+            content: [
+                undefined,
+                {
+                    type: 'text',
+                    text: 'usable output',
+                },
+            ],
+        });
+
+        expect(text).toBe('undefined\nusable output');
     });
 
     it('extracts agent tool metadata from structured spawn-agent results', () => {

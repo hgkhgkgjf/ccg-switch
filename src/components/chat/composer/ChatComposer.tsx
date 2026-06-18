@@ -141,7 +141,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const [enhancing, setEnhancing] = useState(false);
     const [enhancedText, setEnhancedText] = useState('');
 
-    const completions = useCompletions({ cwd });
+    const completions = useCompletions({ cwd, provider });
 
     const isStreaming = activeRequestId !== null;
     const maxTokens = contextWindowFor(model);

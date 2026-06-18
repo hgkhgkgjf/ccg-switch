@@ -8,6 +8,7 @@ import type {ToolInput} from '../../types/tools';
 import {useIsToolDenied} from '../../hooks/useIsToolDenied';
 import {
     extractResultText,
+    formatToolResultDisplayText,
     getToolDisplayStatus,
     resolveToolTarget,
     summarizeGenericTool,
@@ -71,8 +72,9 @@ const GenericToolBlock = memo(function GenericToolBlock({
 
   // 提取结果文本
   const resultText = result ? extractResultText(result) : null;
-  const truncatedResult = resultText ? truncateContent(resultText, 10000) : null;
-  const resultSummary = resultText ? summarizeToolResultText(resultText) : '';
+  const displayResultText = resultText ? formatToolResultDisplayText(resultText) : null;
+  const truncatedResult = displayResultText ? truncateContent(displayResultText, 10000) : null;
+  const resultSummary = displayResultText ? summarizeToolResultText(displayResultText) : '';
   const hasExpandableContent = inputParams.length > 0 || Boolean(truncatedResult);
   const detailResultLabel = isError ? t('tools.errorOutput') : t('tools.result');
   const primarySummary = target
@@ -92,8 +94,8 @@ const GenericToolBlock = memo(function GenericToolBlock({
 
   const handleCopyOutput = async (event?: React.MouseEvent) => {
     event?.stopPropagation();
-    if (resultText) {
-      await copyToClipboard(resultText);
+    if (displayResultText) {
+      await copyToClipboard(displayResultText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -140,7 +142,7 @@ const GenericToolBlock = memo(function GenericToolBlock({
         >
           {copied ? t('tools.copied') : t('tools.copyInput')}
         </button>
-        {resultText && (
+        {displayResultText && (
           <button
             type="button"
             className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
@@ -153,20 +155,10 @@ const GenericToolBlock = memo(function GenericToolBlock({
     </div>
   );
 
-  if (compact) {
-    return (
-      <div className="task-container task-container-compact">
-        <div className="task-details task-details-compact">
-          {detailContent}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="task-container">
+    <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
-        className="task-header"
+        className={compact ? 'task-header task-header-compact' : 'task-header'}
         onClick={hasExpandableContent ? () => setExpanded((prev) => !prev) : undefined}
         style={{ cursor: hasExpandableContent ? 'pointer' : 'default' }}
       >
@@ -199,7 +191,7 @@ const GenericToolBlock = memo(function GenericToolBlock({
           {showResultSummary && (
             <span
               className={`tool-title-secondary-summary ${isError ? 'tool-title-secondary-summary-error' : ''}`}
-              title={resultText ?? resultSummary}
+              title={displayResultText ?? resultSummary}
             >
               {resultSummary}
             </span>
@@ -210,7 +202,7 @@ const GenericToolBlock = memo(function GenericToolBlock({
       </div>
 
       {expanded && hasExpandableContent && (
-        <div className="task-details">
+        <div className={`task-details ${compact ? 'task-details-compact' : ''}`}>
           {detailContent}
         </div>
       )}

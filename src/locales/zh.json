@@ -57,9 +57,44 @@
         "layout": {
             "anchorRail": "消息锚点",
             "searchPlaceholder": "搜索当前对话",
+            "scrollToTop": "滚动到顶部",
             "scrollToBottom": "滚动到底部",
             "statusPanel": "会话状态",
             "messageCount": "消息数",
+            "currentAnchor": "当前位置",
+            "currentActivity": "当前活动",
+            "recentEdits": "最近改动",
+            "editSummary": "{{count}} 个文件 · +{{additions}} / -{{deletions}}",
+            "hiddenEditFiles": "还有 {{count}} 个文件未在列表中显示",
+            "showRecentEditFiles": "收起为最近改动",
+            "expandEditTree": "展开文件夹树",
+            "collapseEditTree": "收起文件夹树",
+            "diffViewMode": "差异展示方式",
+            "diffUnifiedView": "统一差异视图",
+            "diffSplitView": "拆分差异视图",
+            "diffLineWrap": "差异内容自动换行",
+            "diffLineNoWrap": "差异内容不换行，横向滚动查看",
+            "diffPanel": "文件差异",
+            "collapseDiffPanel": "收起文件差异面板",
+            "expandDiffPanel": "展开文件差异面板",
+            "diffPanelEmpty": "选择右侧文件查看完整差异",
+            "diffLineSummary": "{{count}} 行差异",
+            "resizeConversationDiff": "调整对话和差异区域宽度",
+            "resizeDiffStatus": "调整差异和右侧区域宽度",
+            "resizeConversationStatus": "调整对话和右侧区域宽度",
+            "noRecentEdits": "暂时没有可展示的文件改动",
+            "pendingTools": "进行中工具",
+            "errorTools": "失败工具",
+            "streamingReply": "正在生成回复…",
+            "idle": "当前空闲",
+            "jumpToMessage": "跳转到第 {{index}} 条用户消息",
+            "anchorPosition": "{{current}} / {{total}}",
+            "anchorKind": {
+                "text": "文本",
+                "image": "图片",
+                "mixed": "图文",
+                "empty": "空内容"
+            },
             "clearSearch": "清空搜索",
             "searchResults": "找到 {{count}} 条匹配消息",
             "searchNoResults": "没有找到匹配消息"
@@ -136,6 +171,7 @@
             "noProjects": "暂无项目",
             "noSessions": "暂无会话",
             "noMatchingSessions": "没有匹配的会话",
+            "refreshingSessions": "正在刷新会话列表…",
             "projectSessionCount": "{{count}} 个会话"
         },
         "enhancer": {
@@ -145,6 +181,15 @@
             "loading": "正在润色…",
             "useEnhanced": "采用增强版",
             "keepOriginal": "保留原文"
+        },
+        "permission": {
+            "toolTitle": "需要确认工具权限",
+            "toolDescription": "工具 {{tool}} 请求执行。请确认是否允许本次操作。",
+            "parameters": "参数",
+            "rawInput": "完整输入",
+            "cwd": "工作目录：",
+            "deny": "拒绝",
+            "allowOnce": "允许一次"
         },
         "sdk": {
             "title": "SDK 依赖",

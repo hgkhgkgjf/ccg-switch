@@ -1,4 +1,5 @@
 import type {ChatMessage, ContentBlock, MessageRaw, TextBlock, ToolResultBlock,} from '../types/chat';
+import {isImageContentBlock, isImagePlaceholderText, isLikelyImageBase64Text} from './chatImageBlocks';
 
 interface MergeRawChatMessageOptions {
     createId?: () => string;
@@ -6,6 +7,41 @@ interface MergeRawChatMessageOptions {
 }
 
 const TOOL_RESULT_CONTENT = '[tool_result]';
+const PROTOCOL_CONTEXT_PREFIXES = [
+    '<permissions instructions>',
+    '<heartbeat>',
+    '<environment_context>',
+    '<workflow-state>',
+    '<codex-mode>',
+    '<app-context>',
+    '<collaboration_mode>',
+    '<skills_instructions>',
+    '<plugins_instructions>',
+    '<turn_aborted>',
+    '<user_action>',
+    '<subagent_notification>',
+    '<agents-instructions>',
+    '<skill>',
+    '# AGENTS.md instructions for ',
+    '## Skills\nA skill is a set of local instructions',
+    '## Plugins\nA plugin is a local bundle',
+    '## Heartbeats\nOccasionally you will see a user message surrounded',
+    'Another language model started to solve this problem',
+    '## Handoff Summary',
+    'Filesystem sandboxing defines which files can be read or written.',
+    'Tools are grouped by namespace',
+];
+const PROTOCOL_CONTEXT_PATTERNS = [
+    /^You are Codex,\s+a coding agent\b/i,
+    /^You are Claude Code\b/i,
+    /^You are an AI assistant accessed via an API\b/i,
+    /^Knowledge cutoff:\s*\d{4}-\d{2}/i,
+    /^Current date:\s*\d{4}-\d{2}/i,
+    /^#\s*AGENTS\.md\b/i,
+    /^#\s*CLAUDE\.md\b/i,
+    /^#\s*Tools\s*\n/i,
+    /^##\s*Tools\s*\n/i,
+];
 
 function defaultCreateId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -36,6 +72,24 @@ export function getContentBlocksFromRaw(raw?: MessageRaw | null): ContentBlock[]
     return [];
 }
 
+function getDisplayContentBlocksFromRaw(raw?: MessageRaw | null): ContentBlock[] {
+    const blocks = getContentBlocksFromRaw(raw);
+    if (!blocks.some(isImageContentBlock)) return blocks;
+
+    return blocks.filter((block, index) => {
+        if (block.type !== 'text') return true;
+        if (isImagePlaceholderText(block.text)) return false;
+        if (!isLikelyImageBase64Text(block.text)) return true;
+
+        const previousBlock = blocks[index - 1];
+        const nextBlock = blocks[index + 1];
+        return !(
+            (previousBlock && isImageContentBlock(previousBlock))
+            || (nextBlock && isImageContentBlock(nextBlock))
+        );
+    });
+}
+
 function isTextBlock(block: ContentBlock): block is TextBlock {
     return block.type === 'text';
 }
@@ -45,7 +99,7 @@ function isToolResultBlock(block: ContentBlock): block is ToolResultBlock {
 }
 
 function getTextFromRaw(raw: MessageRaw): string {
-    return getContentBlocksFromRaw(raw)
+    return getDisplayContentBlocksFromRaw(raw)
         .filter(isTextBlock)
         .map((block) => block.text)
         .filter((text) => text.trim().length > 0)
@@ -67,7 +121,24 @@ function hasVisibleText(text: string | undefined): boolean {
     return Boolean(text?.trim());
 }
 
+export function isProtocolContextText(text: string | undefined): boolean {
+    const trimmed = text?.trim();
+    if (!trimmed) return false;
+
+    return PROTOCOL_CONTEXT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))
+        || PROTOCOL_CONTEXT_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+function isProtocolContextMessage(message: ChatMessage): boolean {
+    if (isProtocolContextText(message.content)) return true;
+    return getContentBlocksFromRaw(message.raw).some((block) => (
+        block.type === 'text' && isProtocolContextText(block.text)
+    ));
+}
+
 function isRenderableContentBlock(block: ContentBlock): boolean {
+    if (isImageContentBlock(block)) return true;
+
     switch (block.type) {
         case 'text':
             return hasVisibleText(block.text);
@@ -83,10 +154,12 @@ function isRenderableContentBlock(block: ContentBlock): boolean {
 }
 
 export function getRenderableContentBlocks(raw?: MessageRaw | null): ContentBlock[] {
-    return getContentBlocksFromRaw(raw).filter(isRenderableContentBlock);
+    return getDisplayContentBlocksFromRaw(raw).filter(isRenderableContentBlock);
 }
 
 export function shouldRenderChatMessage(message: ChatMessage): boolean {
+    if (message.role === 'system') return false;
+    if (isProtocolContextMessage(message)) return false;
     if (message.role === 'user' && hasToolResult(message.raw)) return false;
     if (message.streaming || message.error) return true;
     if (message.content.trim().length > 0) return true;

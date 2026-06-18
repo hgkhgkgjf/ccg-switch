@@ -1,5 +1,46 @@
 import {describe, expect, it} from 'vitest';
-import {normalizeWorkspaceFile} from './useCompletions';
+import {getSlashCommandCompletions, normalizeWorkspaceFile} from './useCompletions';
+
+describe('getSlashCommandCompletions', () => {
+    it('includes cc-gui parity built-in commands for an empty slash query', () => {
+        const labels = getSlashCommandCompletions('').map((item) => item.label);
+
+        expect(labels).toEqual(expect.arrayContaining([
+            '/clear',
+            '/compact',
+            '/context',
+            '/init',
+            '/plan',
+            '/resume',
+            '/review',
+            '/batch',
+            '/claude-api',
+            '/debug',
+            '/loop',
+            '/simplify',
+            '/update-config',
+            '/diff',
+        ]));
+    });
+
+    it('filters slash commands by command label and description', () => {
+        expect(getSlashCommandCompletions('pla').map((item) => item.label)).toContain('/plan');
+        expect(getSlashCommandCompletions('tokens').map((item) => item.label)).toContain('/compact');
+    });
+
+    it('normalizes backend-provided project commands', () => {
+        expect(getSlashCommandCompletions('deep', [{
+            name: '/review:deep',
+            description: 'Deep project review',
+            source: 'project',
+        }])).toEqual([{
+            id: '/review:deep',
+            label: '/review:deep',
+            description: 'Deep project review [project]',
+            insertText: '/review:deep',
+        }]);
+    });
+});
 
 describe('normalizeWorkspaceFile', () => {
     it('accepts snake_case payloads from Rust commands', () => {

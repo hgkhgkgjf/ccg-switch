@@ -10,7 +10,8 @@ use tauri::{AppHandle, Emitter, Runtime};
 /// Polls the permission directory for request files written by the daemon
 /// (claude-agent-sdk), parses them, and emits Tauri events to the frontend.
 ///
-/// Protocol: daemon writes `ask-user-question-<sessionId>-<requestId>.json` or
+/// Protocol: daemon writes `request-<sessionId>-<requestId>.json`,
+/// `ask-user-question-<sessionId>-<requestId>.json` or
 /// `plan-approval-<sessionId>-<requestId>.json` → watcher reads + emits event →
 /// frontend responds via Tauri command → writes response file → daemon reads.
 pub struct PermissionWatcher<R: Runtime> {
@@ -64,6 +65,37 @@ pub struct AllowedPrompt {
     pub prompt: String,
 }
 
+fn empty_tool_inputs() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
+fn deserialize_tool_inputs<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value =
+        Option::<serde_json::Value>::deserialize(deserializer)?.unwrap_or_else(empty_tool_inputs);
+    if value.is_object() {
+        Ok(value)
+    } else {
+        Ok(empty_tool_inputs())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPermissionRequest {
+    pub request_id: String,
+    pub tool_name: String,
+    #[serde(
+        default = "empty_tool_inputs",
+        deserialize_with = "deserialize_tool_inputs"
+    )]
+    pub inputs: serde_json::Value,
+    pub timestamp: String,
+    pub cwd: String,
+}
+
 // ─── Response Types (for Tauri commands to serialize) ─────────────────────
 
 #[derive(Serialize)]
@@ -82,6 +114,11 @@ struct PlanApprovalResponse {
     target_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ToolPermissionResponse {
+    allow: bool,
 }
 
 impl<R: Runtime> PermissionWatcher<R> {
@@ -132,6 +169,10 @@ impl<R: Runtime> PermissionWatcher<R> {
                         && !name.contains("-response-")
                     {
                         Self::handle_plan_approval(&path, app);
+                    } else if name.starts_with(&format!("request-{}-", session_id))
+                        && name.ends_with(".json")
+                    {
+                        Self::handle_tool_permission(&path, app);
                     }
                 }
             }
@@ -166,6 +207,23 @@ impl<R: Runtime> PermissionWatcher<R> {
             Err(e) => eprintln!("[PermissionWatcher] Read error: {e}"),
         }
     }
+
+    fn handle_tool_permission(file: &Path, app: &AppHandle<R>) {
+        match std::fs::read_to_string(file) {
+            Ok(content) => match serde_json::from_str::<ToolPermissionRequest>(&content) {
+                Ok(req) => {
+                    eprintln!(
+                        "[PermissionWatcher] ToolPermission: {} {}",
+                        req.tool_name, req.request_id
+                    );
+                    let _ = app.emit("permission://tool", req);
+                    let _ = std::fs::remove_file(file);
+                }
+                Err(e) => eprintln!("[PermissionWatcher] Parse error: {e}"),
+            },
+            Err(e) => eprintln!("[PermissionWatcher] Read error: {e}"),
+        }
+    }
 }
 
 /// Write AskUserQuestion response file.
@@ -184,10 +242,8 @@ pub fn write_ask_user_question_response(
         request_id: request_id.to_string(),
         answers,
     };
-    let json = serde_json::to_string_pretty(&resp)
-        .map_err(|e| format!("序列化失败: {e}"))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("写入响应文件失败: {e}"))?;
+    let json = serde_json::to_string_pretty(&resp).map_err(|e| format!("序列化失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入响应文件失败: {e}"))?;
     Ok(())
 }
 
@@ -200,10 +256,7 @@ pub fn write_plan_approval_response(
     target_mode: String,
     message: Option<String>,
 ) -> Result<(), String> {
-    let filename = format!(
-        "plan-approval-response-{}-{}.json",
-        session_id, request_id
-    );
+    let filename = format!("plan-approval-response-{}-{}.json", session_id, request_id);
     let path = permission_dir.join(filename);
     let resp = PlanApprovalResponse {
         request_id: request_id.to_string(),
@@ -211,9 +264,61 @@ pub fn write_plan_approval_response(
         target_mode,
         message,
     };
-    let json = serde_json::to_string_pretty(&resp)
-        .map_err(|e| format!("序列化失败: {e}"))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("写入响应文件失败: {e}"))?;
+    let json = serde_json::to_string_pretty(&resp).map_err(|e| format!("序列化失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入响应文件失败: {e}"))?;
     Ok(())
+}
+
+/// Write generic tool permission response file.
+pub fn write_tool_permission_response(
+    permission_dir: &Path,
+    session_id: &str,
+    request_id: &str,
+    allow: bool,
+) -> Result<(), String> {
+    let filename = format!("response-{}-{}.json", session_id, request_id);
+    let path = permission_dir.join(filename);
+    let resp = ToolPermissionResponse { allow };
+    let json = serde_json::to_string_pretty(&resp).map_err(|e| format!("序列化失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入响应文件失败: {e}"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_tool_permission_response_writes_bridge_allow_payload() {
+        let dir = std::env::temp_dir().join(format!(
+            "ccg-switch-permission-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp permission dir");
+
+        write_tool_permission_response(&dir, "default", "perm-1", true).expect("write response");
+
+        let path = dir.join("response-default-perm-1.json");
+        let content = std::fs::read_to_string(&path).expect("read response file");
+        let value: serde_json::Value = serde_json::from_str(&content).expect("parse response json");
+
+        assert_eq!(value.get("allow").and_then(|v| v.as_bool()), Some(true));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tool_permission_request_allows_missing_inputs() {
+        let request = serde_json::json!({
+            "requestId": "perm-2",
+            "toolName": "Bash",
+            "timestamp": "2026-06-18T09:00:00.000Z",
+            "cwd": "C:/guodevelop/ccg-switch"
+        });
+
+        let parsed: ToolPermissionRequest =
+            serde_json::from_value(request).expect("missing inputs should default");
+
+        assert_eq!(parsed.inputs, empty_tool_inputs());
+    }
 }

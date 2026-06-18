@@ -97,9 +97,11 @@ pub fn detect_node() -> Result<PathBuf, String> {
         }
     }
 
-    Err("Node.js runtime not found. Install Node 18+ and ensure it is on PATH, \
+    Err(
+        "Node.js runtime not found. Install Node 18+ and ensure it is on PATH, \
          or set AI_BRIDGE_NODE to the node executable."
-        .to_string())
+            .to_string(),
+    )
 }
 
 /// Detect a usable `npm` executable.
@@ -147,8 +149,7 @@ pub fn permission_dir<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> Result
         .join("permissions");
 
     if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("创建 permissions 目录失败: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建 permissions 目录失败: {e}"))?;
     }
 
     Ok(dir)
@@ -162,4 +163,3 @@ pub fn permission_dir<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> Result
 pub fn sdk_dir(deps_dir: &Path, sdk_id: &str) -> PathBuf {
     deps_dir.join("dependencies").join(sdk_id)
 }
-

@@ -19,6 +19,7 @@ export interface TaskExecutionBlockProps {
   input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
+  compact?: boolean;
 }
 
 const TaskExecutionBlock = memo(function TaskExecutionBlock({
@@ -26,6 +27,7 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({
   input,
   result,
   toolId,
+  compact = false,
 }: TaskExecutionBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -41,9 +43,9 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({
   const extraParams = getAgentToolExtraParams(input);
 
   return (
-    <div className="task-container">
+    <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
-        className="task-header"
+        className={compact ? 'task-header task-header-compact' : 'task-header'}
         onClick={() => setExpanded((prev) => !prev)}
         style={{ cursor: 'pointer' }}
       >
@@ -74,7 +76,7 @@ const TaskExecutionBlock = memo(function TaskExecutionBlock({
       </div>
 
       {expanded && (
-        <div className="task-details">
+        <div className={`task-details ${compact ? 'task-details-compact' : ''}`}>
           <div className="task-content-wrapper">
             {meta.nickname && (
               <div className="tool-section">

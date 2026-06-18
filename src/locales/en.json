@@ -68,9 +68,44 @@
         "layout": {
             "anchorRail": "Message anchors",
             "searchPlaceholder": "Search this conversation",
+            "scrollToTop": "Scroll to top",
             "scrollToBottom": "Scroll to bottom",
             "statusPanel": "Session status",
             "messageCount": "Messages",
+            "currentAnchor": "Current position",
+            "currentActivity": "Current activity",
+            "recentEdits": "Recent edits",
+            "editSummary": "{{count}} files · +{{additions}} / -{{deletions}}",
+            "hiddenEditFiles": "{{count}} more files not shown in this list",
+            "showRecentEditFiles": "Collapse to recent edits",
+            "expandEditTree": "Expand file tree",
+            "collapseEditTree": "Collapse file tree",
+            "diffViewMode": "Diff view mode",
+            "diffUnifiedView": "Unified diff view",
+            "diffSplitView": "Split diff view",
+            "diffLineWrap": "Wrap diff lines",
+            "diffLineNoWrap": "Do not wrap diff lines; use horizontal scrolling",
+            "diffPanel": "File diff",
+            "collapseDiffPanel": "Collapse file diff panel",
+            "expandDiffPanel": "Expand file diff panel",
+            "diffPanelEmpty": "Select a file on the right to inspect the full diff",
+            "diffLineSummary": "{{count}} diff lines",
+            "resizeConversationDiff": "Resize conversation and diff panes",
+            "resizeDiffStatus": "Resize diff and right panes",
+            "resizeConversationStatus": "Resize conversation and right panes",
+            "noRecentEdits": "No file edits to show yet",
+            "pendingTools": "Pending tools",
+            "errorTools": "Failed tools",
+            "streamingReply": "Generating a reply…",
+            "idle": "Idle",
+            "jumpToMessage": "Go to user message {{index}}",
+            "anchorPosition": "{{current}} / {{total}}",
+            "anchorKind": {
+                "text": "Text",
+                "image": "Image",
+                "mixed": "Text + image",
+                "empty": "Empty"
+            },
             "clearSearch": "Clear search",
             "searchResults": "Found {{count}} matching messages",
             "searchNoResults": "No matching messages found"
@@ -147,6 +182,7 @@
             "noProjects": "No projects",
             "noSessions": "No sessions",
             "noMatchingSessions": "No matching sessions",
+            "refreshingSessions": "Refreshing sessions…",
             "projectSessionCount": "{{count}} sessions"
         },
         "enhancer": {
@@ -156,6 +192,15 @@
             "loading": "Enhancing…",
             "useEnhanced": "Use enhanced",
             "keepOriginal": "Keep original"
+        },
+        "permission": {
+            "toolTitle": "Tool permission required",
+            "toolDescription": "Tool {{tool}} wants to run. Confirm whether to allow this operation.",
+            "parameters": "Parameters",
+            "rawInput": "Full input",
+            "cwd": "Working directory:",
+            "deny": "Deny",
+            "allowOnce": "Allow once"
         },
         "sdk": {
             "title": "SDK Dependencies",

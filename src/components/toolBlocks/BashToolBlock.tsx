@@ -168,20 +168,10 @@ const BashToolBlock = memo(function BashToolBlock({
     </div>
   );
 
-  if (compact) {
-    return (
-      <div className="task-container task-container-compact">
-        <div className="task-details task-details-compact">
-          {detailContent}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="task-container">
+    <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
-        className="task-header"
+        className={compact ? 'task-header task-header-compact' : 'task-header'}
         onClick={() => setExpanded((prev) => !prev)}
         style={{ cursor: 'pointer' }}
       >
@@ -208,7 +198,7 @@ const BashToolBlock = memo(function BashToolBlock({
       </div>
 
       {expanded && (
-        <div className="task-details">
+        <div className={`task-details ${compact ? 'task-details-compact' : ''}`}>
           {detailContent}
         </div>
       )}

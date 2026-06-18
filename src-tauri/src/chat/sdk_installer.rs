@@ -162,10 +162,10 @@ where
     let sdk_dir = resources::sdk_dir(deps_dir, sdk.id);
 
     // Path-safety: ensure sdk_dir stays within deps_dir (prevent traversal).
-    let norm_sdk = sdk_dir
+    let norm_sdk = sdk_dir.canonicalize().unwrap_or_else(|_| sdk_dir.clone());
+    let norm_deps = deps_dir
         .canonicalize()
-        .unwrap_or_else(|_| sdk_dir.clone());
-    let norm_deps = deps_dir.canonicalize().unwrap_or_else(|_| deps_dir.to_path_buf());
+        .unwrap_or_else(|_| deps_dir.to_path_buf());
     // Compare before creation: sdk_dir may not exist yet, so check the lexical prefix.
     if !sdk_dir.starts_with(deps_dir) && !norm_sdk.starts_with(&norm_deps) {
         return Err("安全错误：SDK 目录超出依赖目录范围".to_string());
@@ -246,8 +246,7 @@ where
 pub fn uninstall_sdk(sdk: SdkDefinition, deps_dir: &Path) -> Result<(), String> {
     let dir = resources::sdk_dir(deps_dir, sdk.id);
     if dir.exists() {
-        std::fs::remove_dir_all(&dir)
-            .map_err(|e| format!("删除 {} 失败: {e}", dir.display()))?;
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("删除 {} 失败: {e}", dir.display()))?;
     }
     Ok(())
 }

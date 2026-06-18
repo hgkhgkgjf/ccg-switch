@@ -557,7 +557,11 @@ export function summarizeToolResultText(resultText: string, maxLength = 84): str
   const normalized = resultText
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter((line) => (
+      Boolean(line)
+      && !/^Wall time:/i.test(line)
+      && line.toLowerCase() !== 'output:'
+    ));
 
   if (normalized.length === 0) {
     return '';
@@ -576,6 +580,84 @@ export function summarizeToolResultText(resultText: string, maxLength = 84): str
   }
 
   return truncated;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function decodeEscapedToolText(text: string): string {
+  const escapedLineBreaks = text.match(/\\r\\n|\\n/g)?.length ?? 0;
+  if (escapedLineBreaks === 0 || /\r?\n/.test(text)) return text;
+
+  return text
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t');
+}
+
+function stringifyToolJson(value: unknown): string {
+  if (typeof value === 'string') return decodeEscapedToolText(value);
+  return JSON.stringify(value, null, 2) ?? String(value);
+}
+
+function textFromMcpTextBlocks(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => {
+      if (isRecord(item) && typeof item.text === 'string') return decodeEscapedToolText(item.text);
+      if (isRecord(item) && Array.isArray(item.content)) {
+        return textFromMcpTextBlocks(item.content) ?? stringifyToolJson(item);
+      }
+      return stringifyToolJson(item);
+    }).filter((part) => part.trim().length > 0);
+
+    return parts.length > 0 ? parts.join('\n') : null;
+  }
+
+  if (isRecord(value) && typeof value.text === 'string') {
+    return decodeEscapedToolText(value.text);
+  }
+
+  if (isRecord(value) && Array.isArray(value.content)) {
+    return textFromMcpTextBlocks(value.content);
+  }
+
+  return null;
+}
+
+function parseJsonToolText(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    const textBlocks = textFromMcpTextBlocks(parsed);
+    return textBlocks ?? stringifyToolJson(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function decodeToolOutputJsonSection(text: string): string | null {
+  const markerMatch = /(?:^|\r?\n)Output:\s*/.exec(text);
+  if (!markerMatch || markerMatch.index === undefined) return null;
+
+  const markerStart = markerMatch.index + (text[markerMatch.index] === '\n' || text[markerMatch.index] === '\r' ? 1 : 0);
+  const outputStart = markerMatch.index + markerMatch[0].length;
+  const prefix = text.slice(0, markerStart).trimEnd();
+  const outputJson = text.slice(outputStart).trim();
+  const decodedOutput = parseJsonToolText(outputJson);
+  if (!decodedOutput) return null;
+
+  return prefix ? `${prefix}\nOutput:\n${decodedOutput}` : decodedOutput;
+}
+
+export function formatToolResultDisplayText(resultText: string): string {
+  if (!resultText.trim()) return resultText;
+
+  return decodeToolOutputJsonSection(resultText)
+    ?? parseJsonToolText(resultText)
+    ?? decodeEscapedToolText(resultText);
 }
 
 export interface BashHeaderResult {
@@ -1186,26 +1268,107 @@ export function collectEditToolItems(
   });
 }
 
+function normalizeEditMergeKey(item: EditToolItem): string {
+  return (item.openPath || item.filePath || item.displayPath)
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .toLowerCase();
+}
+
+function mergeLineStart(current: number | undefined, next: number | undefined): number | undefined {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.min(current, next);
+}
+
+function mergeLineEnd(current: number | undefined, next: number | undefined): number | undefined {
+  if (current === undefined) return next;
+  if (next === undefined) return current;
+  return Math.max(current, next);
+}
+
+interface MergeEditToolItemsOptions {
+  order?: 'first' | 'last';
+  diffPreviewLineLimit?: number;
+}
+
+interface MergedEditItemEntry {
+  item: EditToolItem;
+  firstIndex: number;
+  lastIndex: number;
+}
+
+export function mergeEditToolItemsByFile(
+  items: EditToolItem[],
+  options: MergeEditToolItemsOptions = {},
+): EditToolItem[] {
+  const mergedByFile = new Map<string, EditToolItem>();
+  const mergedEntries: MergedEditItemEntry[] = [];
+
+  items.forEach((item, index) => {
+    const key = normalizeEditMergeKey(item);
+    const existing = mergedByFile.get(key);
+
+    if (!existing) {
+      const firstItem: EditToolItem = {
+        ...item,
+        id: `${item.id}-file`,
+        diffPreviewLines: [...item.diffPreviewLines],
+      };
+      mergedByFile.set(key, firstItem);
+      mergedEntries.push({
+        item: firstItem,
+        firstIndex: index,
+        lastIndex: index,
+      });
+      return;
+    }
+
+    const entry = mergedEntries.find((candidate) => candidate.item === existing);
+    if (entry) {
+      entry.lastIndex = index;
+    }
+
+    existing.id = `${existing.id}+${item.id}`;
+    existing.oldString = [existing.oldString, item.oldString].filter(Boolean).join('\n');
+    existing.newString = [existing.newString, item.newString].filter(Boolean).join('\n');
+    existing.additions += item.additions;
+    existing.deletions += item.deletions;
+    existing.diffPreviewLines = [
+      ...existing.diffPreviewLines,
+      ...item.diffPreviewLines,
+    ].slice(0, options.diffPreviewLineLimit);
+    existing.lineStart = mergeLineStart(existing.lineStart, item.lineStart);
+    existing.lineEnd = mergeLineEnd(existing.lineEnd, item.lineEnd);
+    existing.isCompleted = existing.isCompleted && item.isCompleted;
+    existing.isError = existing.isError || item.isError;
+    if (item.isError) {
+      existing.result = item.result;
+    }
+  });
+
+  return [...mergedEntries]
+    .sort((left, right) => (
+      options.order === 'last'
+        ? right.lastIndex - left.lastIndex
+        : left.firstIndex - right.firstIndex
+    ))
+    .map((entry) => entry.item);
+}
+
 /**
  * 提取工具结果的文本内容
  * @param result 工具结果对象
  * @returns 文本内容
  */
-export function extractResultText(result: { content?: string | Array<{ type: string; text?: string }> }): string {
+export function extractResultText(result: { content?: unknown }): string {
   if (!result.content) return '';
 
   if (typeof result.content === 'string') {
     return result.content;
   }
 
-  if (Array.isArray(result.content)) {
-    return result.content
-      .map((item) => (item && typeof item.text === 'string' ? item.text : ''))
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  return '';
+  return textFromMcpTextBlocks(result.content) ?? stringifyToolJson(result.content);
 }
 
 /**

@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {AlertTriangle, Check, Copy, User} from 'lucide-react';
 import type {ChatMessage, ContentBlock, TextBlock, ThinkingBlock} from '../../types/chat';
@@ -15,6 +15,8 @@ interface MessageItemProps {
     messageIndex: number;
     isLast: boolean;
     isSearchMatch?: boolean;
+    anchorId?: string;
+    onAnchorRef?: (messageId: string, node: HTMLElement | null) => void;
 }
 
 function isTextBlock(block: ContentBlock): block is TextBlock {
@@ -26,9 +28,7 @@ function isThinkingBlock(block: ContentBlock): block is ThinkingBlock {
 }
 
 function getCopyText(message: ChatMessage, blocks: ContentBlock[]): string {
-    if (message.content.trim()) return message.content;
-
-    return blocks
+    const blockText = blocks
         .map((block) => {
             if (isTextBlock(block)) return block.text;
             if (isThinkingBlock(block)) return block.thinking;
@@ -37,6 +37,10 @@ function getCopyText(message: ChatMessage, blocks: ContentBlock[]): string {
         })
         .filter((text) => text.trim().length > 0)
         .join('\n\n');
+
+    if (blocks.length > 0) return blockText;
+    if (message.content.trim()) return message.content;
+    return '';
 }
 
 function getLastThinkingBlockIndex(blocks: ContentBlock[]): number | undefined {
@@ -53,6 +57,8 @@ export default function MessageItem({
     messageIndex,
     isLast,
     isSearchMatch = false,
+    anchorId,
+    onAnchorRef,
 }: MessageItemProps) {
     const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
@@ -110,6 +116,10 @@ export default function MessageItem({
     };
 
     const canCopy = copyText.trim().length > 0;
+    const handleAnchorRef = useCallback((node: HTMLElement | null) => {
+        if (!anchorId || !onAnchorRef) return;
+        onAnchorRef(anchorId, node);
+    }, [anchorId, onAnchorRef]);
 
     const copyButton = (
         <button
@@ -145,6 +155,7 @@ export default function MessageItem({
                     findToolResult={(toolId) => findToolResult(messages, toolId, messageIndex)}
                     expandThinkingBlockIndex={expandedThinkingBlockIndex}
                     compact={isAssistant}
+                    imageDisplay={isUser ? 'user-thumbnail' : undefined}
                 />
             ) : message.content ? (
                 <MarkdownBlock content={message.content} isStreaming={message.streaming} />
@@ -166,6 +177,8 @@ export default function MessageItem({
     if (isUser) {
         return (
             <article
+                ref={anchorId ? handleAnchorRef : undefined}
+                data-message-anchor-id={anchorId}
                 className={cn(
                     'chat-message-row user-message-row group mx-auto flex w-full max-w-4xl justify-end px-3 py-2',
                     isSearchMatch && 'rounded-lg bg-primary/5 ring-1 ring-primary/15',

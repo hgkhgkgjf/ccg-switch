@@ -1,56 +1,43 @@
 import {type RefObject, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import type {ChatMessage, ContentBlock} from '../../types/chat';
-import {getRenderableContentBlocks, shouldRenderChatMessage} from '../../utils/chatMessageFlow';
+import type {ChatMessage} from '../../types/chat';
 import {
+    getClampedRevealState,
     getCollapsedMessageWindow,
+    getEffectiveRevealedCount,
+    getNextRevealState,
     getScrollTopAfterPrepend,
-    REVEAL_PAGE_SIZE,
     shouldAutoRevealEarlierMessages,
+    type TranscriptRevealState,
 } from '../../utils/chatUiBehavior';
+import {
+    filterRenderableMessages,
+    getRenderableMessages,
+    isMessageAnchorCandidate,
+    type RenderableMessage,
+} from '../../utils/chatNavigation';
 import MessageItem from './MessageItem';
-
-interface RenderableMessage {
-    message: ChatMessage;
-    originalIndex: number;
-}
 
 interface MessageListProps {
     messages: ChatMessage[];
     searchQuery?: string;
     scrollContainerRef?: RefObject<HTMLDivElement | null>;
-}
-
-function getBlockSearchText(block: ContentBlock): string {
-    if (block.type === 'text') return block.text;
-    if (block.type === 'thinking') return block.thinking;
-    if (block.type === 'tool_use') return `${block.name} ${JSON.stringify(block.input)}`;
-    if (block.type === 'tool_result') {
-        if (typeof block.content === 'string') return block.content;
-        if (Array.isArray(block.content)) return block.content.map(getBlockSearchText).join('\n');
-    }
-
-    return '';
-}
-
-function getMessageSearchText(message: ChatMessage): string {
-    const rawText = getRenderableContentBlocks(message.raw)
-        .map(getBlockSearchText)
-        .join('\n');
-
-    return [message.role, message.content, rawText, message.error]
-        .filter((part): part is string => Boolean(part))
-        .join('\n')
-        .toLowerCase();
+    onCollapsedCountChange?: (count: number) => void;
+    onMessageNodeRef?: (messageId: string, node: HTMLElement | null) => void;
 }
 
 export default function MessageList({
     messages,
     searchQuery = '',
     scrollContainerRef,
+    onCollapsedCountChange,
+    onMessageNodeRef,
 }: MessageListProps) {
     const { t } = useTranslation();
-    const [revealedCount, setRevealedCount] = useState(0);
+    const [revealState, setRevealState] = useState<TranscriptRevealState>({
+        transcriptKey: '',
+        revealedCount: 0,
+    });
     const revealAnchorRef = useRef<{
         previousScrollHeight: number;
         previousScrollTop: number;
@@ -59,17 +46,13 @@ export default function MessageList({
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
     const renderableMessages = useMemo<RenderableMessage[]>(() => (
-        messages
-            .map((message, originalIndex) => ({ message, originalIndex }))
-            .filter(({ message }) => shouldRenderChatMessage(message))
+        getRenderableMessages(messages)
     ), [messages]);
+    const transcriptKey = renderableMessages[0]?.message.id ?? '';
+    const revealedCount = getEffectiveRevealedCount(revealState, transcriptKey);
 
     const filteredMessages = useMemo<RenderableMessage[]>(() => {
-        if (!normalizedSearchQuery) return renderableMessages;
-
-        return renderableMessages.filter(({ message }) => (
-            getMessageSearchText(message).includes(normalizedSearchQuery)
-        ));
+        return filterRenderableMessages(renderableMessages, normalizedSearchQuery);
     }, [normalizedSearchQuery, renderableMessages]);
 
     const isSearching = normalizedSearchQuery.length > 0;
@@ -89,8 +72,16 @@ export default function MessageList({
         : undefined;
 
     useEffect(() => {
-        setRevealedCount((current) => Math.min(current, totalEarlierMessages));
-    }, [totalEarlierMessages]);
+        setRevealState((current) => getClampedRevealState(
+            current,
+            transcriptKey,
+            totalEarlierMessages,
+        ));
+    }, [totalEarlierMessages, transcriptKey]);
+
+    useEffect(() => {
+        onCollapsedCountChange?.(collapsedCount);
+    }, [collapsedCount, onCollapsedCountChange]);
 
     const revealEarlierMessages = useCallback((scrollEl?: HTMLDivElement | null) => {
         if (collapsedCount <= 0) return;
@@ -103,15 +94,16 @@ export default function MessageList({
         }
 
         revealPendingRef.current = true;
-        setRevealedCount((current) => {
-            const next = Math.min(totalEarlierMessages, current + REVEAL_PAGE_SIZE);
-            if (next === current) {
+        setRevealState((current) => {
+            const currentRevealed = getEffectiveRevealedCount(current, transcriptKey);
+            const next = getNextRevealState(current, transcriptKey, totalEarlierMessages);
+            if (next.revealedCount === currentRevealed) {
                 revealPendingRef.current = false;
                 revealAnchorRef.current = null;
             }
             return next;
         });
-    }, [collapsedCount, totalEarlierMessages]);
+    }, [collapsedCount, totalEarlierMessages, transcriptKey]);
 
     useEffect(() => {
         const scrollEl = scrollContainerRef?.current;
@@ -182,6 +174,8 @@ export default function MessageList({
                     messageIndex={originalIndex}
                     isLast={originalIndex === lastRenderableIndex}
                     isSearchMatch={isSearching}
+                    anchorId={isMessageAnchorCandidate(message) ? message.id : undefined}
+                    onAnchorRef={onMessageNodeRef}
                 />
             ))}
         </div>

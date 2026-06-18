@@ -90,6 +90,24 @@ See `src/components/providers/ProviderCard.tsx` and
   putting both the master list and detail list in one long scroll container.
   Example: project list `basis-2/5 overflow-y-auto`, session list
   `flex-1 overflow-y-auto`.
+- Chat session sidebars must use normalized Windows-safe cache keys for project
+  paths. Cache `list_sessions(projectPath)` results by both the selected project
+  path and each returned session's `projectDir` alias so later `currentCwd`
+  updates do not re-scan the same history list just because slash, casing, or
+  trailing separator forms changed. Do not cache or display sessions whose
+  explicit `projectDir` normalizes to a different project path; stale provider
+  scan results must not poison another project's cache key and make the sidebar
+  appear unchanged after a project switch. The rendered session list must track
+  the project path that produced it, so old-project rows are hidden immediately
+  if the user switches projects while another scan or cache update is still
+  settling. Repeated clicks on the active or
+  pending session should short-circuit before resetting transcript navigation.
+  If a `list_sessions(projectPath)` request is already in flight for the
+  normalized project path, do not start another scan unless the user explicitly
+  forces a refresh. Forced refreshes should keep the existing session list
+  visible and show a lightweight refresh status row instead of replacing the
+  detail pane with a full spinner; otherwise users cannot tell whether they are
+  seeing stale results or an in-progress reload.
 - Tool block list renderers must group by the visible items users need to scan,
   not only by raw `tool_use` count. Edit tools must expand `MultiEdit` /
   `edit_file` `input.edits[]` and `apply_patch` patch hunks into file rows; if
@@ -110,6 +128,55 @@ See `src/components/providers/ProviderCard.tsx` and
   expansion chevrons; do not introduce emoji icons in new tool-block UI. On
   narrow screens, keep a truncated primary summary visible and hide only
   secondary badges/statistics.
+- Status-panel edit history should not be a flat pile of rows when the file
+  count grows. Render touched files as a tree with folder-level collapse /
+  expand controls, keep the tree body inside its own scrollable pane, and show
+  the summary counts in the same scan line as the file row. Large edit trees
+  should default to collapsed folder rows while small edit sets can stay
+  expanded for immediate inspection; once the user manually expands/collapses
+  folders, preserve that choice during subsequent transcript updates. Diff
+  hover previews used from this panel should be solid, high-contrast surfaces
+  that can sit outside the scroll pane without being clipped. When a
+  split/unified diff view toggle is added, keep it compact and icon-driven so it
+  reads like a control, not a second card. The Chat page layout should keep all
+  visible desktop panes resizable: when the central diff pane is open, expose
+  conversation-diff and diff-status resize handles; when the diff pane is
+  collapsed or absent, expose a conversation-status handle so the fixed right
+  sidebar can give space back to the transcript. Width clamping belongs in
+  shared UI behavior helpers and must be unit-tested rather than hand-coded only
+  inside `ChatPage`. Collapsing the diff pane must also leave an explicit reopen
+  affordance on the right side of the status-panel edit header whenever the
+  loaded transcript window has any edit record; do not rely on a selected edit
+  key or clicking a file row as the hidden way to restore the central diff pane.
+  Because the status panel is hidden below the desktop `xl` breakpoint and can
+  be visually missed even on wide screens, `ChatPage` must also expose a
+  page-level right-edge restore control whenever the diff pane is collapsed and
+  there is a selected edit to reopen. This global control should float over the
+  review layout instead of reserving a diff column, preserving the "collapsed
+  means no central space used" contract.
+  The full central diff
+  pane should default to wrapped code lines so narrow three-pane layouts remain
+  readable without constant horizontal scrolling, while still exposing a compact
+  no-wrap toggle for exact long-line review. The wrap/no-wrap preference belongs
+  to `ChatPage` state, not local pane state, so collapsing and remounting the
+  central diff pane preserves the user's review mode.
+- `ContentBlockRenderer.compact` must be propagated to every tool surface,
+  including single tool blocks, grouped Bash/Read/Edit/Search blocks, and
+  Agent/Task blocks. Compact mode should be a component contract, not only a
+  CSS side effect of `.assistant-message-flow`; otherwise subagent history and
+  nested historical transcripts drift back into large card-style groups. A
+  compact tool block still renders a one-line operation header and stays
+  collapsed by default; do not render full parameters/results immediately in
+  compact mode, or historical sessions become a stack of expanded output panes.
+  Grouped compact tool blocks must also collapse the group body by default:
+  render only the group header/summary row first, then reveal child rows and
+  bulk expand/collapse actions only after the group header is explicitly
+  expanded.
+- Generic tool result display must normalize MCP text-block wrappers before
+  rendering. Decode arrays or wrapper objects such as `{ content: [{ type:
+  "text", text: "..." }] }`, and restore literal escaped newlines in codegraph
+  output before handing the text to a `<pre>`. Do this in shared presentation
+  helpers, not inside individual tool components.
 - Agent-like tool blocks (`AgentGroupBlock`, `TaskExecutionBlock`) must share
   their transcript-summary shaping through `extractAgentToolMeta()`,
   `summarizeAgentToolMeta()`, `summarizeAgentToolHeader()`, and
@@ -141,6 +208,52 @@ See `src/components/providers/ProviderCard.tsx` and
   instead of becoming hero-scale typography. In assistant flow, tool blocks
   should use low-contrast operation-row styling (for example a subtle rail and
   one-line summary) rather than visually competing with the answer body.
+- Chat history must treat uploaded images as structured content blocks, not as
+  filename-only prompt text. `ContentBlockRenderer` owns `image` /
+  `input_image` rendering: show a bounded thumbnail in the transcript, open a
+  portal lightbox on click, and keep local-path/base64 source parsing in shared
+  image-block helpers. Local `file:///C:/...` style image URLs from historical
+  Codex/Claude payloads must be normalized to filesystem paths before calling
+  Tauri asset conversion; do not feed the `file://` wrapper into the WebView as
+  the final image source. System-role history messages are protocol context and
+  must be filtered out before transcript rendering or anchor generation. Some
+  historical providers replay runtime context as user text instead of `system`;
+  hide recognizable Codex/Claude system prompts, Tools/Skills/Plugins/Heartbeats
+  blocks, sandbox/environment XML blocks, and model handoff summaries such as
+  `Another language model started...` / `## Handoff Summary` from transcript
+  rendering and provider-switch handoff context. Codex can also replay control
+  markers as user
+  text, including `<turn_aborted>`, `<user_action>`,
+  `<subagent_notification>`, `<agents-instructions>`, and `<skill>`; route these
+  through the same shared protocol-context predicate so they disappear from
+  transcript rendering, search, anchor generation, and provider handoff. Do not
+  hide all arbitrary XML-looking user text, because image placeholders and task
+  prompts can carry real user-visible content. The narrow exception is Codex
+  image wrapper text: when the same raw message contains a real `image` /
+  `input_image` block, pure placeholder text such as `<image name=...>` and
+  `</image>` should be filtered from rendering, merged visible content, search,
+  and anchor labels while preserving the image block and the user's real prompt.
+- Long-session anchor rails should stay readable under dense histories. Generate
+  anchors from renderable user messages in the currently revealed transcript
+  window, then sample dense anchor lists through a pure helper that preserves
+  the first, last, and active anchor. Keep point positions based on the original
+  anchor index so the rail still communicates relative conversation progress.
+  Anchor projections must preserve more than a display string: include the
+  preview kind (`text`, `image`, `mixed`, or `empty`), visible sequence, total
+  count, and timestamp when available. The rail uses that metadata for contrast,
+  hover detail, and accessible labels; do not infer image/text state later from
+  the truncated label. Dense sampling should prefer anchors with real content
+  previews (`text`, `image`, or `mixed`) before `empty` anchors; preserve the
+  active anchor even when it is empty, but do not let empty protocol remnants
+  consume the visible rail budget. Anchor candidates must use a shared
+  predicate for both rail data and `MessageList` node registration: user
+  messages need visible prompt/image content, while internal `[tool_result]`,
+  blank, or protocol-context user rows must not become anchors.
+  Before `MessageList` reports its actual collapsed-count state for a newly
+  loaded history session, page-level anchor derivation should assume the default
+  collapsed transcript window rather than zero collapsed messages; otherwise the
+  rail briefly creates anchors for historical messages whose DOM nodes are not
+  mounted and jump targets appear wrong.
 - In assistant flow, runtime metadata such as model / reasoning effort /
   short agent id and placeholder subagent-history surfaces are secondary
   signals. Render them with lower contrast than the primary action summary and
@@ -164,16 +277,51 @@ See `src/components/providers/ProviderCard.tsx` and
   Keep the default compact height near a single-row input, clamp the drag range
   through shared helpers, and keep the final height free of horizontal overflow
   in the central conversation column.
+- Chat composer slash completions must not be maintained as a short frontend-only
+  hardcoded list. The `/` trigger should call `chat_list_slash_commands` with
+  the current `cwd` and provider, then normalize the backend registry payload
+  into `CompletionItem`s. The frontend fallback list is only for backend
+  failures and must stay aligned with cc-gui built-ins such as `/context`,
+  `/plan`, `/resume`, `/batch`, `/claude-api`, `/debug`, `/loop`, `/simplify`,
+  `/update-config`, and Codex `/diff`. Project command files from
+  `.claude/commands/**/*.md` should show their source suffix (for example
+  `[project]`) so users can distinguish built-in and local commands.
 - Transcript history reveal should prefer scroll-triggered paging over repeated
   click-only affordances when the chat page owns a dedicated scroll container.
   When prepending older messages, preserve the user's viewport by capturing the
   previous `scrollHeight` and `scrollTop`, then restoring `scrollTop` with the
   delta after render. Do not snap the user back to the top after each reveal.
+  Reveal state must be scoped to a transcript key such as the first renderable
+  message id; when a user switches sessions, the new history should start from
+  the default recent-message window instead of inheriting an "all earlier
+  messages revealed" state from the previous session.
 - Edit tool summaries should expose per-file additions/deletions and a hoverable
   diff preview. The preview data must come from structured `diffPreviewLines`
   emitted by shared presentation helpers so `apply_patch`, `edit_file`, and
   grouped edit payloads all render through the same hover component instead of
-  building ad hoc preview strings inside the React layer.
+  building ad hoc preview strings inside the React layer. Diff hover previews
+  should use solid backgrounds, high z-index, and viewport-aware placement:
+  center previews in the transcript area, and expand right-sidebar previews left
+  into the conversation area so code is readable and not clipped by side panels.
+  When the same file is edited multiple times in one grouped edit sequence,
+  the visible file list must merge those rows into one per-file item while
+  summing additions/deletions and preserving combined diff preview lines. Keep
+  that merge in shared tool-presentation helpers so the transcript group and
+  status panel report the same touched-file counts.
+- Historical Codex file changes must enter the UI as normalized
+  `tool_use{name:"apply_patch", input:{patch}}` blocks from the backend
+  provider. The status panel should count those through
+  `collectEditToolItems()` just like live edit tools; do not parse raw Codex
+  JSONL payload variants directly in React components.
+- Status-panel edit totals must be computed from the full aggregated edit set,
+  even if the visible `recentEdits` list is capped for layout. Keep the sidebar
+  list compact, but `touchedFileCount`, `totalAdditions`, and `totalDeletions`
+  should reflect all touched files in the loaded transcript window so long
+  Codex/Claude histories do not look like they only changed the four newest
+  visible files. When the capped list hides additional files, show a compact
+  "more files" row that can expand to the complete `allEdits` list and collapse
+  back to recent edits, so the user can inspect every touched file without
+  making the default sidebar dense.
 - Conditional classes are composed with template strings today. A `cn()` helper
   (clsx + tailwind-merge) exists at `src/utils/cn.ts` — prefer it for new
   components with conditional class logic.
@@ -193,6 +341,13 @@ See `src/components/providers/ProviderCard.tsx` and
 - **Toasts**: call the module-level `showToast(message, type, duration?, onClick?)`
   imported from `components/common/ToastContainer`. `<ToastContainer/>` must be
   mounted once near the root. Do not build ad-hoc notification UI.
+- Chat turn-stopped desktop notifications are the exception to in-app toast
+  guidance: route completion / failure / abort notifications through
+  `src/utils/desktopNotification.ts`. In Tauri desktop runtime it must call the
+  native `chat_show_system_notification` command first so Windows notifications
+  come from the OS, while WebView `Notification` remains only a browser/test
+  fallback. Stores and components should not instantiate `Notification`
+  directly.
 - Tauri window dragging: top regions use `data-tauri-drag-region`; modals add a
   fixed drag strip so the window stays movable behind the overlay.
 
@@ -258,6 +413,17 @@ export default function AskUserQuestionDialog({ request, onAnswer }: Props) {
 This pattern keeps the modal globally accessible (can be shown from any page)
 without coupling to page-local state.
 
+For chat permission approvals, generic tool permissions are a separate modal
+path from ask-user-question and plan approval. The backend emits
+`permission://tool` for request files named `request-<sessionId>-<requestId>.json`;
+the page must render a tool permission dialog and answer through
+`permission_respond_tool`. Do not rely on a pending tool block alone for this
+case: the daemon is blocked until the response file
+`response-<sessionId>-<requestId>.json` is written. The dialog should show the
+tool name, working directory, and a compact preview of important inputs such as
+`command`, `file_path`, `path`, `url`, `pattern`, or `query`, with full JSON
+available behind a details disclosure.
+
 ---
 
 ## Accessibility
@@ -292,3 +458,11 @@ states. Note that full WCAG compliance has not been verified for this project.
 - Rendering batch edit tools as a single generic/edit card. Users lose the
   changed-file list for `MultiEdit`, filesystem `edit_file`, and `apply_patch`
   unless those payloads are expanded into per-file edit items first.
+- Rendering uploaded image history as `[Image: name]` / `[图片: name]` text.
+  That loses the actual visual attachment and makes anchors look blank. Preserve
+  raw `image` / `input_image` blocks and render thumbnails instead.
+- Letting user-uploaded thumbnails expand to full bubble width. User message
+  images should render as compact, click-to-preview thumbnails in the transcript
+  and only use the lightbox for the full-size image. If historical raw content
+  contains base64 image payload fragments as adjacent `text` blocks, filter
+  those fragments out before rendering, copying, or deriving message previews.

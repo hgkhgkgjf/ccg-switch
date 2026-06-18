@@ -2,11 +2,17 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import type {ChatMessage, MessageRaw} from '../types/chat';
 import {getSessionSelectionKey, type SessionMeta, type UnifiedSessionMessage} from '../types/session';
 import {findToolResult, getRenderableContentBlocks} from '../utils/chatMessageFlow';
-import {useChatStore} from './useChatStore';
+import {buildChatStatusSummary} from '../utils/chatStatusSummary';
+import {clearChatSessionHistoryCache, useChatStore} from './useChatStore';
 
 const tauriMocks = vi.hoisted(() => ({
     invoke: vi.fn(),
     listen: vi.fn(async (_eventName: string, _callback: (event: { payload: unknown }) => void) => vi.fn()),
+}));
+
+const notificationMocks = vi.hoisted(() => ({
+    notifyChatTurnStopped: vi.fn(),
+    prepareChatTurnStoppedNotificationPermission: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -15,6 +21,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@tauri-apps/api/event', () => ({
     listen: tauriMocks.listen,
+}));
+
+vi.mock('../utils/desktopNotification', () => ({
+    notifyChatTurnStopped: notificationMocks.notifyChatTurnStopped,
+    prepareChatTurnStoppedNotificationPermission: notificationMocks.prepareChatTurnStoppedNotificationPermission,
 }));
 
 const activeMessages: ChatMessage[] = [
@@ -78,6 +89,7 @@ function resetStore() {
         error: null,
         pendingAskUserQuestion: null,
         pendingPlanApproval: null,
+        pendingToolPermission: null,
         deniedToolIds: new Set(),
     });
 }
@@ -86,6 +98,9 @@ describe('useChatStore session transitions', () => {
     beforeEach(() => {
         tauriMocks.invoke.mockReset();
         tauriMocks.listen.mockClear();
+        notificationMocks.notifyChatTurnStopped.mockClear();
+        notificationMocks.prepareChatTurnStoppedNotificationPermission.mockClear();
+        clearChatSessionHistoryCache();
         resetStore();
     });
 
@@ -195,6 +210,102 @@ describe('useChatStore session transitions', () => {
             activeSession: loadedSession,
             pendingSessionKey: null,
         });
+    });
+
+    it('does not reload when selecting the already active history session', async () => {
+        useChatStore.setState({
+            provider: 'codex',
+            sessionId: loadedSession.sessionId,
+            activeSession: loadedSession,
+            currentCwd: loadedSession.projectDir,
+            messages: [
+                {
+                    id: 'history-existing',
+                    role: 'assistant',
+                    content: 'already loaded',
+                    createdAt: 100,
+                },
+            ],
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+
+        expect(tauriMocks.invoke).not.toHaveBeenCalled();
+        expect(useChatStore.getState()).toMatchObject({
+            activeSession: loadedSession,
+            pendingSessionKey: null,
+        });
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'already loaded',
+        ]);
+    });
+
+    it('reuses cached history for the same session metadata', async () => {
+        const history: UnifiedSessionMessage[] = [
+            {
+                role: 'assistant',
+                content: 'cached history',
+                ts: '2026-06-17T08:00:03.000Z',
+            },
+        ];
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_messages') return history;
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+        useChatStore.setState({
+            messages: [],
+            sessionId: null,
+            activeSession: null,
+            currentCwd: null,
+        });
+        await useChatStore.getState().loadSession(loadedSession);
+
+        expect(tauriMocks.invoke).toHaveBeenCalledTimes(1);
+        expect(useChatStore.getState()).toMatchObject({
+            activeSession: loadedSession,
+            pendingSessionKey: null,
+        });
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'cached history',
+        ]);
+    });
+
+    it('reloads cached sessions when lastActiveAt changes', async () => {
+        const updatedSession: SessionMeta = {
+            ...loadedSession,
+            lastActiveAt: loadedSession.lastActiveAt + 1,
+        };
+        let loadCount = 0;
+        tauriMocks.invoke.mockImplementation(async (_command: string, args?: { sourcePath?: string }) => {
+            if (args?.sourcePath === loadedSession.sourcePath) {
+                loadCount += 1;
+                return [
+                    {
+                        role: 'assistant',
+                        content: loadCount === 1 ? 'initial history' : 'updated history',
+                        ts: '2026-06-17T08:00:03.000Z',
+                    },
+                ] satisfies UnifiedSessionMessage[];
+            }
+            throw new Error(`Unexpected call: ${JSON.stringify(args)}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+        useChatStore.setState({
+            messages: [],
+            sessionId: null,
+            activeSession: null,
+            currentCwd: null,
+        });
+        await useChatStore.getState().loadSession(updatedSession);
+
+        expect(tauriMocks.invoke).toHaveBeenCalledTimes(2);
+        expect(useChatStore.getState().activeSession).toBe(updatedSession);
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'updated history',
+        ]);
     });
 
     it('ignores stale history loads when a newer session selection finishes later', async () => {
@@ -325,6 +436,255 @@ describe('useChatStore session transitions', () => {
         });
     });
 
+    it('keeps normalized Codex apply_patch history visible to edit summaries', async () => {
+        const patchRaw: MessageRaw = {
+            type: 'assistant',
+            timestamp: '2026-06-17T08:00:01.000Z',
+            message: {
+                content: [
+                    {
+                        type: 'tool_use',
+                        id: 'call-patch-1',
+                        name: 'apply_patch',
+                        input: {
+                            patch: [
+                                '*** Begin Patch',
+                                '*** Update File: src/stores/useChatStore.ts',
+                                '@@ -1,1 +1,2 @@',
+                                ' const oldValue = true;',
+                                '+const newValue = true;',
+                                '*** Update File: src/components/chat/StatusPanel.tsx',
+                                '@@ -2,2 +2,1 @@',
+                                '-const stale = true;',
+                                ' const keep = true;',
+                                '*** End Patch',
+                            ].join('\n'),
+                        },
+                    },
+                ],
+            },
+        };
+        const resultRaw: MessageRaw = {
+            type: 'user',
+            timestamp: '2026-06-17T08:00:02.000Z',
+            message: {
+                content: [
+                    {
+                        type: 'tool_result',
+                        tool_use_id: 'call-patch-1',
+                        content: 'Done!',
+                        is_error: false,
+                    },
+                ],
+            },
+        };
+        const history: UnifiedSessionMessage[] = [
+            {
+                role: 'assistant',
+                content: '',
+                ts: '2026-06-17T08:00:01.000Z',
+                raw: patchRaw,
+            },
+            {
+                role: 'user',
+                content: '[tool_result]',
+                ts: '2026-06-17T08:00:02.000Z',
+                raw: resultRaw,
+            },
+        ];
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_messages') return history;
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+
+        const summary = buildChatStatusSummary(useChatStore.getState().messages);
+        expect(summary.touchedFileCount).toBe(2);
+        expect(summary.totalAdditions).toBe(1);
+        expect(summary.totalDeletions).toBe(1);
+        expect(summary.recentEdits.map((edit) => edit.displayPath)).toEqual([
+            'src/components/chat/StatusPanel.tsx',
+            'src/stores/useChatStore.ts',
+        ]);
+    });
+
+    it('surfaces generic tool permission requests and writes allow responses', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockResolvedValue(undefined);
+
+        await useChatStore.getState().init();
+
+        listeners['permission://tool']?.({
+            payload: {
+                requestId: 'perm-1',
+                toolName: 'mcp__chrome-devtools__new_page',
+                inputs: {
+                    url: 'https://www.baidu.com',
+                },
+                timestamp: '2026-06-18T09:00:00.000Z',
+                cwd: 'C:/guodevelop/ccg-switch',
+            },
+        });
+
+        expect(useChatStore.getState().pendingToolPermission).toEqual({
+            requestId: 'perm-1',
+            toolName: 'mcp__chrome-devtools__new_page',
+            inputs: {
+                url: 'https://www.baidu.com',
+            },
+            timestamp: '2026-06-18T09:00:00.000Z',
+            cwd: 'C:/guodevelop/ccg-switch',
+        });
+
+        await useChatStore.getState().answerToolPermission('perm-1', true);
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('permission_respond_tool', {
+            requestId: 'perm-1',
+            allow: true,
+        });
+        expect(useChatStore.getState().pendingToolPermission).toBeNull();
+    });
+
+    it('sends desktop notifications when a streaming turn completes or fails', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockResolvedValue(undefined);
+
+        await useChatStore.getState().init();
+
+        useChatStore.setState({
+            provider: 'codex',
+            activeRequestId: 'request-success',
+            messages: [
+                {
+                    id: 'assistant-success',
+                    role: 'assistant',
+                    content: 'streaming fallback',
+                    streaming: true,
+                    createdAt: 100,
+                    raw: {
+                        type: 'assistant',
+                        message: {
+                            content: [
+                                {type: 'text', text: 'pre tool note'},
+                                {type: 'tool_use', id: 'tool-1', name: 'Read', input: {file_path: 'src/main.ts'}},
+                                {type: 'text', text: ' final answer preview '},
+                            ],
+                        },
+                    },
+                },
+            ],
+        });
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-success',
+                success: true,
+                error: null,
+            },
+        });
+
+        expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledWith({
+            outcome: 'success',
+            provider: 'codex',
+            detail: 'final answer preview',
+        });
+
+        useChatStore.setState({
+            provider: 'claude',
+            activeRequestId: 'request-error',
+            messages: [
+                {id: 'assistant-error', role: 'assistant', content: '', streaming: true, createdAt: 200},
+            ],
+        });
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-error',
+                success: false,
+                error: 'tool failed',
+            },
+        });
+
+        expect(notificationMocks.notifyChatTurnStopped).toHaveBeenLastCalledWith({
+            outcome: 'error',
+            provider: 'claude',
+            detail: 'tool failed',
+        });
+    });
+
+    it('deduplicates stopped notifications for the same request id', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockResolvedValue(undefined);
+
+        await useChatStore.getState().init();
+
+        useChatStore.setState({
+            provider: 'codex',
+            activeRequestId: 'request-duplicate',
+            messages: [
+                {id: 'assistant-duplicate', role: 'assistant', content: 'done once', streaming: true, createdAt: 210},
+            ],
+        });
+
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-duplicate',
+                success: true,
+                error: null,
+            },
+        });
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-duplicate',
+                success: true,
+                error: null,
+            },
+        });
+
+        expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledTimes(1);
+        expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledWith({
+            outcome: 'success',
+            provider: 'codex',
+            detail: 'done once',
+        });
+    });
+
+    it('sends a desktop notification when the user aborts a streaming turn', async () => {
+        useChatStore.setState({
+            provider: 'claude',
+            activeRequestId: 'request-abort',
+            messages: [
+                {id: 'assistant-abort', role: 'assistant', content: 'partial', streaming: true, createdAt: 300},
+            ],
+        });
+        tauriMocks.invoke.mockResolvedValue(undefined);
+
+        await useChatStore.getState().abort();
+
+        expect(notificationMocks.prepareChatTurnStoppedNotificationPermission).toHaveBeenCalledTimes(1);
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_abort');
+        expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledWith({
+            outcome: 'aborted',
+            provider: 'claude',
+            detail: 'partial',
+        });
+        expect(useChatStore.getState().messages[0]).toMatchObject({
+            streaming: false,
+            error: '已停止输出',
+        });
+    });
+
     it('saves Codex THREAD_ID and resumes Codex turns with threadId', async () => {
         const listeners: Record<string, (event: { payload: unknown }) => void> = {};
         tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
@@ -354,6 +714,7 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().send('continue');
 
+        expect(notificationMocks.prepareChatTurnStoppedNotificationPermission).toHaveBeenCalledTimes(1);
         expect(tauriMocks.invoke).toHaveBeenLastCalledWith('chat_send', {
             provider: 'codex',
             command: 'send',
@@ -373,6 +734,12 @@ describe('useChatStore session transitions', () => {
             activeSession: claudeSession,
             currentCwd: claudeSession.projectDir,
             messages: [
+                {
+                    id: 'history-protocol-1',
+                    role: 'user',
+                    content: 'You are Codex, a coding agent based on GPT-5.\n\n# Tools\nTools are grouped by namespace.',
+                    createdAt: 99,
+                },
                 {
                     id: 'history-user-1',
                     role: 'user',
@@ -405,6 +772,8 @@ describe('useChatStore session transitions', () => {
         const payload = lastCall?.[1] as { params: { message: string } };
         expect(payload.params.message).toContain('已了解：需要修复历史会话选择和工具块展示。');
         expect(payload.params.message).toContain('继续实现');
+        expect(payload.params.message).not.toContain('You are Codex');
+        expect(payload.params.message).not.toContain('Tools are grouped by namespace');
         const messages = useChatStore.getState().messages;
         expect(messages[messages.length - 2]?.content).toBe('继续实现');
     });
@@ -446,6 +815,20 @@ describe('useChatStore session transitions', () => {
         });
         const messages = useChatStore.getState().messages;
         expect(messages[messages.length - 2]?.content).toBe('识别这张图\n\n[Image: screen.png]');
+        expect(messages[messages.length - 2]?.raw?.message.content).toEqual([
+            { type: 'text', text: '识别这张图' },
+            {
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgo=',
+                },
+                media_type: 'image/png',
+                data: 'iVBORw0KGgo=',
+                fileName: 'screen.png',
+            },
+        ]);
     });
 
     it('maps Codex local image paths to SDK local_image attachments', async () => {
@@ -517,5 +900,18 @@ describe('useChatStore session transitions', () => {
         });
         const messages = useChatStore.getState().messages;
         expect(messages[messages.length - 2]?.content).toBe('[Image: clipboard.png]');
+        expect(messages[messages.length - 2]?.raw?.message.content).toEqual([
+            {
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgo=',
+                },
+                media_type: 'image/png',
+                data: 'iVBORw0KGgo=',
+                fileName: 'clipboard.png',
+            },
+        ]);
     });
 });

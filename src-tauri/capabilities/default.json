@@ -9,6 +9,7 @@
     "opener:allow-open-path",
     "shell:allow-open",
     "shell:allow-execute",
-    "deep-link:default"
+    "deep-link:default",
+    "notification:default"
   ]
 }

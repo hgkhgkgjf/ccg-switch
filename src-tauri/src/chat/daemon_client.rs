@@ -221,11 +221,7 @@ impl DaemonClient {
     }
 
     /// Route one parsed stdout line to its request channel or the event sink.
-    async fn route_line(
-        inner: &Arc<Mutex<Inner>>,
-        event_sink: &Option<EventSink>,
-        raw: RawLine,
-    ) {
+    async fn route_line(inner: &Arc<Mutex<Inner>>, event_sink: &Option<EventSink>, raw: RawLine) {
         // Lifecycle/broadcast events: kind == "daemon".
         if raw.kind.as_deref() == Some("daemon") {
             if let Some(sink) = event_sink {
@@ -432,4 +428,3 @@ mod tests {
         );
     }
 }
-

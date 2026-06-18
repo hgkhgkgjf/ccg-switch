@@ -14,8 +14,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::OnceCell;
 
 use super::daemon_client::DaemonClient;
-use super::resources;
 use super::permission_watcher::PermissionWatcher;
+use super::resources;
 
 pub struct ChatManager {
     app: AppHandle,
@@ -50,12 +50,7 @@ impl ChatManager {
                 let (api_key, base_url) = self.get_active_provider_config().await?;
 
                 let client = Arc::new(DaemonClient::new(
-                    node,
-                    bridge,
-                    deps,
-                    perm_dir,
-                    api_key,
-                    base_url,
+                    node, bridge, deps, perm_dir, api_key, base_url,
                 ));
 
                 // Forward lifecycle events to the frontend.
@@ -147,10 +142,7 @@ impl ChatManager {
                         if let Some(json) = text.strip_prefix("[MESSAGE]") {
                             let json_trimmed = json.trim();
                             if !json_trimmed.is_empty() {
-                                let _ = app.emit(
-                                    "chat://message",
-                                    json!({ "json": json_trimmed }),
-                                );
+                                let _ = app.emit("chat://message", json!({ "json": json_trimmed }));
                             }
                         }
 
@@ -296,7 +288,10 @@ impl ChatManager {
         };
         let script = normalize(&bridge.join("services").join("prompt-enhancer.js"));
         if !script.exists() {
-            return Err(format!("prompt-enhancer.js not found at {}", script.display()));
+            return Err(format!(
+                "prompt-enhancer.js not found at {}",
+                script.display()
+            ));
         }
         let bridge_norm = normalize(&bridge);
 
@@ -322,7 +317,6 @@ impl ChatManager {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt as _;
             cmd.creation_flags(0x0800_0000);
         }
 
@@ -361,4 +355,3 @@ impl ChatManager {
         ))
     }
 }
-

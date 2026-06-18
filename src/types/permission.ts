@@ -33,3 +33,11 @@ export interface PlanApprovalRequest {
   timestamp: string;
   cwd: string;
 }
+
+export interface ToolPermissionRequest {
+  requestId: string;
+  toolName: string;
+  inputs: Record<string, unknown>;
+  timestamp: string;
+  cwd: string;
+}

@@ -78,7 +78,10 @@ pub enum StreamLine {
     /// Captured stderr text.
     Stderr { text: String },
     /// Terminal signal for the request.
-    Done { success: bool, error: Option<String> },
+    Done {
+        success: bool,
+        error: Option<String>,
+    },
 }
 
 /// A daemon lifecycle event (broadcast, not tied to a request id).

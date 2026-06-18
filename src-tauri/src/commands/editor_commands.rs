@@ -3,6 +3,18 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const MAX_FUZZY_SEARCH_ENTRIES: usize = 20_000;
+const FUZZY_SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".next",
+    ".turbo",
+    "build",
+    "dist",
+    "node_modules",
+    "src-tauri/target",
+    "target",
+];
+
 #[derive(Clone, Copy)]
 enum EditorLaunchMode {
     CodeGoto,
@@ -102,12 +114,178 @@ fn resolve_file_path(file_path: &str, cwd: Option<&str>) -> PathBuf {
         return candidate;
     }
 
-    cwd
+    let Some(base) = cwd
         .map(normalize_windows_like_path)
         .map(PathBuf::from)
         .filter(|base| base.is_absolute())
-        .map(|base| base.join(candidate))
-        .unwrap_or_else(|| PathBuf::from(normalized))
+    else {
+        return PathBuf::from(normalized);
+    };
+
+    let direct = base.join(&candidate);
+    if direct.is_file() {
+        return direct;
+    }
+
+    resolve_file_by_fuzzy_match(&base, &normalized).unwrap_or(direct)
+}
+
+fn extract_file_name(path_hint: &str) -> Option<String> {
+    let normalized = path_hint.replace('\\', "/");
+    normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .next_back()
+        .map(ToString::to_string)
+        .filter(|segment| !segment.is_empty())
+}
+
+fn extract_path_suffix(path_hint: &str) -> Option<String> {
+    let segments = path_hint
+        .replace('\\', "/")
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if segments.len() <= 1 {
+        return None;
+    }
+
+    let common_roots = ["src", "main", "java", "kotlin", "webview"];
+    let start_index = if segments.len() > 2
+        && common_roots
+            .iter()
+            .any(|root| segments[0].eq_ignore_ascii_case(root))
+    {
+        1
+    } else {
+        0
+    };
+
+    if start_index >= segments.len() - 1 {
+        return None;
+    }
+
+    Some(segments[start_index..].join("/"))
+}
+
+fn should_skip_fuzzy_dir(base: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(base) else {
+        return false;
+    };
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    let normalized_lower = normalized.to_ascii_lowercase();
+    FUZZY_SKIP_DIRS.iter().any(|skip| {
+        let skip_lower = skip.to_ascii_lowercase();
+        if skip_lower.contains('/') {
+            return normalized_lower == skip_lower
+                || normalized_lower.starts_with(&format!("{skip_lower}/"));
+        }
+
+        normalized_lower
+            .split('/')
+            .any(|segment| segment == skip_lower)
+    })
+}
+
+fn fuzzy_score(relative_path: &str, path_hint: &str, path_suffix: Option<&str>) -> u8 {
+    if relative_path.eq_ignore_ascii_case(path_hint) {
+        return 0;
+    }
+
+    if relative_path
+        .to_ascii_lowercase()
+        .ends_with(&path_hint.to_ascii_lowercase())
+    {
+        return 1;
+    }
+
+    if let Some(suffix) = path_suffix {
+        let relative_lower = relative_path.to_ascii_lowercase();
+        let suffix_lower = suffix.to_ascii_lowercase();
+        if relative_lower.ends_with(&suffix_lower) {
+            return 2;
+        }
+        if relative_lower.contains(&suffix_lower) {
+            return 3;
+        }
+    }
+
+    let relative_lower = relative_path.to_ascii_lowercase();
+    if relative_lower.starts_with("src/") || relative_lower.contains("/src/") {
+        return 4;
+    }
+    if relative_lower.starts_with("main/") || relative_lower.contains("/main/") {
+        return 5;
+    }
+
+    6
+}
+
+fn resolve_file_by_fuzzy_match(base: &Path, path_hint: &str) -> Option<PathBuf> {
+    if !base.is_dir() {
+        return None;
+    }
+
+    let normalized_hint = path_hint.replace('\\', "/");
+    let normalized_hint = normalized_hint.trim_matches('/');
+    let file_name = extract_file_name(normalized_hint)?;
+    let path_suffix = extract_path_suffix(normalized_hint);
+    let mut stack = vec![base.to_path_buf()];
+    let mut visited_entries = 0usize;
+    let mut matches: Vec<(u8, usize, String, PathBuf)> = Vec::new();
+
+    while let Some(directory) = stack.pop() {
+        if visited_entries >= MAX_FUZZY_SEARCH_ENTRIES {
+            break;
+        }
+
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        let mut entries = entries.flatten().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            if visited_entries >= MAX_FUZZY_SEARCH_ENTRIES {
+                break;
+            }
+            visited_entries += 1;
+
+            let path = entry.path();
+            if path.is_dir() {
+                if !should_skip_fuzzy_dir(base, &path) {
+                    stack.push(path);
+                }
+                continue;
+            }
+
+            let Some(current_file_name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if !current_file_name.eq_ignore_ascii_case(&file_name) {
+                continue;
+            }
+
+            let relative_path = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let score = fuzzy_score(&relative_path, normalized_hint, path_suffix.as_deref());
+            matches.push((score, relative_path.len(), relative_path, path));
+        }
+    }
+
+    matches.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.cmp(&right.2))
+    });
+    matches.into_iter().next().map(|(_, _, _, path)| path)
 }
 
 fn goto_arg(path: &Path, line_start: Option<u32>) -> String {
@@ -122,7 +300,13 @@ fn try_spawn(program: &str, args: &[String]) -> bool {
 }
 
 fn discover_editor_executables(root: &Path, names: &[&str], max_depth: usize) -> Vec<PathBuf> {
-    fn walk(dir: &Path, names: &[String], depth: usize, max_depth: usize, found: &mut Vec<PathBuf>) {
+    fn walk(
+        dir: &Path,
+        names: &[String],
+        depth: usize,
+        max_depth: usize,
+        found: &mut Vec<PathBuf>,
+    ) {
         if depth > max_depth {
             return;
         }
@@ -262,8 +446,17 @@ fn editor_candidates() -> Vec<EditorCandidate> {
             EditorLaunchMode::CodeGoto,
         );
 
-        let toolbox_scripts = local_app_data.join("JetBrains").join("Toolbox").join("scripts");
-        for script in ["idea.cmd", "webstorm.cmd", "rustrover.cmd", "pycharm.cmd", "clion.cmd"] {
+        let toolbox_scripts = local_app_data
+            .join("JetBrains")
+            .join("Toolbox")
+            .join("scripts");
+        for script in [
+            "idea.cmd",
+            "webstorm.cmd",
+            "rustrover.cmd",
+            "pycharm.cmd",
+            "clion.cmd",
+        ] {
             push_existing_candidate(
                 &mut candidates,
                 &mut seen,
@@ -272,7 +465,10 @@ fn editor_candidates() -> Vec<EditorCandidate> {
             );
         }
 
-        let toolbox_apps = local_app_data.join("JetBrains").join("Toolbox").join("apps");
+        let toolbox_apps = local_app_data
+            .join("JetBrains")
+            .join("Toolbox")
+            .join("apps");
         for editor in discover_editor_executables(
             &toolbox_apps,
             &[
@@ -366,10 +562,8 @@ mod tests {
 
     #[test]
     fn resolves_relative_file_path_against_cwd() {
-        let resolved = resolve_file_path(
-            "src/pages/ChatPage.tsx",
-            Some("C:/guodevelop/ccg-switch"),
-        );
+        let resolved =
+            resolve_file_path("src/pages/ChatPage.tsx", Some("C:/guodevelop/ccg-switch"));
 
         assert_eq!(
             resolved.to_string_lossy().replace('\\', "/"),
@@ -412,11 +606,64 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_resolves_filename_against_cwd_when_direct_path_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("ccg-switch-fuzzy-name-{}", std::process::id()));
+        let target_dir = root.join("src").join("utils");
+        let target = target_dir.join("linkify.ts");
+
+        fs::create_dir_all(&target_dir).expect("create source dir");
+        fs::write(&target, "").expect("create target file");
+
+        let resolved = resolve_file_path("linkify.ts", Some(&root.to_string_lossy()));
+
+        assert_eq!(resolved, target);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fuzzy_prefers_path_suffix_over_first_filename_match() {
+        let root =
+            std::env::temp_dir().join(format!("ccg-switch-fuzzy-suffix-{}", std::process::id()));
+        let less_specific_dir = root.join("src").join("other");
+        let suffix_dir = root.join("webview").join("src").join("utils");
+        let less_specific = less_specific_dir.join("linkify.ts");
+        let suffix_target = suffix_dir.join("linkify.ts");
+
+        fs::create_dir_all(&less_specific_dir).expect("create first source dir");
+        fs::create_dir_all(&suffix_dir).expect("create suffix source dir");
+        fs::write(&less_specific, "").expect("create first target file");
+        fs::write(&suffix_target, "").expect("create suffix target file");
+
+        let resolved = resolve_file_path("utils/linkify.ts", Some(&root.to_string_lossy()));
+
+        assert_eq!(resolved, suffix_target);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fuzzy_skips_generated_dependency_dirs() {
+        let root =
+            std::env::temp_dir().join(format!("ccg-switch-fuzzy-skip-{}", std::process::id()));
+        let dependency_dir = root.join("node_modules").join("pkg");
+        let dependency_file = dependency_dir.join("linkify.ts");
+
+        fs::create_dir_all(&dependency_dir).expect("create dependency dir");
+        fs::write(&dependency_file, "").expect("create dependency file");
+
+        let resolved = resolve_file_path("linkify.ts", Some(&root.to_string_lossy()));
+
+        assert_eq!(resolved, root.join("linkify.ts"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn discovers_editor_executables_in_nested_toolbox_dirs() {
-        let root = std::env::temp_dir().join(format!(
-            "ccg-switch-editor-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("ccg-switch-editor-test-{}", std::process::id()));
         let bin_dir = root
             .join("JetBrains")
             .join("Toolbox")

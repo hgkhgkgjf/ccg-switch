@@ -90,7 +90,7 @@ warmup.
 | Transient async status for a view | custom hook | `useHealthCheck` statuses |
 | Imperative drag tracking | `useRef` + `useState` | `ProvidersPage` `dragSourceRef` |
 | Route | HashRouter | `App.tsx` `createHashRouter` |
-| **Event-driven request (Tauri push)** | **Zustand store** | **`pendingAskUserQuestion` (权限审批)** |
+| **Event-driven request (Tauri push)** | **Zustand store** | **`pendingAskUserQuestion` / `pendingToolPermission` (权限审批)** |
 
 ### Event-Driven State Pattern (Tauri → Frontend)
 
@@ -127,6 +127,40 @@ answerAskUserQuestion: async (requestId, answers) => {
 
 This pattern keeps event-driven modals decoupled from page state—any page can
 show the dialog when the backend pushes the event.
+
+### Permission Event Variants
+
+Chat permissions have three event families and each must own an explicit pending
+field plus a response action in `useChatStore`:
+
+| Event | Pending state | Response action | Invoke command |
+|-------|---------------|-----------------|----------------|
+| `permission://tool` | `pendingToolPermission` | `answerToolPermission(requestId, allow)` | `permission_respond_tool` |
+| `permission://ask-user-question` | `pendingAskUserQuestion` | `answerAskUserQuestion(requestId, answers)` | `permission_respond_ask_user_question` |
+| `permission://plan-approval` | `pendingPlanApproval` | `approvePlan(requestId, approved, targetMode)` | `permission_respond_plan_approval` |
+
+Do not treat generic tool permission as a visual-only tool block state. The
+daemon is waiting on a filesystem response file; if the store does not listen
+to `permission://tool` and call `permission_respond_tool`, tools such as
+`Bash`, `Edit`, `Write`, or MCP calls can remain pending until the bridge
+timeout and the chat appears frozen.
+
+### Chat Turn-Stopped Notifications
+
+`useChatStore` owns the transition from an active streaming turn to a stopped
+turn. Every terminal path must notify once through `notifyChatTurnStopped()`:
+
+- `chat://done` with `success: true` → `outcome: 'success'`
+- `chat://done` with `success: false` → `outcome: 'error'`
+- user `abort()` after `chat_abort` succeeds → `outcome: 'aborted'`
+- immediate `chat_send` failure before a backend request id exists → synthesize
+  a stable `send-error:<assistantMessageId>` dedupe key
+
+Notifications must be keyed by request id and deduplicated in the store because
+the daemon can emit duplicate terminal events or a local abort can be followed by
+a later done event. The store-level tests should cover success, error, abort,
+and duplicate terminal events so Windows desktop notifications do not regress
+into missing or repeated toasts.
 
 ---
 

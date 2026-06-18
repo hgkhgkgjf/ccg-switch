@@ -745,6 +745,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -894,8 +895,11 @@ pub fn run() {
             chat_commands::chat_install_sdk,
             chat_commands::chat_uninstall_sdk,
             chat_commands::chat_restart_daemon,
+            chat_commands::chat_list_slash_commands,
+            chat_commands::chat_show_system_notification,
             // Permission 命令（权限审批响应）
             chat_commands::permission_respond_ask_user_question,
+            chat_commands::permission_respond_tool,
             chat_commands::permission_respond_plan_approval,
             chat_commands::chat_list_workspace_files,
             chat_commands::chat_enhance_prompt,
@@ -1010,9 +1014,7 @@ pub fn run() {
             // 退出时优雅关闭 ai-bridge daemon（避免遗留孤儿 node 进程；
             // daemon 自身也有父进程监控兜底）。
             if let tauri::RunEvent::Exit = _event {
-                if let Some(chat_state) =
-                    _app_handle.try_state::<chat_commands::ChatState>()
-                {
+                if let Some(chat_state) = _app_handle.try_state::<chat_commands::ChatState>() {
                     tauri::async_runtime::block_on(chat_state.manager.shutdown());
                 }
             }

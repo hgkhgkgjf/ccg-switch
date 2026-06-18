@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import type { CompletionItem } from './CompletionMenu';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {invoke} from '@tauri-apps/api/core';
+import type {CompletionItem} from './CompletionMenu';
 
 /** 触发符类型。 */
 export type CompletionTrigger = '@' | '#' | '!' | '/';
@@ -9,15 +9,26 @@ interface SlashCommand {
     id: string;
     label: string;
     description: string;
+    source?: string;
 }
 
-/** 内置 Slash 命令（参考 Claude Code 常用指令的子集）。 */
+/** 内置 Slash 命令兜底，对齐 cc-gui 的 SlashCommandRegistry 常用项。 */
 const SLASH_COMMANDS: SlashCommand[] = [
-    { id: 'clear', label: '/clear', description: '清空当前会话' },
-    { id: 'compact', label: '/compact', description: '压缩上下文' },
-    { id: 'init', label: '/init', description: '生成 CLAUDE.md' },
-    { id: 'review', label: '/review', description: '审查代码改动' },
-    { id: 'help', label: '/help', description: '查看可用命令' },
+    { id: 'clear', label: '/clear', description: '清空当前会话并新建会话', source: 'local' },
+    { id: 'compact', label: '/compact', description: 'Summarize conversation to free context/tokens', source: 'builtin' },
+    { id: 'context', label: '/context', description: 'Visualize current context usage as a colored grid', source: 'builtin' },
+    { id: 'init', label: '/init', description: 'Initialize a new CLAUDE.md or AGENTS.md file', source: 'builtin' },
+    { id: 'plan', label: '/plan', description: 'Switch to plan mode', source: 'builtin' },
+    { id: 'resume', label: '/resume', description: 'Resume a previous conversation', source: 'builtin' },
+    { id: 'review', label: '/review', description: 'Review a pull request or working tree changes', source: 'builtin' },
+    { id: 'batch', label: '/batch', description: 'Execute large-scale changes in parallel across isolated worktrees', source: 'bundled' },
+    { id: 'claude-api', label: '/claude-api', description: 'Build apps with the Claude API or Anthropic SDK', source: 'bundled' },
+    { id: 'debug', label: '/debug', description: 'Enable debug logging and diagnose session issues', source: 'bundled' },
+    { id: 'loop', label: '/loop', description: 'Run a prompt or command on a recurring interval', source: 'bundled' },
+    { id: 'simplify', label: '/simplify', description: 'Review changed code for reuse, quality, and efficiency', source: 'bundled' },
+    { id: 'update-config', label: '/update-config', description: 'Configure settings.json hooks, permissions, and env vars', source: 'bundled' },
+    { id: 'diff', label: '/diff', description: 'Show pending changes diff including untracked files', source: 'builtin' },
+    { id: 'help', label: '/help', description: '查看可用命令', source: 'local' },
 ];
 
 interface WorkspaceFile {
@@ -32,6 +43,15 @@ interface WorkspaceFilePayload {
     name?: unknown;
     isDir?: unknown;
     is_dir?: unknown;
+}
+
+interface SlashCommandPayload {
+    id?: unknown;
+    name?: unknown;
+    label?: unknown;
+    description?: unknown;
+    source?: unknown;
+    category?: unknown;
 }
 
 interface PromptPreset {
@@ -91,6 +111,63 @@ function basename(path: string): string {
     return parts[parts.length - 1] ?? path;
 }
 
+function normalizeSlashCommand(command: SlashCommandPayload): SlashCommand | null {
+    const rawLabel = stringField(command.label)
+        ?? stringField(command.name)
+        ?? stringField(command.id);
+    if (!rawLabel) return null;
+
+    const label = rawLabel.startsWith('/') ? rawLabel : `/${rawLabel}`;
+    const id = stringField(command.id) ?? label.replace(/^\//, '');
+    const description = stringField(command.description) ?? '';
+    const source = stringField(command.source) ?? stringField(command.category) ?? undefined;
+
+    return {
+        id: id.replace(/^\//, ''),
+        label,
+        description,
+        source,
+    };
+}
+
+function formatSlashDescription(description: string, source?: string): string | undefined {
+    if (!source) return description || undefined;
+    const suffix = `[${source}]`;
+    if (!description) return suffix;
+    if (description.includes(suffix)) return description;
+    return `${description} ${suffix}`;
+}
+
+export function getSlashCommandCompletions(
+    query: string,
+    commands: SlashCommandPayload[] = SLASH_COMMANDS,
+): CompletionItem[] {
+    const q = query.trim().replace(/^\//, '').toLowerCase();
+    const seen = new Set<string>();
+    return commands
+        .map(normalizeSlashCommand)
+        .filter((c): c is SlashCommand => c !== null)
+        .filter((c) => {
+            const key = c.label.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .filter((c) => {
+            if (!q) return true;
+            return c.id.toLowerCase().includes(q)
+                || c.label.toLowerCase().includes(q)
+                || c.description.toLowerCase().includes(q)
+                || (c.source?.toLowerCase().includes(q) ?? false);
+        })
+        .map((c) => ({
+            id: c.label,
+            label: c.label,
+            description: formatSlashDescription(c.description, c.source),
+            insertText: c.label,
+        }));
+}
+
 export function normalizeWorkspaceFile(file: WorkspaceFilePayload): WorkspaceFile | null {
     const relPath = stringField(file.relPath) ?? stringField(file.rel_path);
     if (!relPath) return null;
@@ -105,6 +182,8 @@ export function normalizeWorkspaceFile(file: WorkspaceFilePayload): WorkspaceFil
 interface UseCompletionsOptions {
     /** 工作目录（@ 文件补全用，缺省主目录） */
     cwd?: string;
+    /** 当前 AI provider，用于按 Claude/Codex 返回对应 slash command。 */
+    provider?: string;
 }
 
 export interface CompletionState {
@@ -132,9 +211,9 @@ export interface CompletionState {
  *   @  → chat_list_workspace_files（Rust）
  *   #  → list_subagents
  *   !  → list_prompts
- *   /  → 内置 SLASH_COMMANDS
+ *   /  → chat_list_slash_commands（Rust），失败时回退内置命令
  */
-export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionState {
+export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): CompletionState {
     const [active, setActive] = useState<ActiveCompletion | null>(null);
     const [items, setItems] = useState<CompletionItem[]>([]);
     const [activeIndex, setActiveIndex] = useState(0);
@@ -158,14 +237,16 @@ export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionS
             const q = active.query.toLowerCase();
             switch (active.trigger) {
                 case '/': {
-                    return SLASH_COMMANDS.filter(
-                        (c) => c.id.includes(q) || c.label.includes(q),
-                    ).map((c) => ({
-                        id: c.id,
-                        label: c.label,
-                        description: c.description,
-                        insertText: c.label,
-                    }));
+                    try {
+                        const commands = await invoke<SlashCommandPayload[]>(
+                            'chat_list_slash_commands',
+                            { cwd, provider },
+                        );
+                        const result = getSlashCommandCompletions(active.query, commands);
+                        return result.length > 0 ? result : getSlashCommandCompletions(active.query);
+                    } catch {
+                        return getSlashCommandCompletions(active.query);
+                    }
                 }
                 case '@': {
                     const files = await invoke<WorkspaceFilePayload[]>(
@@ -224,7 +305,7 @@ export function useCompletions({ cwd }: UseCompletionsOptions = {}): CompletionS
                 setItems([]);
                 setLoading(false);
             });
-    }, [active, cwd]);
+    }, [active, cwd, provider]);
 
     const onTextChange = useCallback(
         (text: string, caret: number) => {

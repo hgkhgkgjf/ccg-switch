@@ -191,7 +191,11 @@ pub fn load_claude_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessa
             role: msg_type.to_string(),
             content,
             ts,
-            raw: if has_structured_content { Some(json) } else { None },
+            raw: if has_structured_content {
+                Some(json)
+            } else {
+                None
+            },
         });
     }
 
@@ -215,11 +219,9 @@ fn has_content_block_type(content: &serde_json::Value, target_type: &str) -> boo
     content
         .as_array()
         .map(|items| {
-            items.iter().any(|item| {
-                item.get("type")
-                    .and_then(|v| v.as_str())
-                    == Some(target_type)
-            })
+            items
+                .iter()
+                .any(|item| item.get("type").and_then(|v| v.as_str()) == Some(target_type))
         })
         .unwrap_or(false)
 }
@@ -228,6 +230,8 @@ fn has_structured_history_content(content: &serde_json::Value) -> bool {
     has_content_block_type(content, "thinking")
         || has_content_block_type(content, "tool_use")
         || has_content_block_type(content, "tool_result")
+        || has_content_block_type(content, "image")
+        || has_content_block_type(content, "input_image")
 }
 
 fn has_tool_result_content(content: &serde_json::Value) -> bool {
@@ -507,6 +511,28 @@ mod tests {
         assert_eq!(
             messages[2].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"],
             "tool-1"
+        );
+    }
+
+    #[test]
+    fn load_claude_messages_preserves_image_only_blocks() {
+        let path = write_temp_session(
+            r#"{"type":"user","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="},"fileName":"screen.png"}]}}"#,
+        );
+
+        let messages = load_claude_messages(&path.to_string_lossy()).expect("load messages");
+        fs::remove_file(path).ok();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "");
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["type"],
+            "image"
+        );
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["source"]["media_type"],
+            "image/png"
         );
     }
 

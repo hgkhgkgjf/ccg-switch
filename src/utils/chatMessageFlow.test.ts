@@ -192,6 +192,107 @@ describe('chat message flow', () => {
         expect(shouldRenderChatMessage(toolResultMessage)).toBe(false);
     });
 
+    it('filters image base64 residue text while keeping the image block renderable', () => {
+        const raw = userRaw([
+            {type: 'text', text: 'arsAAAAASUVORK5CYII='},
+            {
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgo=',
+                },
+                fileName: 'screen.png',
+            },
+            {type: 'text', text: 'QAAAABJR5ErkJggg=='},
+        ]);
+
+        const blocks = getRenderableContentBlocks(raw);
+
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0].type).toBe('image');
+    });
+
+    it('filters Codex image placeholder tags while keeping image and prompt text renderable', () => {
+        const raw = userRaw([
+            {type: 'text', text: '<image name=[Image #1]>'},
+            {
+                type: 'input_image',
+                image_url: 'file:///C:/Users/Administrator/Pictures/screen.png',
+            },
+            {type: 'text', text: '</image>'},
+            {type: 'text', text: '请看这张截图的问题'},
+        ]);
+
+        const blocks = getRenderableContentBlocks(raw);
+
+        expect(blocks.map((block) => block.type)).toEqual(['input_image', 'text']);
+        expect(blocks[1]).toMatchObject({
+            type: 'text',
+            text: '请看这张截图的问题',
+        });
+    });
+
+    it('keeps non-adjacent base64-like text when a message also has an image', () => {
+        const raw = userRaw([
+            {type: 'text', text: 'Here is a token-like sample:'},
+            {type: 'text', text: 'QAAAABJR5ErkJggg=='},
+            {type: 'text', text: 'and the screenshot is below'},
+            {
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgo=',
+                },
+                fileName: 'screen.png',
+            },
+        ]);
+
+        const blocks = getRenderableContentBlocks(raw);
+
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'text', 'text', 'image']);
+    });
+
+    it('does not persist image base64 residue as message content when merging raw user messages', () => {
+        const next = mergeRawChatMessage([], userRaw([
+            {type: 'text', text: 'arsAAAAASUVORK5CYII='},
+            {
+                type: 'input_image',
+                source: {
+                    type: 'base64',
+                    media_type: 'image/png',
+                    data: 'iVBORw0KGgo=',
+                },
+                fileName: 'screen.png',
+            },
+            {type: 'text', text: 'QAAAABJR5ErkJggg=='},
+        ]), {createId: () => 'u-image', now: () => 100});
+
+        expect(next).toHaveLength(1);
+        expect(next[0].content).toBe('');
+        expect(getRenderableContentBlocks(next[0].raw)).toHaveLength(1);
+    });
+
+    it('does not persist Codex image placeholder tags as message content when merging raw user messages', () => {
+        const next = mergeRawChatMessage([], userRaw([
+            {type: 'text', text: '<image name=[Image #1]>'},
+            {
+                type: 'input_image',
+                image_url: 'file:///C:/Users/Administrator/Pictures/screen.png',
+            },
+            {type: 'text', text: '</image>'},
+            {type: 'text', text: '截图里的按钮太大了'},
+        ]), {createId: () => 'u-image-placeholder', now: () => 100});
+
+        expect(next).toHaveLength(1);
+        expect(next[0].content).toBe('截图里的按钮太大了');
+        expect(getRenderableContentBlocks(next[0].raw).map((block) => block.type)).toEqual([
+            'input_image',
+            'text',
+        ]);
+    });
+
     it('keeps empty streaming and error messages visible for status feedback', () => {
         expect(shouldRenderChatMessage({
             id: 'a-streaming',
@@ -208,5 +309,129 @@ describe('chat message flow', () => {
             error: '执行失败',
             createdAt: 101,
         })).toBe(true);
+    });
+
+    it('hides protocol context messages even when history marks them as user text', () => {
+        const message: ChatMessage = {
+            id: 'system-like-user',
+            role: 'user',
+            content: 'Filesystem sandboxing defines which files can be read or written. Approval policy is currently never.',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: 'Filesystem sandboxing defines which files can be read or written. Approval policy is currently never.',
+                },
+            ]),
+            createdAt: 100,
+        };
+
+        expect(shouldRenderChatMessage(message)).toBe(false);
+    });
+
+    it('hides assistant runtime system prompts that are replayed as history text', () => {
+        const message: ChatMessage = {
+            id: 'codex-system-like-user',
+            role: 'user',
+            content: 'You are Codex, a coding agent based on GPT-5.\n\n# Tools\nTools are grouped by namespace.',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: 'You are Codex, a coding agent based on GPT-5.\n\n# Tools\nTools are grouped by namespace.',
+                },
+            ]),
+            createdAt: 100,
+        };
+
+        expect(shouldRenderChatMessage(message)).toBe(false);
+    });
+
+    it('hides AGENTS and heartbeat protocol blocks from history rendering', () => {
+        const agentsMessage: ChatMessage = {
+            id: 'agents-context',
+            role: 'user',
+            content: '# AGENTS.md instructions for C:\\guodevelop\\ccg-switch\n\n<INSTRUCTIONS>\n必须使用中文回复\n</INSTRUCTIONS>',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: '# AGENTS.md instructions for C:\\guodevelop\\ccg-switch\n\n<INSTRUCTIONS>\n必须使用中文回复\n</INSTRUCTIONS>',
+                },
+            ]),
+            createdAt: 100,
+        };
+        const heartbeatMessage: ChatMessage = {
+            id: 'heartbeat-context',
+            role: 'user',
+            content: '<heartbeat>\n  <automation_id>ccg-switch-chat-ui-parity-monitor</automation_id>\n</heartbeat>',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: '<heartbeat>\n  <automation_id>ccg-switch-chat-ui-parity-monitor</automation_id>\n</heartbeat>',
+                },
+            ]),
+            createdAt: 101,
+        };
+
+        expect(shouldRenderChatMessage(agentsMessage)).toBe(false);
+        expect(shouldRenderChatMessage(heartbeatMessage)).toBe(false);
+    });
+
+    it('hides handoff summary blocks from history rendering', () => {
+        const handoffMessage: ChatMessage = {
+            id: 'handoff-context',
+            role: 'user',
+            content: 'Another language model started to solve this problem and produced a summary of its thinking process.\n\n## Handoff Summary\n\n- Current task: continue Chat UI parity.',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: 'Another language model started to solve this problem and produced a summary of its thinking process.\n\n## Handoff Summary\n\n- Current task: continue Chat UI parity.',
+                },
+            ]),
+            createdAt: 102,
+        };
+
+        expect(shouldRenderChatMessage(handoffMessage)).toBe(false);
+    });
+
+    it('hides Codex control markers from history rendering', () => {
+        const turnAbortedMessage: ChatMessage = {
+            id: 'turn-aborted',
+            role: 'user',
+            content: '<turn_aborted>',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: '<turn_aborted>',
+                },
+            ]),
+            createdAt: 100,
+        };
+        const userActionMessage: ChatMessage = {
+            id: 'user-action',
+            role: 'user',
+            content: '<user_action>\n<context>User initiated a review task.</context>\n</user_action>',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: '<user_action>\n<context>User initiated a review task.</context>\n</user_action>',
+                },
+            ]),
+            createdAt: 101,
+        };
+        const agentsInstructionsMessage: ChatMessage = {
+            id: 'agents-instructions',
+            role: 'user',
+            content: '<agents-instructions>\n# Global Instructions\n</agents-instructions>',
+            raw: userRaw([
+                {
+                    type: 'text',
+                    text: '<agents-instructions>\n# Global Instructions\n</agents-instructions>',
+                },
+            ]),
+            createdAt: 102,
+        };
+
+        expect(shouldRenderChatMessage(turnAbortedMessage)).toBe(false);
+        expect(shouldRenderChatMessage(userActionMessage)).toBe(false);
+        expect(shouldRenderChatMessage(agentsInstructionsMessage)).toBe(false);
     });
 });

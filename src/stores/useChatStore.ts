@@ -9,14 +9,21 @@ import {
     ChatProvider,
     ChatRole,
     ChatStreamEvent,
+    ContentBlock,
+    ImageBlock,
     MessageRaw,
     TokenUsage,
 } from '../types/chat';
 import {getSessionSelectionKey, type SessionMeta, type UnifiedSessionMessage} from '../types/session';
-import {AskUserQuestionRequest, PlanApprovalRequest,} from '../types/permission';
+import {AskUserQuestionRequest, PlanApprovalRequest, ToolPermissionRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
 import {CLAUDE_MODELS, CODEX_MODELS, reasoningLevelsFor,} from '../components/chat/composer/constants';
-import {mergeRawChatMessage, TOOL_RESULT_CONTENT} from '../utils/chatMessageFlow';
+import {isProtocolContextText, mergeRawChatMessage, TOOL_RESULT_CONTENT} from '../utils/chatMessageFlow';
+import {
+    type ChatTurnStopOutcome,
+    notifyChatTurnStopped,
+    prepareChatTurnStoppedNotificationPermission,
+} from '../utils/desktopNotification';
 
 const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
 const MODEL_KEY_PREFIX = 'ccg-chat-model:';
@@ -24,6 +31,10 @@ const REASONING_KEY = 'ccg-chat-reasoning';
 const HANDOFF_CONTEXT_MAX_MESSAGES = 24;
 const HANDOFF_CONTEXT_MAX_CHARS = 12_000;
 const ATTACHMENT_ONLY_MESSAGE = 'Please analyze the attached image(s).';
+const SESSION_HISTORY_CACHE_LIMIT = 8;
+const STOPPED_REQUEST_NOTIFICATION_LIMIT = 64;
+const STOPPED_OUTPUT_ERROR = '已停止输出';
+const stoppedRequestNotifications = new Set<string>();
 
 function loadDraft(provider: ChatProviderId): string {
     try {
@@ -51,6 +62,99 @@ function loadReasoning(): ReasoningEffort {
         // ignore
     }
     return 'high';
+}
+
+function imageBlockFromAttachment(attachment: ChatAttachment): ImageBlock | null {
+    const hasData = Boolean(attachment.data?.trim());
+    const hasPath = Boolean(attachment.path?.trim());
+    if (!hasData && !hasPath) return null;
+
+    const block: ImageBlock = {
+        type: 'image',
+        media_type: attachment.mediaType,
+        fileName: attachment.fileName,
+    };
+
+    if (hasData && attachment.data) {
+        block.data = attachment.data;
+        block.source = {
+            type: 'base64',
+            media_type: attachment.mediaType,
+            data: attachment.data,
+        };
+    } else if (hasPath && attachment.path) {
+        block.path = attachment.path;
+        block.source = {
+            type: 'file',
+            media_type: attachment.mediaType,
+            path: attachment.path,
+        };
+    }
+
+    return block;
+}
+
+function buildUserRawMessage(text: string, attachments: ChatAttachment[]): MessageRaw | undefined {
+    const blocks: ContentBlock[] = [];
+    const trimmed = text.trim();
+    if (trimmed) {
+        blocks.push({type: 'text', text: trimmed});
+    }
+
+    for (const attachment of attachments) {
+        const imageBlock = imageBlockFromAttachment(attachment);
+        if (imageBlock) blocks.push(imageBlock);
+    }
+
+    if (blocks.length === 0) return undefined;
+    return {
+        type: 'user',
+        timestamp: new Date().toISOString(),
+        message: {
+            content: blocks,
+        },
+    };
+}
+
+function notifyStoppedRequestOnce(
+    requestId: string | null | undefined,
+    outcome: ChatTurnStopOutcome,
+    provider: ChatProvider,
+    detail?: string | null,
+): void {
+    if (!requestId) return;
+    if (stoppedRequestNotifications.has(requestId)) return;
+
+    stoppedRequestNotifications.add(requestId);
+    while (stoppedRequestNotifications.size > STOPPED_REQUEST_NOTIFICATION_LIMIT) {
+        const oldest = stoppedRequestNotifications.values().next().value;
+        if (!oldest) break;
+        stoppedRequestNotifications.delete(oldest);
+    }
+
+    notifyChatTurnStopped({
+        outcome,
+        provider,
+        ...(detail ? {detail} : {}),
+    });
+}
+
+function getLastAssistantTextPreview(messages: ChatMessage[]): string | null {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.role !== 'assistant') continue;
+
+        const rawTextBlocks = message.raw?.message.content
+            .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+            .map((block) => block.text.trim())
+            .filter(Boolean);
+        const rawText = rawTextBlocks?.[rawTextBlocks.length - 1];
+        const fallbackText = message.content.trim();
+        const preview = (rawText || fallbackText).replace(/\s+/g, ' ').trim();
+        if (preview) return preview;
+    }
+
+    return null;
 }
 
 interface ChatState {
@@ -94,6 +198,8 @@ interface ChatState {
     pendingAskUserQuestion: AskUserQuestionRequest | null;
     /** 待审批的 PlanApproval 请求（弹窗） */
     pendingPlanApproval: PlanApprovalRequest | null;
+    /** 待审批的普通工具权限请求（弹窗） */
+    pendingToolPermission: ToolPermissionRequest | null;
     /** 被用户拒绝的工具调用 ID 集合 */
     deniedToolIds: Set<string>;
 
@@ -116,11 +222,13 @@ interface ChatState {
     abort: () => Promise<void>;
     clear: () => Promise<void>;
     answerAskUserQuestion: (requestId: string, answers: Record<string, string>) => Promise<void>;
+    answerToolPermission: (requestId: string, allow: boolean) => Promise<void>;
     approvePlan: (requestId: string, approved: boolean, targetMode: string) => Promise<void>;
 }
 
 let unlisteners: UnlistenFn[] = [];
 let latestSessionLoadToken = 0;
+const sessionHistoryCache = new Map<string, ChatMessage[]>();
 
 function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -171,20 +279,93 @@ function mapHistoryMessage(
         ? parsedTime
         : session.createdAt + index;
 
+    const role = isProtocolContextText(message.content)
+        ? 'system'
+        : normalizeHistoryRole(message.role);
+
     return {
         id: `history-${session.providerId}-${session.sessionId}-${index}`,
-        role: normalizeHistoryRole(message.role),
+        role,
         content: message.content,
         raw: message.raw ?? undefined,
         createdAt,
     };
 }
 
+function getSessionHistoryCacheKey(session: SessionMeta): string {
+    return [
+        session.providerId,
+        session.sourcePath,
+        session.sessionId,
+        session.lastActiveAt,
+    ].join('::');
+}
+
+function cloneHistoryMessages(messages: ChatMessage[]): ChatMessage[] {
+    return messages.map((message) => ({...message}));
+}
+
+function getCachedSessionHistory(session: SessionMeta): ChatMessage[] | null {
+    const key = getSessionHistoryCacheKey(session);
+    const cached = sessionHistoryCache.get(key);
+    if (!cached) return null;
+
+    sessionHistoryCache.delete(key);
+    sessionHistoryCache.set(key, cached);
+    return cloneHistoryMessages(cached);
+}
+
+function rememberSessionHistory(session: SessionMeta, messages: ChatMessage[]): void {
+    const key = getSessionHistoryCacheKey(session);
+    sessionHistoryCache.delete(key);
+    sessionHistoryCache.set(key, cloneHistoryMessages(messages));
+
+    while (sessionHistoryCache.size > SESSION_HISTORY_CACHE_LIMIT) {
+        const oldestKey = sessionHistoryCache.keys().next().value;
+        if (!oldestKey) break;
+        sessionHistoryCache.delete(oldestKey);
+    }
+}
+
+export function clearChatSessionHistoryCache(): void {
+    sessionHistoryCache.clear();
+}
+
+function getLoadedSessionState(
+    session: SessionMeta,
+    provider: ChatProvider,
+    messages: ChatMessage[],
+    state: ChatState,
+): Partial<ChatState> {
+    const model = defaultModel(provider);
+    const levels = reasoningLevelsFor(provider, model);
+
+    return {
+        messages,
+        provider,
+        model,
+        draft: loadDraft(provider),
+        reasoningEffort: levels.some((level) => level.id === state.reasoningEffort)
+            ? state.reasoningEffort
+            : (levels[levels.length - 1]?.id ?? 'high'),
+        sessionId: session.sessionId,
+        currentCwd: session.projectDir,
+        activeSession: session,
+        pendingSessionKey: null,
+        handoffContextProvider: null,
+        activeRequestId: null,
+        contextTokens: 0,
+        error: null,
+    };
+}
+
 function hasHandoffContent(message: ChatMessage): boolean {
     if (message.streaming || message.error) return false;
-    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system') return false;
+    if (message.role !== 'user' && message.role !== 'assistant') return false;
     const content = message.content.trim();
-    return content.length > 0 && content !== TOOL_RESULT_CONTENT;
+    return content.length > 0
+        && content !== TOOL_RESULT_CONTENT
+        && !isProtocolContextText(content);
 }
 
 function roleLabel(role: ChatRole): string {
@@ -260,6 +441,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     error: null,
     pendingAskUserQuestion: null,
     pendingPlanApproval: null,
+    pendingToolPermission: null,
     deniedToolIds: new Set(),
 
     init: async () => {
@@ -339,7 +521,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
 
         const doneUn = await listen<ChatDoneEvent>('chat://done', (event) => {
-            const { success, error } = event.payload;
+            const { requestId, success, error } = event.payload;
+            const stateBeforeDone = get();
+            notifyStoppedRequestOnce(
+                requestId,
+                success ? 'success' : 'error',
+                stateBeforeDone.provider,
+                success ? getLastAssistantTextPreview(stateBeforeDone.messages) : error,
+            );
 
             set((state) => ({
                 activeRequestId: null,
@@ -376,6 +565,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set({ pendingPlanApproval: event.payload });
         });
 
+        const toolPermissionUn = await listen<ToolPermissionRequest>('permission://tool', (event) => {
+            set({ pendingToolPermission: event.payload });
+        });
+
         // 监听 chat://message 事件（工具调用可视化）
         const messageUn = await listen<{ json: string }>('chat://message', (event) => {
             try {
@@ -393,7 +586,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         });
 
-        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn, messageUn];
+        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn, toolPermissionUn, messageUn];
 
         // 预热 daemon（懒启动也可，但提前启动可减少首条消息延迟）
         try {
@@ -473,6 +666,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         )) ?? [];
         const hasAttachments = attachments.length > 0;
         if (!trimmed && !hasAttachments) return;
+        prepareChatTurnStoppedNotificationPermission();
+
         const messageText = trimmed || ATTACHMENT_ONLY_MESSAGE;
         const stateBeforeSend = get();
         const outboundMessage = stateBeforeSend.handoffContextProvider
@@ -491,6 +686,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             id: newId(),
             role: 'user',
             content: displayText,
+            raw: buildUserRawMessage(trimmed, attachments),
             createdAt: Date.now(),
         };
         const assistantMsg: ChatMessage = {
@@ -542,6 +738,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             set({ activeRequestId: requestId });
         } catch (e) {
+            notifyStoppedRequestOnce(
+                `send-error:${assistantMsg.id}`,
+                'error',
+                provider,
+                String(e),
+            );
             set((state) => ({
                 error: String(e),
                 messages: state.messages.map((m) =>
@@ -558,8 +760,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set({ error: `Unsupported chat provider: ${session.providerId}` });
             return;
         }
+        const provider = session.providerId;
 
         const pendingSessionKey = getSessionSelectionKey(session);
+        const currentState = get();
+        const isCurrentSession = currentState.activeSession
+            ? getSessionSelectionKey(currentState.activeSession) === pendingSessionKey
+            : false;
+        if (
+            isCurrentSession
+            && !currentState.activeRequestId
+            && !currentState.pendingSessionKey
+        ) {
+            return;
+        }
+
         const loadToken = ++latestSessionLoadToken;
         set({
             pendingSessionKey,
@@ -568,6 +783,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         try {
             await abortActiveRequestIfNeeded(get, set);
+            const cachedHistory = getCachedSessionHistory(session);
+            if (cachedHistory) {
+                if (loadToken !== latestSessionLoadToken) {
+                    return;
+                }
+                set((state) => getLoadedSessionState(session, provider, cachedHistory, state));
+                return;
+            }
+
             const history = await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
                 providerId: session.providerId,
                 sourcePath: session.sourcePath,
@@ -575,25 +799,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (loadToken !== latestSessionLoadToken) {
                 return;
             }
-            const provider = session.providerId;
-            const model = defaultModel(provider);
-            const levels = reasoningLevelsFor(provider, model);
+            const mappedHistory = history.map((message, index) => mapHistoryMessage(session, message, index));
+            rememberSessionHistory(session, mappedHistory);
             set((state) => ({
-                messages: history.map((message, index) => mapHistoryMessage(session, message, index)),
-                provider,
-                model,
-                draft: loadDraft(provider),
-                reasoningEffort: levels.some((level) => level.id === state.reasoningEffort)
-                    ? state.reasoningEffort
-                    : (levels[levels.length - 1]?.id ?? 'high'),
-                sessionId: session.sessionId,
-                currentCwd: session.projectDir,
-                activeSession: session,
-                pendingSessionKey: null,
-                handoffContextProvider: null,
-                activeRequestId: null,
-                contextTokens: 0,
-                error: null,
+                ...getLoadedSessionState(session, provider, mappedHistory, state),
             }));
         } catch (e) {
             if (loadToken !== latestSessionLoadToken) {
@@ -623,12 +832,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     abort: async () => {
+        const { activeRequestId, provider, messages } = get();
+        prepareChatTurnStoppedNotificationPermission();
+
         try {
             await invoke('chat_abort');
+            notifyStoppedRequestOnce(
+                activeRequestId,
+                'aborted',
+                provider,
+                getLastAssistantTextPreview(messages),
+            );
         } catch (e) {
             set({ error: String(e) });
         }
-        set({ activeRequestId: null });
+        set((state) => ({
+            activeRequestId: null,
+            messages: state.messages.map((message) => (
+                message.role === 'assistant' && message.streaming
+                    ? {
+                        ...message,
+                        streaming: false,
+                        error: message.error ?? STOPPED_OUTPUT_ERROR,
+                        durationMs: Date.now() - message.createdAt,
+                    }
+                    : message
+            )),
+        }));
     },
 
     clear: async () => {
@@ -649,6 +879,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
             await invoke('permission_respond_ask_user_question', { requestId, answers });
             set({ pendingAskUserQuestion: null });
+        } catch (e) {
+            set({ error: String(e) });
+        }
+    },
+
+    answerToolPermission: async (requestId, allow) => {
+        try {
+            await invoke('permission_respond_tool', { requestId, allow });
+            set({ pendingToolPermission: null });
         } catch (e) {
             set({ error: String(e) });
         }

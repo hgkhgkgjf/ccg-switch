@@ -4,7 +4,7 @@
 //! String. Follows the project's command-layer convention.
 
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::chat::ChatManager;
 
@@ -17,6 +17,15 @@ pub struct WorkspaceFile {
     pub name: String,
     /// 是否为目录
     pub is_dir: bool,
+}
+
+/// 一个 Slash 命令补全项，格式对齐 cc-gui 的 SlashCommandRegistry。
+#[derive(serde::Serialize)]
+pub struct SlashCommandItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source: String,
 }
 
 /// Shared chat manager, stored in Tauri managed state.
@@ -61,30 +70,45 @@ pub async fn chat_start_daemon(state: State<'_, ChatState>) -> Result<(), String
     state.manager.warm_up().await
 }
 
+/// 发送系统级桌面通知，用于聊天任务完成/失败/中断后的右下角提示。
+#[tauri::command]
+pub fn chat_show_system_notification(
+    app: AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    let title = title.trim();
+    let body = body.trim();
+    if title.is_empty() {
+        return Err("发送系统通知失败: 标题不能为空".to_string());
+    }
+
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| format!("发送系统通知失败: {e}"))
+}
+
 /// 列出所有 SDK 的安装状态（Claude / Codex）。
 #[tauri::command]
-pub fn chat_sdk_status(
-    state: State<'_, ChatState>,
-) -> Result<Vec<crate::chat::SdkStatus>, String> {
+pub fn chat_sdk_status(state: State<'_, ChatState>) -> Result<Vec<crate::chat::SdkStatus>, String> {
     state.manager.sdk_status()
 }
 
 /// 安装指定 SDK。npm 日志通过 "chat://sdk-install-log" 事件流式推送，
 /// 结束时发 "chat://sdk-install-done"。
 #[tauri::command]
-pub async fn chat_install_sdk(
-    sdk_id: String,
-    state: State<'_, ChatState>,
-) -> Result<(), String> {
+pub async fn chat_install_sdk(sdk_id: String, state: State<'_, ChatState>) -> Result<(), String> {
     state.manager.install_sdk(sdk_id).await
 }
 
 /// 卸载指定 SDK。
 #[tauri::command]
-pub async fn chat_uninstall_sdk(
-    sdk_id: String,
-    state: State<'_, ChatState>,
-) -> Result<(), String> {
+pub async fn chat_uninstall_sdk(sdk_id: String, state: State<'_, ChatState>) -> Result<(), String> {
     state.manager.uninstall_sdk(sdk_id)
 }
 
@@ -92,6 +116,28 @@ pub async fn chat_uninstall_sdk(
 #[tauri::command]
 pub async fn chat_restart_daemon(state: State<'_, ChatState>) -> Result<(), String> {
     state.manager.restart_daemon().await
+}
+
+/// 列出 Slash 命令，用于输入框 `/` 补全。
+///
+/// 内置命令对齐 cc-gui 的 SlashCommandRegistry，并额外扫描当前项目向上的
+/// `.claude/commands/**/*.md`，避免补全长期依赖前端硬编码列表。
+#[tauri::command]
+pub fn chat_list_slash_commands(
+    cwd: Option<String>,
+    provider: Option<String>,
+) -> Result<Vec<SlashCommandItem>, String> {
+    Ok(
+        crate::chat::list_slash_commands(provider.as_deref(), cwd.as_deref())
+            .into_iter()
+            .map(|command| SlashCommandItem {
+                id: command.id,
+                name: command.name,
+                description: command.description,
+                source: command.source,
+            })
+            .collect(),
+    )
 }
 
 /// 响应 AskUserQuestion 权限请求。
@@ -111,6 +157,20 @@ pub async fn permission_respond_ask_user_question(
         &request_id,
         answers,
     )
+}
+
+/// 响应普通工具权限请求。
+///
+/// `request_id` 来自 "permission://tool" 事件，`allow` 会写入
+/// `response-<sessionId>-<requestId>.json`，供 ai-bridge 继续执行或拒绝工具。
+#[tauri::command]
+pub async fn permission_respond_tool(
+    request_id: String,
+    allow: bool,
+    state: State<'_, ChatState>,
+) -> Result<(), String> {
+    let perm_dir = crate::chat::permission_dir(state.manager.app())?;
+    crate::chat::write_tool_permission_response(&perm_dir, "default", &request_id, allow)
 }
 
 /// 列出工作目录下的文件，用于 `@` 文件引用补全。
@@ -231,4 +291,3 @@ pub async fn permission_respond_plan_approval(
         message,
     )
 }
-

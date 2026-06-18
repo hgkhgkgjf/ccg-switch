@@ -4,6 +4,17 @@ export const COMPOSER_MAX_HEIGHT = 320;
 export const AUTO_REVEAL_SCROLL_THRESHOLD = 48;
 export const VISIBLE_MESSAGE_WINDOW = 15;
 export const REVEAL_PAGE_SIZE = 30;
+export const CONVERSATION_PANE_MIN_WIDTH = 380;
+export const CONVERSATION_PANE_MAX_WIDTH = 960;
+export const DIFF_PANE_MIN_WIDTH = 360;
+export const DIFF_PANE_MAX_WIDTH = 920;
+export const STATUS_PANE_MIN_WIDTH = 260;
+export const STATUS_PANE_MAX_WIDTH = 520;
+
+export interface TranscriptRevealState {
+    transcriptKey: string;
+    revealedCount: number;
+}
 
 export function clampComposerHeight(
     height: number,
@@ -19,6 +30,66 @@ export function getComposerHeightFromDrag(
     currentClientY: number,
 ): number {
     return clampComposerHeight(startHeight + startClientY - currentClientY);
+}
+
+export function clampPaneSize(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+export function clampPaneResizeDelta(
+    delta: number,
+    leftStart: number,
+    rightStart: number,
+    leftMin: number,
+    leftMax: number,
+    rightMin: number,
+    rightMax: number,
+): number {
+    const minDelta = Math.max(leftMin - leftStart, rightStart - rightMax);
+    const maxDelta = Math.min(leftMax - leftStart, rightStart - rightMin);
+    return clampPaneSize(delta, minDelta, maxDelta);
+}
+
+export interface PaneResizeResult {
+    leftWidth: number;
+    rightWidth: number;
+}
+
+export function getPaneWidthsAfterResize(
+    delta: number,
+    leftStart: number,
+    rightStart: number,
+    leftMin: number,
+    leftMax: number,
+    rightMin: number,
+    rightMax: number,
+): PaneResizeResult {
+    const clampedDelta = clampPaneResizeDelta(
+        delta,
+        leftStart,
+        rightStart,
+        leftMin,
+        leftMax,
+        rightMin,
+        rightMax,
+    );
+
+    return {
+        leftWidth: Math.round(leftStart + clampedDelta),
+        rightWidth: Math.round(rightStart - clampedDelta),
+    };
+}
+
+interface DiffPaneReopenControlInput {
+    diffPaneCollapsed: boolean;
+    hasSelectedEdit: boolean;
+}
+
+export function shouldShowDiffPaneReopenControl({
+    diffPaneCollapsed,
+    hasSelectedEdit,
+}: DiffPaneReopenControlInput): boolean {
+    return diffPaneCollapsed && hasSelectedEdit;
 }
 
 interface AutoRevealInput {
@@ -48,6 +119,45 @@ interface CollapsedMessageWindowResult {
     collapsedCount: number;
     nextRevealCount: number;
     visibleStartIndex: number;
+}
+
+export function getEffectiveRevealedCount(
+    state: TranscriptRevealState,
+    transcriptKey: string,
+): number {
+    return state.transcriptKey === transcriptKey ? state.revealedCount : 0;
+}
+
+export function getClampedRevealState(
+    state: TranscriptRevealState,
+    transcriptKey: string,
+    totalEarlierMessages: number,
+): TranscriptRevealState {
+    const revealedCount = Math.min(
+        getEffectiveRevealedCount(state, transcriptKey),
+        totalEarlierMessages,
+    );
+
+    if (state.transcriptKey === transcriptKey && state.revealedCount === revealedCount) {
+        return state;
+    }
+
+    return {transcriptKey, revealedCount};
+}
+
+export function getNextRevealState(
+    state: TranscriptRevealState,
+    transcriptKey: string,
+    totalEarlierMessages: number,
+    pageSize = REVEAL_PAGE_SIZE,
+): TranscriptRevealState {
+    return {
+        transcriptKey,
+        revealedCount: Math.min(
+            totalEarlierMessages,
+            getEffectiveRevealedCount(state, transcriptKey) + pageSize,
+        ),
+    };
 }
 
 export function getCollapsedMessageWindow({

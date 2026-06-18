@@ -50,11 +50,37 @@ export interface MessageRaw {
 }
 
 /** 内容块联合类型 */
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
+export type ContentBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
 
 export interface TextBlock {
     type: 'text';
     text: string;
+}
+
+export interface ImageSource {
+    type?: string;
+    media_type?: string;
+    mediaType?: string;
+    data?: string;
+    url?: string;
+    path?: string;
+}
+
+export interface ImageBlock {
+    type: 'image' | 'input_image';
+    source?: ImageSource;
+    media_type?: string;
+    mediaType?: string;
+    data?: string;
+    url?: string;
+    path?: string;
+    image_url?: string | {
+        url?: string;
+        path?: string;
+        detail?: string;
+    };
+    fileName?: string;
+    name?: string;
 }
 
 export interface ToolUseBlock {

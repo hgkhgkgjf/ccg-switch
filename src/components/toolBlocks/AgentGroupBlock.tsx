@@ -14,6 +14,7 @@ export interface AgentGroupBlockProps {
   input?: ToolInput;
   result?: ToolResultBlock | null;
   toolId?: string;
+  compact?: boolean;
 }
 
 const AgentGroupBlock = memo(function AgentGroupBlock({
@@ -21,6 +22,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   input,
   result,
   toolId,
+  compact = false,
 }: AgentGroupBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -36,9 +38,9 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   const hasVisibleMeta = header.hasVisibleMeta;
 
   return (
-    <div className="task-container">
+    <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
-        className="task-header"
+        className={compact ? 'task-header task-header-compact' : 'task-header'}
         onClick={() => setExpanded((prev) => !prev)}
         style={{ cursor: 'pointer' }}
       >
@@ -69,7 +71,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
       </div>
 
       {expanded && (
-        <div className="task-details">
+        <div className={`task-details ${compact ? 'task-details-compact' : ''}`}>
           <div className="task-content-wrapper">
             {meta.description && (
               <div className="tool-section">

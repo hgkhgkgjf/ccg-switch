@@ -1,9 +1,20 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
 import {ChevronRight, Clock, FolderOpen, MessageSquare, Plus, RefreshCw, Search,} from 'lucide-react';
 import {getSessionSelectionKey, type SessionMeta} from '../../types/session';
-import {formatShortDate, getSessionProviderLabel, sessionTitle} from './chatSessionSidebarUtils';
+import {
+    formatShortDate,
+    getCachedProjectSessions,
+    getSessionProviderLabel,
+    getVisibleProjectSessions,
+    normalizeProjectPathForCache,
+    rememberProjectSessions,
+    sessionTitle,
+    shouldIgnoreSessionClick,
+    shouldShowSessionRefreshStatus,
+    shouldSyncProjectFromCurrentCwd,
+} from './chatSessionSidebarUtils';
 
 interface ProjectInfo {
     name: string;
@@ -20,10 +31,6 @@ interface ChatSessionSidebarProps {
     onNewSession: (cwd?: string | null) => void;
 }
 
-function isSupportedChatProvider(providerId: string): boolean {
-    return providerId === 'claude' || providerId === 'codex';
-}
-
 export default function ChatSessionSidebar({
     activeSession,
     currentCwd,
@@ -34,11 +41,16 @@ export default function ChatSessionSidebar({
     const {t} = useTranslation();
     const [projects, setProjects] = useState<ProjectInfo[]>([]);
     const [sessions, setSessions] = useState<SessionMeta[]>([]);
+    const [sessionsProjectPath, setSessionsProjectPath] = useState<string | null>(currentCwd);
     const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(currentCwd);
     const [projectQuery, setProjectQuery] = useState('');
     const [sessionQuery, setSessionQuery] = useState('');
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
+    const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
+    const sessionRequestSeqRef = useRef(0);
+    const sessionInFlightKeyRef = useRef<string | null>(null);
+    const hasManualProjectSelectionRef = useRef(false);
 
     const loadProjects = useCallback(async () => {
         setLoadingProjects(true);
@@ -52,16 +64,51 @@ export default function ChatSessionSidebar({
         }
     }, []);
 
-    const loadSessions = useCallback(async (projectPath: string) => {
+    const loadSessions = useCallback(async (
+        projectPath: string,
+        options: {clearOnMiss?: boolean; force?: boolean} = {},
+    ) => {
+        const projectCacheKey = normalizeProjectPathForCache(projectPath);
+        if (!options.force && projectCacheKey && sessionInFlightKeyRef.current === projectCacheKey) {
+            return;
+        }
+
+        const cached = getCachedProjectSessions(sessionCacheRef.current, projectPath, options.force);
+        if (cached) {
+            setSessionsProjectPath(projectPath);
+            setSessions(cached);
+            return;
+        }
+
+        if (options.clearOnMiss) {
+            setSessionsProjectPath(projectPath);
+            setSessions([]);
+        }
+
+        const requestSeq = sessionRequestSeqRef.current + 1;
+        sessionRequestSeqRef.current = requestSeq;
+        sessionInFlightKeyRef.current = projectCacheKey;
         setLoadingSessions(true);
         try {
             const data = await invoke<SessionMeta[]>('list_sessions', {projectPath});
-            setSessions(data.filter((session) => isSupportedChatProvider(session.providerId)));
+            if (sessionRequestSeqRef.current !== requestSeq) return;
+
+            const supportedSessions = rememberProjectSessions(sessionCacheRef.current, projectPath, data);
+            setSessionsProjectPath(projectPath);
+            setSessions(supportedSessions);
         } catch (error) {
+            if (sessionRequestSeqRef.current !== requestSeq) return;
             console.error('[ChatSessionSidebar] load sessions failed:', error);
-            setSessions([]);
+            sessionCacheRef.current.delete(normalizeProjectPathForCache(projectPath));
+            setSessionsProjectPath(projectPath);
+            if (!options.force) {
+                setSessions([]);
+            }
         } finally {
-            setLoadingSessions(false);
+            if (sessionRequestSeqRef.current === requestSeq) {
+                sessionInFlightKeyRef.current = null;
+                setLoadingSessions(false);
+            }
         }
     }, []);
 
@@ -71,10 +118,30 @@ export default function ChatSessionSidebar({
 
     useEffect(() => {
         if (!currentCwd) return;
+        const currentProjectKey = normalizeProjectPathForCache(currentCwd);
+        const selectedProjectKey = normalizeProjectPathForCache(selectedProjectPath);
+        const visibleSessions = getVisibleProjectSessions(sessions, selectedProjectPath, sessionsProjectPath);
+        const cachedSessions = getCachedProjectSessions(sessionCacheRef.current, currentCwd);
+        const shouldSync = shouldSyncProjectFromCurrentCwd({
+            currentCwd,
+            selectedProjectPath,
+            hasManualProjectSelection: hasManualProjectSelectionRef.current,
+            visibleSessionCount: visibleSessions.length,
+            hasCachedCurrentProjectSessions: Boolean(cachedSessions),
+        });
+
+        if (!shouldSync) {
+            if (currentProjectKey && currentProjectKey === selectedProjectKey) {
+                hasManualProjectSelectionRef.current = false;
+            }
+            return;
+        }
+
+        hasManualProjectSelectionRef.current = false;
         setSelectedProjectPath(currentCwd);
         setSessionQuery('');
-        void loadSessions(currentCwd);
-    }, [currentCwd, loadSessions]);
+        void loadSessions(currentCwd, {clearOnMiss: true});
+    }, [currentCwd, loadSessions, selectedProjectPath, sessions, sessionsProjectPath]);
 
     const filteredProjects = useMemo(() => {
         const query = projectQuery.trim().toLowerCase();
@@ -86,23 +153,36 @@ export default function ChatSessionSidebar({
         ));
     }, [projectQuery, projects]);
 
+    const visibleSessions = useMemo(
+        () => getVisibleProjectSessions(sessions, selectedProjectPath, sessionsProjectPath),
+        [selectedProjectPath, sessions, sessionsProjectPath],
+    );
+
     const filteredSessions = useMemo(() => {
         const query = sessionQuery.trim().toLowerCase();
-        if (!query) return sessions;
+        if (!query) return visibleSessions;
 
-        return sessions.filter((session) => (
+        return visibleSessions.filter((session) => (
             sessionTitle(session).toLowerCase().includes(query)
             || session.sessionId.toLowerCase().includes(query)
             || session.providerId.toLowerCase().includes(query)
         ));
-    }, [sessionQuery, sessions]);
+    }, [sessionQuery, visibleSessions]);
 
     const activeSessionKey = activeSession ? getSessionSelectionKey(activeSession) : null;
+    const showSessionRefreshStatus = shouldShowSessionRefreshStatus(loadingSessions, visibleSessions.length);
 
     const handleProjectSelect = (project: ProjectInfo) => {
+        const nextProjectKey = normalizeProjectPathForCache(project.path);
+        const selectedProjectKey = normalizeProjectPathForCache(selectedProjectPath);
+        if (nextProjectKey === selectedProjectKey && visibleSessions.length > 0) {
+            return;
+        }
+
+        hasManualProjectSelectionRef.current = true;
         setSelectedProjectPath(project.path);
         setSessionQuery('');
-        void loadSessions(project.path);
+        void loadSessions(project.path, {clearOnMiss: true});
     };
 
     const handleNewSession = () => {
@@ -111,7 +191,14 @@ export default function ChatSessionSidebar({
 
     const handleRefreshSessions = () => {
         if (!selectedProjectPath) return;
-        void loadSessions(selectedProjectPath);
+        void loadSessions(selectedProjectPath, {force: true});
+    };
+
+    const handleSessionSelect = (session: SessionMeta) => {
+        if (shouldIgnoreSessionClick(session, activeSessionKey, pendingSessionKey)) {
+            return;
+        }
+        onSessionSelect(session);
     };
 
     return (
@@ -173,7 +260,8 @@ export default function ChatSessionSidebar({
                         ) : (
                             <div className="space-y-0.5 px-2">
                                 {filteredProjects.map((project) => {
-                                    const selected = selectedProjectPath === project.path;
+                                    const selected = normalizeProjectPathForCache(selectedProjectPath)
+                                        === normalizeProjectPathForCache(project.path);
                                     return (
                                         <button
                                             key={project.path}
@@ -224,16 +312,27 @@ export default function ChatSessionSidebar({
                             <div className="px-3 py-5 text-center text-xs text-base-content/40">
                                 {t('chat.sessionPanel.selectProject')}
                             </div>
-                        ) : loadingSessions && sessions.length === 0 ? (
+                        ) : loadingSessions && visibleSessions.length === 0 ? (
                             <div className="flex items-center justify-center py-6 text-base-content/40">
                                 <RefreshCw size={16} className="animate-spin"/>
                             </div>
-                        ) : sessions.length === 0 ? (
+                        ) : visibleSessions.length === 0 ? (
                             <div className="px-3 py-5 text-center text-xs text-base-content/40">
                                 {t('chat.sessionPanel.noSessions')}
                             </div>
                         ) : (
                             <div className="pb-3">
+                                {showSessionRefreshStatus && (
+                                    <div
+                                        className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-base-300 bg-base-200/45 px-2 py-1.5 text-[11px] text-base-content/45"
+                                        role="status"
+                                    >
+                                        <RefreshCw size={12} className="animate-spin text-primary/70"/>
+                                        <span className="min-w-0 flex-1 truncate">
+                                            {t('chat.sessionPanel.refreshingSessions')}
+                                        </span>
+                                    </div>
+                                )}
                                 <div className="px-2 pb-2">
                                     <label className="relative block">
                                         <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
@@ -247,11 +346,7 @@ export default function ChatSessionSidebar({
                                     </label>
                                 </div>
 
-                                {loadingSessions ? (
-                                    <div className="flex items-center justify-center py-6 text-base-content/40">
-                                        <RefreshCw size={16} className="animate-spin"/>
-                                    </div>
-                                ) : filteredSessions.length === 0 ? (
+                                {filteredSessions.length === 0 ? (
                                     <div className="px-3 py-5 text-center text-xs text-base-content/40">
                                         {t('chat.sessionPanel.noMatchingSessions')}
                                     </div>
@@ -267,7 +362,7 @@ export default function ChatSessionSidebar({
                                                 <button
                                                     key={sessionKey}
                                                     type="button"
-                                                    onClick={() => onSessionSelect(session)}
+                                                    onClick={() => handleSessionSelect(session)}
                                                     className={`w-full rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                                                         selected
                                                             ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
