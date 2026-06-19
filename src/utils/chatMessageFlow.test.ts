@@ -233,6 +233,21 @@ describe('chat message flow', () => {
         });
     });
 
+    it('merges adjacent text blocks so markdown history keeps document structure', () => {
+        const raw = assistantRaw([
+            {type: 'text', text: '**上轮进展与阻塞**\n记录里声称完成。'},
+            {type: 'text', text: '- **本轮规划**：先定位根因。'},
+            {type: 'text', text: '- **验证结果**：保留列表。'},
+        ]);
+
+        expect(getRenderableContentBlocks(raw)).toEqual([
+            {
+                type: 'text',
+                text: '**上轮进展与阻塞**\n记录里声称完成。\n\n- **本轮规划**：先定位根因。\n- **验证结果**：保留列表。',
+            },
+        ]);
+    });
+
     it('keeps non-adjacent base64-like text when a message also has an image', () => {
         const raw = userRaw([
             {type: 'text', text: 'Here is a token-like sample:'},
@@ -251,7 +266,11 @@ describe('chat message flow', () => {
 
         const blocks = getRenderableContentBlocks(raw);
 
-        expect(blocks.map((block) => block.type)).toEqual(['text', 'text', 'text', 'image']);
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'image']);
+        expect(blocks[0]).toMatchObject({
+            type: 'text',
+            text: 'Here is a token-like sample:\n\nQAAAABJR5ErkJggg==\n\nand the screenshot is below',
+        });
     });
 
     it('does not persist image base64 residue as message content when merging raw user messages', () => {

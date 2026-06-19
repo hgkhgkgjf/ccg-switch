@@ -19,6 +19,32 @@ export interface UnifiedSessionMessage {
     raw?: MessageRaw | null;
 }
 
+export interface UnifiedSessionMessageWindow {
+    messages: UnifiedSessionMessage[];
+    startIndex: number;
+    totalCount: number;
+    complete: boolean;
+}
+
+export interface ChatSessionLoadMetrics {
+    sessionKey: string;
+    providerId: 'claude' | 'codex';
+    sourcePath: string;
+    cacheHit: boolean;
+    status: 'loading' | 'windowed' | 'complete' | 'error';
+    startedAt: number;
+    completedAt: number | null;
+    elapsedMs: number | null;
+    windowMessageCount: number;
+    totalMessageCount: number | null;
+    fullMessageCount: number | null;
+    windowLoadMs: number | null;
+    windowMapMs: number | null;
+    fullLoadMs: number | null;
+    fullMapMs: number | null;
+    error: string | null;
+}
+
 export function getSessionSelectionKey(
     session: Pick<SessionMeta, 'providerId' | 'sourcePath'>,
 ): string {

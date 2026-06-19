@@ -14,6 +14,7 @@ export interface Question {
 
 export interface AskUserQuestionRequest {
   requestId: string;
+  sessionId?: string;
   toolName: string;
   questions: Question[];
   timestamp: string;
@@ -27,6 +28,7 @@ export interface AllowedPrompt {
 
 export interface PlanApprovalRequest {
   requestId: string;
+  sessionId?: string;
   toolName: string;
   plan: string;
   allowedPrompts: AllowedPrompt[];
@@ -36,6 +38,7 @@ export interface PlanApprovalRequest {
 
 export interface ToolPermissionRequest {
   requestId: string;
+  sessionId?: string;
   toolName: string;
   inputs: Record<string, unknown>;
   timestamp: string;

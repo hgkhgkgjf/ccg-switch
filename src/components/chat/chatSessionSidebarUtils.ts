@@ -1,7 +1,15 @@
 import type {SessionMeta} from '../../types/session';
 import {getSessionSelectionKey} from '../../types/session';
+import {shouldIgnoreChatSessionSelection} from '../../utils/chatUiBehavior';
 
 export type SessionCache = Map<string, SessionMeta[]>;
+
+interface SessionListResponseOwnership {
+    requestSeq: number;
+    latestRequestSeq: number;
+    requestProjectPath: string | null | undefined;
+    selectedProjectPath: string | null | undefined;
+}
 
 export function normalizeProjectPathForCache(projectPath: string | null | undefined): string {
     if (!projectPath) return '';
@@ -51,6 +59,19 @@ export function getCachedProjectSessions(
 ): SessionMeta[] | null {
     if (force) return null;
     return cache.get(normalizeProjectPathForCache(projectPath)) ?? null;
+}
+
+export function shouldAcceptSessionListResponse({
+    requestSeq,
+    latestRequestSeq,
+    requestProjectPath,
+    selectedProjectPath,
+}: SessionListResponseOwnership): boolean {
+    if (requestSeq !== latestRequestSeq) return false;
+
+    const requestProjectKey = normalizeProjectPathForCache(requestProjectPath);
+    const selectedProjectKey = normalizeProjectPathForCache(selectedProjectPath);
+    return Boolean(requestProjectKey && selectedProjectKey && requestProjectKey === selectedProjectKey);
 }
 
 interface ShouldSyncProjectFromCurrentCwdOptions {
@@ -115,7 +136,11 @@ export function shouldIgnoreSessionClick(
     pendingSessionKey: string | null,
 ): boolean {
     const sessionKey = getSessionSelectionKey(session);
-    return sessionKey === pendingSessionKey || (!pendingSessionKey && sessionKey === activeSessionKey);
+    return shouldIgnoreChatSessionSelection({
+        sessionKey,
+        activeSessionKey,
+        pendingSessionKey,
+    });
 }
 
 export function shouldShowSessionRefreshStatus(loadingSessions: boolean, visibleSessionCount: number): boolean {

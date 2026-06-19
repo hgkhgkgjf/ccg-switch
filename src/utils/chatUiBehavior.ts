@@ -16,6 +16,54 @@ export interface TranscriptRevealState {
     revealedCount: number;
 }
 
+interface ChatSessionSelectionInput {
+    sessionKey: string;
+    activeSessionKey: string | null;
+    pendingSessionKey: string | null;
+}
+
+interface CompleteChatStatusSummaryInput {
+    messageCount: number;
+    isSearching: boolean;
+    sessionLoadStatus?: 'loading' | 'windowed' | 'complete' | 'error' | null;
+}
+
+interface FullHistorySearchIntentInput {
+    isSearching: boolean;
+    activeSessionKey: string | null;
+    sessionLoadStatus?: 'loading' | 'windowed' | 'complete' | 'error' | null;
+    fullHistorySearchSessionKey?: string | null;
+    fullHistorySearchStatus?: 'loading' | 'complete' | 'error' | null;
+}
+
+export function shouldIgnoreChatSessionSelection({
+    sessionKey,
+    activeSessionKey,
+    pendingSessionKey,
+}: ChatSessionSelectionInput): boolean {
+    return sessionKey === pendingSessionKey || (!pendingSessionKey && sessionKey === activeSessionKey);
+}
+
+export function shouldBuildCompleteChatStatusSummary({
+    messageCount,
+    isSearching,
+    sessionLoadStatus,
+}: CompleteChatStatusSummaryInput): boolean {
+    return messageCount > 0 && !isSearching && sessionLoadStatus !== 'windowed';
+}
+
+export function shouldRequestFullHistoryForSearch({
+    isSearching,
+    activeSessionKey,
+    sessionLoadStatus,
+    fullHistorySearchSessionKey,
+    fullHistorySearchStatus,
+}: FullHistorySearchIntentInput): boolean {
+    if (!isSearching || !activeSessionKey || sessionLoadStatus !== 'windowed') return false;
+    if (fullHistorySearchSessionKey !== activeSessionKey) return true;
+    return fullHistorySearchStatus !== 'loading' && fullHistorySearchStatus !== 'complete';
+}
+
 export function clampComposerHeight(
     height: number,
     minHeight = COMPOSER_MIN_HEIGHT,
@@ -90,6 +138,86 @@ export function shouldShowDiffPaneReopenControl({
     hasSelectedEdit,
 }: DiffPaneReopenControlInput): boolean {
     return diffPaneCollapsed && hasSelectedEdit;
+}
+
+export type ActivePermissionDialog =
+    | 'ask-user-question'
+    | 'plan-approval'
+    | 'tool-permission'
+    | null;
+
+interface ActivePermissionDialogInput {
+    hasAskUserQuestion?: boolean;
+    askUserQuestionTimestamp?: string | null;
+    hasPlanApproval?: boolean;
+    planApprovalTimestamp?: string | null;
+    hasToolPermission?: boolean;
+    toolPermissionTimestamp?: string | null;
+}
+
+const PERMISSION_DIALOG_PRIORITY: Record<Exclude<ActivePermissionDialog, null>, number> = {
+    'ask-user-question': 0,
+    'plan-approval': 1,
+    'tool-permission': 2,
+};
+
+function parsePermissionTimestamp(timestamp: string | null | undefined): number {
+    if (!timestamp) return Number.NEGATIVE_INFINITY;
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+function isPermissionDialogCandidatePresent(
+    hasCandidate: boolean | undefined,
+    timestamp: string | null | undefined,
+): boolean {
+    return hasCandidate ?? (timestamp !== null && timestamp !== undefined);
+}
+
+export function getActivePermissionDialog({
+    hasAskUserQuestion,
+    askUserQuestionTimestamp,
+    hasPlanApproval,
+    planApprovalTimestamp,
+    hasToolPermission,
+    toolPermissionTimestamp,
+}: ActivePermissionDialogInput): ActivePermissionDialog {
+    const candidates: Array<{
+        type: Exclude<ActivePermissionDialog, null>;
+        timestamp: number;
+        priority: number;
+    }> = [];
+
+    if (isPermissionDialogCandidatePresent(hasAskUserQuestion, askUserQuestionTimestamp)) {
+        candidates.push({
+            type: 'ask-user-question',
+            timestamp: parsePermissionTimestamp(askUserQuestionTimestamp),
+            priority: PERMISSION_DIALOG_PRIORITY['ask-user-question'],
+        });
+    }
+    if (isPermissionDialogCandidatePresent(hasPlanApproval, planApprovalTimestamp)) {
+        candidates.push({
+            type: 'plan-approval',
+            timestamp: parsePermissionTimestamp(planApprovalTimestamp),
+            priority: PERMISSION_DIALOG_PRIORITY['plan-approval'],
+        });
+    }
+    if (isPermissionDialogCandidatePresent(hasToolPermission, toolPermissionTimestamp)) {
+        candidates.push({
+            type: 'tool-permission',
+            timestamp: parsePermissionTimestamp(toolPermissionTimestamp),
+            priority: PERMISSION_DIALOG_PRIORITY['tool-permission'],
+        });
+    }
+
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => {
+        if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+        return b.priority - a.priority;
+    });
+
+    return candidates[0].type;
 }
 
 interface AutoRevealInput {
@@ -190,4 +318,57 @@ export function getScrollTopAfterPrepend({
     nextScrollHeight,
 }: ScrollPreserveInput): number {
     return Math.max(0, previousScrollTop + nextScrollHeight - previousScrollHeight);
+}
+
+export const TOOL_ANCHOR_JUMP_HIGHLIGHT_CLASS = 'chat-tool-anchor-jump-highlight';
+export const TOOL_ANCHOR_JUMP_HIGHLIGHT_DURATION_MS = 1400;
+
+interface HighlightableToolAnchor {
+    classList: Pick<DOMTokenList, 'add' | 'remove'>;
+    dataset: DOMStringMap;
+}
+
+interface HighlightTranscriptToolAnchorOptions {
+    durationMs?: number;
+    previousCleanup?: (() => void) | null;
+    setTimeoutFn?: (handler: () => void, timeout: number) => unknown;
+    clearTimeoutFn?: (handle: unknown) => void;
+}
+
+export function highlightTranscriptToolAnchor(
+    anchor: HighlightableToolAnchor,
+    {
+        durationMs = TOOL_ANCHOR_JUMP_HIGHLIGHT_DURATION_MS,
+        previousCleanup,
+        setTimeoutFn = (handler, timeout) => globalThis.setTimeout(handler, timeout),
+        clearTimeoutFn = (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+    }: HighlightTranscriptToolAnchorOptions = {},
+): () => void {
+    previousCleanup?.();
+
+    let cleaned = false;
+    let timeoutHandle: unknown = null;
+    const clearHighlight = () => {
+        anchor.classList.remove(TOOL_ANCHOR_JUMP_HIGHLIGHT_CLASS);
+        delete anchor.dataset.chatToolJumpHighlighted;
+    };
+
+    clearHighlight();
+    anchor.classList.add(TOOL_ANCHOR_JUMP_HIGHLIGHT_CLASS);
+    anchor.dataset.chatToolJumpHighlighted = 'true';
+
+    timeoutHandle = setTimeoutFn(() => {
+        if (cleaned) return;
+        cleaned = true;
+        clearHighlight();
+    }, durationMs);
+
+    return () => {
+        if (cleaned) return;
+        cleaned = true;
+        if (timeoutHandle !== null) {
+            clearTimeoutFn(timeoutHandle);
+        }
+        clearHighlight();
+    };
 }

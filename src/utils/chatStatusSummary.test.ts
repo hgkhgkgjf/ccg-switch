@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ChatMessage, MessageRaw} from '../types/chat';
-import {buildChatStatusSummary} from './chatStatusSummary';
+import {buildChatStatusSummary, mergeChatInputStatusSummary} from './chatStatusSummary';
 
 function createRawMessage(type: 'user' | 'assistant', content: MessageRaw['message']['content']): MessageRaw {
     return {
@@ -58,6 +58,66 @@ describe('chatStatusSummary', () => {
         expect(summary.pendingToolCount).toBe(1);
         expect(summary.completedToolCount).toBe(1);
         expect(summary.errorToolCount).toBe(0);
+    });
+
+    it('exposes the full tool timeline and agent subset for input status tabs', () => {
+        const messages: ChatMessage[] = [
+            createMessage({
+                id: 'assistant-tools',
+                role: 'assistant',
+                raw: createRawMessage('assistant', [
+                    { type: 'tool_use', id: 'tool-build', name: 'Bash', input: { command: 'npm test' } },
+                    {
+                        type: 'tool_use',
+                        id: 'tool-agent',
+                        name: 'Task',
+                        input: {
+                            description: 'Review the chat composer status strip',
+                            subagent_type: 'frontend-reviewer',
+                            model: 'claude-sonnet-provider-20260601',
+                        },
+                    },
+                    {
+                        type: 'tool_use',
+                        id: 'tool-edit',
+                        name: 'Edit',
+                        input: {
+                            file_path: 'src/components/chat/ChatInputStatusTabs.tsx',
+                            old_string: '',
+                            new_string: 'export function ChatInputStatusTabs() {}',
+                        },
+                    },
+                ]),
+            }),
+            createMessage({
+                id: 'tool-results',
+                role: 'user',
+                content: '[tool_result]',
+                raw: createRawMessage('user', [
+                    { type: 'tool_result', tool_use_id: 'tool-build', content: 'Tests passed', is_error: false },
+                    { type: 'tool_result', tool_use_id: 'tool-edit', content: 'Applied edit', is_error: false },
+                ]),
+            }),
+        ];
+
+        const summary = buildChatStatusSummary(messages);
+        const toolTimeline = summary.toolTimeline ?? [];
+
+        expect(toolTimeline.map((tool) => tool.toolId)).toEqual([
+            'tool-build',
+            'tool-agent',
+            'tool-edit',
+        ]);
+        expect(toolTimeline.map((tool) => tool.type)).toEqual(['bash', 'agent', 'edit']);
+        expect(summary.agentTools).toEqual([
+            expect.objectContaining({
+                toolId: 'tool-agent',
+                type: 'agent',
+                summary: 'Review the chat composer status strip',
+                detail: 'frontend-reviewer · claude-sonnet-provider-20260601',
+                status: 'pending',
+            }),
+        ]);
     });
 
     it('aggregates recent edited files with additions and deletions', () => {
@@ -274,5 +334,71 @@ describe('chatStatusSummary', () => {
         });
         expect(summary.pendingToolCount).toBe(0);
         expect(summary.completedToolCount).toBe(1);
+    });
+
+    it('merges full-history status into the input strip summary without requiring the visible window to contain tools', () => {
+        const visibleSummary = buildChatStatusSummary([
+            createMessage({
+                id: 'latest-user',
+                role: 'user',
+                raw: createRawMessage('user', [
+                    { type: 'text', text: 'What changed?' },
+                ]),
+            }),
+        ]);
+        const completeSummary = buildChatStatusSummary([
+            createMessage({
+                id: 'assistant-early-tools',
+                role: 'assistant',
+                raw: createRawMessage('assistant', [
+                    {
+                        type: 'tool_use',
+                        id: 'tool-agent-full',
+                        name: 'Task',
+                        input: {
+                            description: 'Audit input status strip',
+                            subagent_type: 'frontend-reviewer',
+                        },
+                    },
+                    {
+                        type: 'tool_use',
+                        id: 'tool-edit-full',
+                        name: 'Edit',
+                        input: {
+                            file_path: 'src/components/chat/ChatInputStatusTabs.tsx',
+                            old_string: 'hidden',
+                            new_string: 'visible',
+                        },
+                    },
+                ]),
+            }),
+            createMessage({
+                id: 'tool-results-full',
+                role: 'user',
+                content: '[tool_result]',
+                raw: createRawMessage('user', [
+                    { type: 'tool_result', tool_use_id: 'tool-edit-full', content: 'Applied edit', is_error: false },
+                ]),
+            }),
+            createMessage({
+                id: 'latest-user-full',
+                role: 'user',
+                raw: createRawMessage('user', [
+                    { type: 'text', text: 'What changed?' },
+                ]),
+            }),
+        ]);
+
+        const merged = mergeChatInputStatusSummary(visibleSummary, completeSummary);
+
+        expect(merged.toolTimeline?.map((tool) => tool.toolId)).toEqual([
+            'tool-agent-full',
+            'tool-edit-full',
+        ]);
+        expect(merged.agentTools?.map((tool) => tool.toolId)).toEqual(['tool-agent-full']);
+        expect(merged.allEdits.map((edit) => edit.displayPath)).toEqual([
+            'src/components/chat/ChatInputStatusTabs.tsx',
+        ]);
+        expect(merged.touchedFileCount).toBe(1);
     });
 });

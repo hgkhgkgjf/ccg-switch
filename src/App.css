@@ -115,6 +115,33 @@ a {
   animation: fadeIn 0.2s ease-out;
 }
 
+@keyframes chatToolAnchorJumpHighlight {
+  0% {
+    background-color: rgba(59, 130, 246, 0.14);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.40), 0 0 0 6px rgba(59, 130, 246, 0.10);
+  }
+  55% {
+    background-color: rgba(59, 130, 246, 0.08);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.24), 0 0 0 3px rgba(59, 130, 246, 0.06);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.chat-tool-anchor-jump-highlight {
+  animation: chatToolAnchorJumpHighlight 1.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-tool-anchor-jump-highlight {
+    animation: none;
+    background-color: rgba(59, 130, 246, 0.12);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.36);
+  }
+}
+
 /* Markdown 样式 */
 .markdown-block {
   line-height: 1.6;
@@ -283,6 +310,20 @@ a {
   font-size: 13.5px;
   line-height: 1.62;
   font-weight: 400;
+}
+
+.chat-content-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-content-blocks-compact {
+  gap: 0.625rem;
+}
+
+.chat-content-blocks-default {
+  gap: 0.75rem;
 }
 
 .assistant-message-flow .markdown-block {

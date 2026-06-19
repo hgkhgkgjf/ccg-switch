@@ -793,6 +793,7 @@ pub fn run() {
             // Session Manager 命令
             session_commands::list_sessions,
             session_commands::get_project_provider_map,
+            session_commands::get_unified_session_message_window,
             session_commands::get_unified_session_messages,
             session_commands::get_claude_subagent_session_messages,
             open_in_terminal,
@@ -897,6 +898,7 @@ pub fn run() {
             chat_commands::chat_restart_daemon,
             chat_commands::chat_list_slash_commands,
             chat_commands::chat_show_system_notification,
+            chat_commands::chat_workspace_status,
             // Permission 命令（权限审批响应）
             chat_commands::permission_respond_ask_user_question,
             chat_commands::permission_respond_tool,

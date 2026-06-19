@@ -98,8 +98,63 @@ function isToolResultBlock(block: ContentBlock): block is ToolResultBlock {
     return block.type === 'tool_result';
 }
 
+const MARKDOWN_LIST_ITEM_PATTERN = /^\s*(?:[-+*]|\d+[.)])\s+/;
+
+function firstNonEmptyLine(text: string): string {
+    return text.split('\n').find((line) => line.trim().length > 0) ?? '';
+}
+
+function lastNonEmptyLine(text: string): string {
+    const lines = text.split('\n');
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (lines[index].trim().length > 0) return lines[index];
+    }
+    return '';
+}
+
+function getTextBlockSeparator(previousText: string, nextText: string): string {
+    if (previousText.endsWith('\n') || nextText.startsWith('\n')) return '';
+
+    const previousLine = lastNonEmptyLine(previousText);
+    const nextLine = firstNonEmptyLine(nextText);
+    if (
+        MARKDOWN_LIST_ITEM_PATTERN.test(previousLine)
+        && MARKDOWN_LIST_ITEM_PATTERN.test(nextLine)
+    ) {
+        return '\n';
+    }
+
+    return '\n\n';
+}
+
+function mergeTextBlockText(previousText: string, nextText: string): string {
+    const left = previousText.trimEnd();
+    const right = nextText.trimStart();
+
+    if (!left) return right;
+    if (!right) return left;
+
+    return `${left}${getTextBlockSeparator(left, right)}${right}`;
+}
+
+export function mergeAdjacentTextContentBlocks(blocks: ContentBlock[]): ContentBlock[] {
+    return blocks.reduce<ContentBlock[]>((result, block) => {
+        const previousBlock = result[result.length - 1];
+        if (block.type === 'text' && previousBlock?.type === 'text') {
+            result[result.length - 1] = {
+                ...previousBlock,
+                text: mergeTextBlockText(previousBlock.text, block.text),
+            };
+            return result;
+        }
+
+        result.push(block);
+        return result;
+    }, []);
+}
+
 function getTextFromRaw(raw: MessageRaw): string {
-    return getDisplayContentBlocksFromRaw(raw)
+    return mergeAdjacentTextContentBlocks(getDisplayContentBlocksFromRaw(raw).filter(isRenderableContentBlock))
         .filter(isTextBlock)
         .map((block) => block.text)
         .filter((text) => text.trim().length > 0)
@@ -154,7 +209,7 @@ function isRenderableContentBlock(block: ContentBlock): boolean {
 }
 
 export function getRenderableContentBlocks(raw?: MessageRaw | null): ContentBlock[] {
-    return getDisplayContentBlocksFromRaw(raw).filter(isRenderableContentBlock);
+    return mergeAdjacentTextContentBlocks(getDisplayContentBlocksFromRaw(raw).filter(isRenderableContentBlock));
 }
 
 export function shouldRenderChatMessage(message: ChatMessage): boolean {

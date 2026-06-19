@@ -1,8 +1,10 @@
 use super::utils::{
     extract_message_text, extract_teammate_summary, home_dir, is_system_message,
-    sanitize_session_text, truncate_text,
+    sanitize_session_markdown_text, sanitize_session_text, truncate_text,
 };
-use crate::session_manager::{SessionMeta, UnifiedSessionMessage};
+use crate::session_manager::{
+    MessageWindowBuilder, SessionMeta, UnifiedSessionMessage, UnifiedSessionMessageWindow,
+};
 use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -142,64 +144,38 @@ pub fn load_claude_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessa
             Ok(l) => l,
             Err(_) => continue,
         };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+        if let Some(message) = parse_claude_history_line(&line) {
+            messages.push(message);
         }
-
-        let json: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        // 跳过 meta 行
-        if json.get("isMeta").and_then(|v| v.as_bool()) == Some(true) {
-            continue;
-        }
-
-        let msg_type = json
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        if msg_type != "user" && msg_type != "assistant" {
-            continue;
-        }
-
-        let message_content = match json.get("message").and_then(|v| v.get("content")) {
-            Some(content) => content,
-            None => continue,
-        };
-
-        let has_structured_content = has_structured_history_content(message_content);
-        let raw_text = extract_message_text(message_content).unwrap_or_default();
-        let clean_text = sanitize_session_text(&raw_text);
-        if clean_text.is_empty() && !has_structured_content {
-            continue;
-        }
-        let content = if clean_text.is_empty() && has_tool_result_content(message_content) {
-            TOOL_RESULT_CONTENT.to_string()
-        } else {
-            clean_text
-        };
-
-        let ts = json
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        messages.push(UnifiedSessionMessage {
-            role: msg_type.to_string(),
-            content,
-            ts,
-            raw: if has_structured_content {
-                Some(json)
-            } else {
-                None
-            },
-        });
     }
 
     Ok(messages)
+}
+
+pub fn load_claude_message_window(
+    source_path: &str,
+    tail_limit: usize,
+) -> Result<UnifiedSessionMessageWindow, String> {
+    let path = Path::new(source_path);
+    if !path.exists() {
+        return Err("Session file not found".to_string());
+    }
+
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let reader = BufReader::new(file);
+    let mut window = MessageWindowBuilder::new(tail_limit);
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if let Some(message) = parse_claude_history_line(&line) {
+            window.push(message);
+        }
+    }
+
+    Ok(window.finish())
 }
 
 pub fn load_claude_subagent_messages(
@@ -213,6 +189,57 @@ pub fn load_claude_subagent_messages(
     let history_file = find_subagent_history_file(&subagents_dir, agent_id, description)
         .ok_or_else(|| "Subagent history file not found".to_string())?;
     load_claude_messages(&history_file.to_string_lossy())
+}
+
+fn parse_claude_history_line(line: &str) -> Option<UnifiedSessionMessage> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+
+    // 跳过 meta 行
+    if json.get("isMeta").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
+
+    let msg_type = json
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if msg_type != "user" && msg_type != "assistant" {
+        return None;
+    }
+
+    let message_content = json.get("message").and_then(|v| v.get("content"))?;
+    let has_structured_content = has_structured_history_content(message_content);
+    let raw_text = extract_message_text(message_content).unwrap_or_default();
+    let clean_text = sanitize_session_markdown_text(&raw_text);
+    if clean_text.is_empty() && !has_structured_content {
+        return None;
+    }
+    let content = if clean_text.is_empty() && has_tool_result_content(message_content) {
+        TOOL_RESULT_CONTENT.to_string()
+    } else {
+        clean_text
+    };
+
+    let ts = json
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(UnifiedSessionMessage {
+        role: msg_type.to_string(),
+        content,
+        ts,
+        raw: if has_structured_content {
+            Some(json)
+        } else {
+            None
+        },
+    })
 }
 
 fn has_content_block_type(content: &serde_json::Value, target_type: &str) -> bool {
@@ -515,6 +542,22 @@ mod tests {
     }
 
     #[test]
+    fn load_claude_messages_preserves_markdown_line_breaks() {
+        let path = write_temp_session(
+            r#"{"type":"assistant","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"text","text":"**上轮进展与阻塞**\n记录里声称完成。\n\n- **本轮规划**：先定位根因。\n- **验证结果**：保留列表。"}]}}"#,
+        );
+
+        let messages = load_claude_messages(&path.to_string_lossy()).expect("load messages");
+        fs::remove_file(path).ok();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].content,
+            "**上轮进展与阻塞**\n记录里声称完成。\n\n- **本轮规划**：先定位根因。\n- **验证结果**：保留列表。"
+        );
+    }
+
+    #[test]
     fn load_claude_messages_preserves_image_only_blocks() {
         let path = write_temp_session(
             r#"{"type":"user","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="},"fileName":"screen.png"}]}}"#,
@@ -534,6 +577,29 @@ mod tests {
             messages[0].raw.as_ref().unwrap()["message"]["content"][0]["source"]["media_type"],
             "image/png"
         );
+    }
+
+    #[test]
+    fn load_claude_message_window_keeps_tail_with_original_start_index() {
+        let path = write_temp_session(
+            r#"{"type":"user","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"text","text":"first"}]}}"#
+                .to_owned()
+                + "\n"
+                + r#"{"type":"assistant","timestamp":"2026-06-17T08:00:01.000Z","message":{"content":[{"type":"text","text":"second"}]}}"#
+                + "\n"
+                + r#"{"type":"user","timestamp":"2026-06-17T08:00:02.000Z","message":{"content":[{"type":"text","text":"third"}]}}"#,
+        );
+
+        let window =
+            load_claude_message_window(&path.to_string_lossy(), 2).expect("load window");
+        fs::remove_file(path).ok();
+
+        assert_eq!(window.total_count, 3);
+        assert_eq!(window.start_index, 1);
+        assert!(!window.complete);
+        assert_eq!(window.messages.len(), 2);
+        assert_eq!(window.messages[0].content, "second");
+        assert_eq!(window.messages[1].content, "third");
     }
 
     #[test]

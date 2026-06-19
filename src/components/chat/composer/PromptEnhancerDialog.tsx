@@ -1,7 +1,15 @@
-import { useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
-import { Sparkles, Loader2, X } from 'lucide-react';
+import {useEffect} from 'react';
+import {createPortal} from 'react-dom';
+import {useTranslation} from 'react-i18next';
+import {Loader2, Sparkles, X} from 'lucide-react';
+import {isEditableShortcutTarget, isEnterShortcutControl,} from '../../../utils/dialogShortcuts';
+
+type PromptEnhancerShortcutAction = 'use-enhanced' | 'close' | null;
+
+interface PromptEnhancerShortcutState {
+    isLoading: boolean;
+    hasEnhancedPrompt: boolean;
+}
 
 interface PromptEnhancerDialogProps {
     isOpen: boolean;
@@ -11,6 +19,24 @@ interface PromptEnhancerDialogProps {
     onUseEnhanced: () => void;
     onKeepOriginal: () => void;
     onClose: () => void;
+}
+
+export function resolvePromptEnhancerShortcutAction(
+    key: string,
+    target: EventTarget | null,
+    {
+        isLoading,
+        hasEnhancedPrompt,
+    }: PromptEnhancerShortcutState,
+): PromptEnhancerShortcutAction {
+    if (key === 'Escape') {
+        return isEditableShortcutTarget(target) ? null : 'close';
+    }
+    if (key === 'Enter') {
+        if (isLoading || !hasEnhancedPrompt || isEnterShortcutControl(target)) return null;
+        return 'use-enhanced';
+    }
+    return null;
 }
 
 /**
@@ -30,10 +56,22 @@ export function PromptEnhancerDialog({
 
     useEffect(() => {
         if (!isOpen) return;
-        const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-        window.addEventListener('keydown', onEsc);
-        return () => window.removeEventListener('keydown', onEsc);
-    }, [isOpen, onClose]);
+        const onKeyDown = (event: KeyboardEvent) => {
+            const action = resolvePromptEnhancerShortcutAction(event.key, event.target, {
+                isLoading,
+                hasEnhancedPrompt: enhancedPrompt.length > 0,
+            });
+            if (!action) return;
+            event.preventDefault();
+            if (action === 'use-enhanced') {
+                onUseEnhanced();
+            } else {
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [enhancedPrompt, isLoading, isOpen, onClose, onUseEnhanced]);
 
     if (!isOpen) return null;
 

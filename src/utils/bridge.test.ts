@@ -43,6 +43,18 @@ describe('bridge openFile', () => {
     });
   });
 
+  it('keeps legal literal percent signs in file paths', async () => {
+    await expect(openFile('src/reports/100% coverage.md', undefined, undefined, 'C:/guodevelop/ccg-switch'))
+      .resolves.toBe(true);
+
+    expect(invokeMock).toHaveBeenCalledWith('open_file_in_editor', {
+      filePath: 'src/reports/100% coverage.md',
+      lineStart: undefined,
+      lineEnd: undefined,
+      cwd: 'C:/guodevelop/ccg-switch',
+    });
+  });
+
   it('parses line and range suffixes when explicit lines are absent', async () => {
     await openFile('src/pages/ChatPage.tsx:42');
     await openFile('src/pages/ChatPage.tsx:50-54');

@@ -17,7 +17,9 @@ export interface ModelInfo {
     id: string;
     label: string;
     /** i18n key 后缀，对应 chat.models.<key>.description */
-    descKey: string;
+    descKey?: string;
+    /** 动态模型的直接描述，通常来自 provider 配置或本地自定义模型。 */
+    description?: string;
 }
 
 export interface ReasoningInfo {

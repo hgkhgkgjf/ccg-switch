@@ -6,12 +6,14 @@ import {
     type PointerEvent,
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
 } from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
 import {useChatStore} from '../../../stores/useChatStore';
+import {useProviderStore} from '../../../stores/useProviderStore';
 import type {ChatAttachment} from '../../../types/chat';
 import {ContextBar} from './ContextBar';
 import {ButtonArea} from './ButtonArea';
@@ -19,6 +21,13 @@ import {CompletionMenu} from './CompletionMenu';
 import {PromptEnhancerDialog} from './PromptEnhancerDialog';
 import {useCompletions} from './useCompletions';
 import {type ChatProviderId, contextWindowFor} from './constants';
+import {
+    buildChatModelList,
+    ensureChatModelInList,
+    getChatModelRefreshSource,
+    isChatModelStorageKey,
+    storeFetchedChatModels,
+} from '../../../utils/chatModels';
 import {
     clampComposerHeight,
     COMPOSER_MAX_HEIGHT,
@@ -101,6 +110,64 @@ function fileDisplayName(name: string): string {
     return name.split(/[/\\]/).pop() || name;
 }
 
+function attachmentKey(attachment: ChatAttachment): string {
+    return [
+        attachment.fileName,
+        attachment.mediaType,
+        attachment.path ?? '',
+        attachment.data ?? '',
+        String(attachment.size ?? ''),
+    ].join('\u0000');
+}
+
+function normalizeModelRefreshError(error: unknown): string | null {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const normalized = message.replace(/\s+/g, ' ').trim();
+    if (!normalized) return null;
+    return normalized.length > 140 ? `${normalized.slice(0, 137)}...` : normalized;
+}
+
+export function restoreFailedSendAttachments(
+    currentAttachments: ChatAttachment[],
+    sentAttachments: ChatAttachment[],
+): ChatAttachment[] {
+    const currentKeys = new Set(currentAttachments.map(attachmentKey));
+    const missingSentAttachments = sentAttachments.filter((attachment) => (
+        !currentKeys.has(attachmentKey(attachment))
+    ));
+    return [...missingSentAttachments, ...currentAttachments];
+}
+
+interface ChatComposerSubmitState {
+    hasPromptText: boolean;
+    hasAttachments: boolean;
+    isStreaming: boolean;
+    isSending: boolean;
+}
+
+export function shouldBlockChatComposerSubmit({
+    hasPromptText,
+    hasAttachments,
+    isStreaming,
+    isSending,
+}: ChatComposerSubmitState): boolean {
+    return (!hasPromptText && !hasAttachments) || isStreaming || isSending;
+}
+
+interface PromptEnhanceState {
+    hasPromptText: boolean;
+    isEnhancing: boolean;
+    isEnhanceInFlight: boolean;
+}
+
+export function shouldBlockPromptEnhance({
+    hasPromptText,
+    isEnhancing,
+    isEnhanceInFlight,
+}: PromptEnhanceState): boolean {
+    return !hasPromptText || isEnhancing || isEnhanceInFlight;
+}
+
 /**
  * 发送控制台：顶部上下文栏 + 富输入框（@/#/!// 补全）+ 底部控制工具栏。
  * 整合自 jcc-gui ChatInputBox 的交互能力，用 ccg-switch 现有栈重写。
@@ -123,6 +190,13 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         send,
         abort,
     } = useChatStore();
+    const {
+        providers,
+        hasLoaded: providersLoaded,
+        loading: providersLoading,
+        error: providersError,
+        loadAllProviders,
+    } = useProviderStore();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const composingRef = useRef(false);
@@ -130,11 +204,17 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const historyCursorRef = useRef<number | null>(null);
     const resizeCleanupRef = useRef<(() => void) | null>(null);
     const manualResizeRef = useRef(false);
+    const sendInFlightRef = useRef(false);
+    const enhanceInFlightRef = useRef(false);
     const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+    const [isSending, setIsSending] = useState(false);
     const [isDraggingFile, setIsDraggingFile] = useState(false);
     const [isResizingComposer, setIsResizingComposer] = useState(false);
     const [textareaHeight, setTextareaHeight] = useState(COMPOSER_MIN_HEIGHT);
     const [statusPanelExpanded, setStatusPanelExpanded] = useState(true);
+    const [modelConfigVersion, setModelConfigVersion] = useState(0);
+    const [modelsRefreshing, setModelsRefreshing] = useState(false);
+    const [modelsRefreshError, setModelsRefreshError] = useState<string | null>(null);
 
     // Prompt 增强弹窗状态
     const [enhancerOpen, setEnhancerOpen] = useState(false);
@@ -144,8 +224,52 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     const completions = useCompletions({ cwd, provider });
 
     const isStreaming = activeRequestId !== null;
+    const providerId = provider as ChatProviderId;
+    const modelOptions = useMemo(() => (
+        ensureChatModelInList(
+            buildChatModelList(providerId, providers),
+            model,
+        )
+    ), [modelConfigVersion, model, providerId, providers]);
+    const modelRefreshSource = useMemo(
+        () => getChatModelRefreshSource(providerId, providers),
+        [providerId, providers],
+    );
     const maxTokens = contextWindowFor(model);
     const percentage = maxTokens > 0 ? (contextTokens / maxTokens) * 100 : 0;
+
+    useEffect(() => {
+        if (!providersLoaded) {
+            void loadAllProviders();
+        }
+    }, [loadAllProviders, providersLoaded]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+
+        const handleStorageChange = (event: StorageEvent) => {
+            if (isChatModelStorageKey(event.key)) {
+                setModelConfigVersion((version) => version + 1);
+            }
+        };
+        const handleLocalStorageChange = (event: Event) => {
+            const key = (event as CustomEvent<{key?: string}>).detail?.key ?? null;
+            if (isChatModelStorageKey(key)) {
+                setModelConfigVersion((version) => version + 1);
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        window.addEventListener('localStorageChange', handleLocalStorageChange);
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            window.removeEventListener('localStorageChange', handleLocalStorageChange);
+        };
+    }, []);
+
+    useEffect(() => {
+        setModelsRefreshError(null);
+    }, [providerId, modelRefreshSource?.url]);
 
     // 自适应高度
     const applyTextareaHeight = useCallback((height: number) => {
@@ -216,7 +340,12 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
 
     const handleSend = async () => {
         const text = draft.trim();
-        if ((!text && attachments.length === 0) || isStreaming) return;
+        if (shouldBlockChatComposerSubmit({
+            hasPromptText: text.length > 0,
+            hasAttachments: attachments.length > 0,
+            isStreaming,
+            isSending: sendInFlightRef.current,
+        })) return;
         if (sdkMissing) {
             onSdkMissing();
             return;
@@ -229,24 +358,37 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
             ? [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
             : text;
 
-        // 先清空 UI（立即生效）
-        setAttachments([]);
-        if (text && draftHistoryRef.current[draftHistoryRef.current.length - 1] !== text) {
-            draftHistoryRef.current = [...draftHistoryRef.current.slice(-49), text];
-        }
-        historyCursorRef.current = null;
-
-        // 发送消息（store 内部会清空 draft）
-        await send(text, { cwd, attachments: sendingAttachments, displayText });
-
-        // 确保 textarea 高度重置
-        requestAnimationFrame(() => {
-            const el = textareaRef.current;
-            if (el) {
-                autosize(manualResizeRef.current ? textareaHeight : COMPOSER_MIN_HEIGHT);
-                el.focus();
+        sendInFlightRef.current = true;
+        setIsSending(true);
+        try {
+            // 先清空 UI（立即生效）
+            setAttachments([]);
+            if (text && draftHistoryRef.current[draftHistoryRef.current.length - 1] !== text) {
+                draftHistoryRef.current = [...draftHistoryRef.current.slice(-49), text];
             }
-        });
+            historyCursorRef.current = null;
+
+            // 发送消息（store 内部会清空 draft）
+            const sent = await send(text, { cwd, attachments: sendingAttachments, displayText });
+            if (!sent) {
+                setAttachments((current) => restoreFailedSendAttachments(current, sendingAttachments));
+                if (text && !useChatStore.getState().draft.trim()) {
+                    setDraft(text);
+                }
+            }
+        } finally {
+            sendInFlightRef.current = false;
+            setIsSending(false);
+
+            // 确保 textarea 高度重置
+            requestAnimationFrame(() => {
+                const el = textareaRef.current;
+                if (el) {
+                    autosize(manualResizeRef.current ? textareaHeight : COMPOSER_MIN_HEIGHT);
+                    el.focus();
+                }
+            });
+        }
     };
 
     const applyDraftFromHistory = (historyIndex: number | null) => {
@@ -372,7 +514,12 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
 
     const handleEnhance = async () => {
         const text = draft.trim();
-        if (!text || enhancing) return;
+        if (shouldBlockPromptEnhance({
+            hasPromptText: text.length > 0,
+            isEnhancing: enhancing,
+            isEnhanceInFlight: enhanceInFlightRef.current,
+        })) return;
+        enhanceInFlightRef.current = true;
         setEnhancerOpen(true);
         setEnhancing(true);
         setEnhancedText('');
@@ -388,7 +535,32 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
             setEnhancerOpen(false);
             console.error('[ChatComposer] enhance failed:', e);
         } finally {
+            enhanceInFlightRef.current = false;
             setEnhancing(false);
+        }
+    };
+
+    const handleRefreshModels = async () => {
+        if (!modelRefreshSource || modelsRefreshing) return;
+
+        setModelsRefreshing(true);
+        setModelsRefreshError(null);
+        try {
+            const fetchedModels = await invoke<string[]>('fetch_models', {
+                url: modelRefreshSource.url,
+                apiKey: modelRefreshSource.apiKey,
+            });
+            const storedCount = storeFetchedChatModels(providerId, fetchedModels);
+            setModelConfigVersion((version) => version + 1);
+            if (fetchedModels.length > 0 && storedCount === 0) {
+                setModelsRefreshError(t('chat.modelsRefreshSaveError'));
+            } else if (storedCount === 0) {
+                setModelsRefreshError(t('chat.modelsRefreshEmpty'));
+            }
+        } catch (refreshError) {
+            setModelsRefreshError(normalizeModelRefreshError(refreshError) ?? t('chat.modelsRefreshError'));
+        } finally {
+            setModelsRefreshing(false);
         }
     };
 
@@ -494,17 +666,30 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
 
                 {/* 底部控制工具栏 */}
                 <ButtonArea
-                    provider={provider as ChatProviderId}
+                    provider={providerId}
                     permissionMode={permissionMode}
                     model={model}
+                    models={modelOptions}
+                    modelsLoading={providersLoading && !providersLoaded}
+                    modelsError={providersError}
+                    modelsCanRefresh={Boolean(modelRefreshSource)}
+                    modelsRefreshing={modelsRefreshing}
+                    modelsRefreshError={modelsRefreshError}
                     reasoningEffort={reasoningEffort}
                     isLoading={isStreaming}
+                    isSubmitting={isSending}
                     isEnhancing={enhancing}
-                    canSubmit={draft.trim().length > 0 || attachments.length > 0}
+                    canSubmit={!shouldBlockChatComposerSubmit({
+                        hasPromptText: draft.trim().length > 0,
+                        hasAttachments: attachments.length > 0,
+                        isStreaming,
+                        isSending,
+                    })}
                     hasPromptText={draft.trim().length > 0}
                     onProviderChange={(p) => setProvider(p)}
                     onModeChange={setPermissionMode}
                     onModelChange={setModel}
+                    onRefreshModels={handleRefreshModels}
                     onReasoningChange={setReasoningEffort}
                     onEnhance={handleEnhance}
                     onSubmit={handleSend}

@@ -41,7 +41,7 @@ pub struct DaemonClient {
     api_key: Option<String>,
     base_url: Option<String>,
     request_counter: AtomicU64,
-    running: AtomicBool,
+    running: Arc<AtomicBool>,
     inner: Arc<Mutex<Inner>>,
     event_sink: Mutex<Option<EventSink>>,
 }
@@ -63,7 +63,7 @@ impl DaemonClient {
             api_key,
             base_url,
             request_counter: AtomicU64::new(0),
-            running: AtomicBool::new(false),
+            running: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(Mutex::new(Inner {
                 stdin: None,
                 child: None,
@@ -161,6 +161,7 @@ impl DaemonClient {
 
         // Reader loop: parse NDJSON and route by request id.
         let inner = self.inner.clone();
+        let running = self.running.clone();
         let event_sink = self.current_sink().await;
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -185,14 +186,7 @@ impl DaemonClient {
                 };
                 Self::route_line(&inner, &event_sink, raw).await;
             }
-            // stdout closed → daemon exited. Drain pending with failure.
-            let mut guard = inner.lock().await;
-            for (_, tx) in guard.pending.drain() {
-                let _ = tx.send(StreamLine::Done {
-                    success: false,
-                    error: Some("daemon exited".into()),
-                });
-            }
+            Self::handle_stdout_closed(&inner, &running, &event_sink).await;
         });
 
         // Stderr drain (diagnostics → event sink as logs).
@@ -218,6 +212,38 @@ impl DaemonClient {
 
     async fn current_sink(&self) -> Option<EventSink> {
         self.event_sink.lock().await.clone()
+    }
+
+    /// Handle daemon stdout closing unexpectedly or during shutdown.
+    async fn handle_stdout_closed(
+        inner: &Arc<Mutex<Inner>>,
+        running: &Arc<AtomicBool>,
+        event_sink: &Option<EventSink>,
+    ) {
+        let was_running = running.swap(false, Ordering::SeqCst);
+
+        {
+            let mut guard = inner.lock().await;
+            guard.stdin = None;
+            guard.child = None;
+            for (_, tx) in guard.pending.drain() {
+                let _ = tx.send(StreamLine::Done {
+                    success: false,
+                    error: Some("daemon exited".into()),
+                });
+            }
+        }
+
+        if was_running {
+            if let Some(sink) = event_sink {
+                sink(DaemonEvent {
+                    event: "shutdown".into(),
+                    pid: None,
+                    message: Some("daemon exited".into()),
+                    provider: None,
+                });
+            }
+        }
     }
 
     /// Route one parsed stdout line to its request channel or the event sink.
@@ -364,8 +390,13 @@ impl DaemonClient {
 
 #[cfg(test)]
 mod tests {
-    use super::super::protocol::{DaemonRequest, RawLine};
+    use super::super::protocol::{DaemonEvent, DaemonRequest, RawLine, StreamLine};
+    use super::{DaemonClient, EventSink, Inner};
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tokio::sync::{mpsc, Mutex};
 
     #[test]
     fn request_serializes_to_ndjson_shape() {
@@ -426,5 +457,67 @@ mod tests {
             raw.extra.get("ts").and_then(|v| v.as_u64()),
             Some(1700000000000)
         );
+    }
+
+    #[tokio::test]
+    async fn stdout_close_marks_stopped_drains_pending_and_emits_shutdown() {
+        let inner = Arc::new(Mutex::new(Inner {
+            stdin: None,
+            child: None,
+            pending: HashMap::new(),
+        }));
+        let running = Arc::new(AtomicBool::new(true));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        inner.lock().await.pending.insert("req-1".into(), tx);
+
+        let events = Arc::new(StdMutex::new(Vec::<DaemonEvent>::new()));
+        let captured_events = events.clone();
+        let sink: Option<EventSink> = Some(Arc::new(move |event| {
+            captured_events.lock().unwrap().push(event);
+        }));
+
+        DaemonClient::handle_stdout_closed(&inner, &running, &sink).await;
+
+        assert!(!running.load(Ordering::SeqCst));
+        assert!(inner.lock().await.pending.is_empty());
+
+        let done = rx
+            .recv()
+            .await
+            .expect("pending request should receive daemon exit");
+        match done {
+            StreamLine::Done { success, error } => {
+                assert!(!success);
+                assert_eq!(error.as_deref(), Some("daemon exited"));
+            }
+            other => panic!("expected done event, got {other:?}"),
+        }
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "shutdown");
+        assert_eq!(events[0].message.as_deref(), Some("daemon exited"));
+    }
+
+    #[tokio::test]
+    async fn stdout_close_after_stop_does_not_emit_duplicate_shutdown() {
+        let inner = Arc::new(Mutex::new(Inner {
+            stdin: None,
+            child: None,
+            pending: HashMap::new(),
+        }));
+        let running = Arc::new(AtomicBool::new(false));
+
+        let events = Arc::new(StdMutex::new(Vec::<DaemonEvent>::new()));
+        let captured_events = events.clone();
+        let sink: Option<EventSink> = Some(Arc::new(move |event| {
+            captured_events.lock().unwrap().push(event);
+        }));
+
+        DaemonClient::handle_stdout_closed(&inner, &running, &sink).await;
+
+        assert!(!running.load(Ordering::SeqCst));
+        assert!(inner.lock().await.pending.is_empty());
+        assert!(events.lock().unwrap().is_empty());
     }
 }

@@ -1,4 +1,6 @@
-use crate::session_manager::{self, SessionMeta, UnifiedSessionMessage};
+use crate::session_manager::{
+    self, SessionMeta, UnifiedSessionMessage, UnifiedSessionMessageWindow,
+};
 use std::collections::HashMap;
 
 #[tauri::command]
@@ -32,6 +34,20 @@ pub async fn get_unified_session_messages(
 ) -> Result<Vec<UnifiedSessionMessage>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         session_manager::load_messages(&providerId, &sourcePath)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn get_unified_session_message_window(
+    providerId: String,
+    sourcePath: String,
+    tailLimit: usize,
+) -> Result<UnifiedSessionMessageWindow, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::load_message_window(&providerId, &sourcePath, tailLimit)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?

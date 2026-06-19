@@ -1,13 +1,21 @@
-import {useMemo} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Check, ShieldAlert, X} from 'lucide-react';
+import {Check, Loader2, ShieldAlert, X} from 'lucide-react';
 import {useTranslation} from 'react-i18next';
 import type {ToolPermissionRequest} from '../../types/permission';
+import {
+    type DialogSubmissionRef,
+    isEditableShortcutTarget,
+    isEnterShortcutControl,
+    markDialogSubmitted,
+} from '../../utils/dialogShortcuts';
 
 interface ToolPermissionDialogProps {
     request: ToolPermissionRequest;
     onAnswer: (allow: boolean) => void;
 }
+
+type ToolPermissionShortcutAction = 'allow' | 'deny' | null;
 
 const PRIORITY_INPUT_KEYS = [
     'command',
@@ -52,13 +60,71 @@ function getInputPreview(inputs: Record<string, unknown>): Array<[string, string
         .slice(0, 6);
 }
 
+export function resolveToolPermissionShortcutAction(
+    key: string,
+    target: EventTarget | null,
+): ToolPermissionShortcutAction {
+    if (key === 'Escape') {
+        return isEditableShortcutTarget(target) ? null : 'deny';
+    }
+    if (key === 'Enter') {
+        return isEnterShortcutControl(target) ? null : 'allow';
+    }
+    return null;
+}
+
+export function submitToolPermissionDecision(
+    submittedRef: DialogSubmissionRef,
+    onFirstSubmit: () => void,
+    onDecision: (allow: boolean) => void,
+    allow: boolean,
+): boolean {
+    if (!markDialogSubmitted(submittedRef, onFirstSubmit)) return false;
+    onDecision(allow);
+    return true;
+}
+
 export default function ToolPermissionDialog({
     request,
     onAnswer,
 }: ToolPermissionDialogProps) {
     const {t} = useTranslation();
+    const [submitted, setSubmitted] = useState(false);
+    const submittedRef = useRef(false);
     const inputPreview = useMemo(() => getInputPreview(request.inputs), [request.inputs]);
     const rawInput = useMemo(() => truncateText(JSON.stringify(request.inputs, null, 2), RAW_INPUT_LIMIT), [request.inputs]);
+
+    useEffect(() => {
+        submittedRef.current = false;
+        setSubmitted(false);
+    }, [request]);
+
+    const markSubmittedBusy = useCallback(() => {
+        setSubmitted(true);
+    }, []);
+
+    const handleDeny = useCallback(() => {
+        submitToolPermissionDecision(submittedRef, markSubmittedBusy, onAnswer, false);
+    }, [markSubmittedBusy, onAnswer]);
+    const handleAllow = useCallback(() => {
+        submitToolPermissionDecision(submittedRef, markSubmittedBusy, onAnswer, true);
+    }, [markSubmittedBusy, onAnswer]);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const action = resolveToolPermissionShortcutAction(event.key, event.target);
+            if (!action) return;
+            event.preventDefault();
+            if (action === 'allow') {
+                handleAllow();
+            } else {
+                handleDeny();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [handleAllow, handleDeny]);
 
     return createPortal(
         <>
@@ -69,10 +135,11 @@ export default function ToolPermissionDialog({
 
             <div
                 className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/55 p-6"
-                onClick={() => onAnswer(false)}
+                onClick={handleDeny}
             >
                 <div
                     className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-2xl"
+                    aria-busy={submitted}
                     onClick={(event) => event.stopPropagation()}
                 >
                     <div className="flex items-center justify-between border-b border-base-300 px-4 py-3">
@@ -94,7 +161,8 @@ export default function ToolPermissionDialog({
                             className="btn btn-ghost btn-sm btn-circle"
                             title={t('chat.permission.deny')}
                             aria-label={t('chat.permission.deny')}
-                            onClick={() => onAnswer(false)}
+                            onClick={handleDeny}
+                            disabled={submitted}
                         >
                             <X className="h-4 w-4" />
                         </button>
@@ -150,7 +218,8 @@ export default function ToolPermissionDialog({
                         <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => onAnswer(false)}
+                            onClick={handleDeny}
+                            disabled={submitted}
                         >
                             <X className="h-4 w-4" />
                             {t('chat.permission.deny')}
@@ -158,9 +227,14 @@ export default function ToolPermissionDialog({
                         <button
                             type="button"
                             className="btn btn-success btn-sm"
-                            onClick={() => onAnswer(true)}
+                            onClick={handleAllow}
+                            disabled={submitted}
                         >
-                            <Check className="h-4 w-4" />
+                            {submitted ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Check className="h-4 w-4" />
+                            )}
                             {t('chat.permission.allowOnce')}
                         </button>
                     </div>

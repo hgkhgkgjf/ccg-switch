@@ -116,6 +116,12 @@ export interface ChatDoneEvent {
     error?: string | null;
 }
 
+/** 后端 "chat://message" 事件载荷，包含结构化 raw 消息。 */
+export interface ChatMessageEvent {
+    requestId: string;
+    json: string;
+}
+
 /** 后端 "chat://daemon" 生命周期事件载荷 */
 export interface ChatDaemonEvent {
     event: string;

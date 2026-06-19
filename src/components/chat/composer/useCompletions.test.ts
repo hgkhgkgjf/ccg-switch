@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {getSlashCommandCompletions, normalizeWorkspaceFile} from './useCompletions';
+import {getSlashCommandCompletions, normalizeWorkspaceFile, shouldConsumeCompletionKey,} from './useCompletions';
 
 describe('getSlashCommandCompletions', () => {
     it('includes cc-gui parity built-in commands for an empty slash query', () => {
@@ -72,5 +72,17 @@ describe('normalizeWorkspaceFile', () => {
             name: 'missing-path.ts',
             is_dir: false,
         })).toBeNull();
+    });
+});
+
+describe('shouldConsumeCompletionKey', () => {
+    it('consumes Enter and Tab while the completion menu is open even before items finish loading', () => {
+        expect(shouldConsumeCompletionKey('Enter', true, 0)).toBe(true);
+        expect(shouldConsumeCompletionKey('Tab', true, 0)).toBe(true);
+    });
+
+    it('does not consume submit keys when the completion menu is closed', () => {
+        expect(shouldConsumeCompletionKey('Enter', false, 0)).toBe(false);
+        expect(shouldConsumeCompletionKey('Tab', false, 3)).toBe(false);
     });
 });

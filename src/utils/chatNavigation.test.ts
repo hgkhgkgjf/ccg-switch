@@ -5,7 +5,9 @@ import {
     getAnchorPreview,
     getAnchorPreviewLabel,
     getMessageSearchText,
+    getRecentRenderableMessages,
     getRenderableMessages,
+    getSearchStatusContextMessages,
     getVisibleAnchorMessages,
     isMessageAnchorCandidate,
 } from './chatNavigation';
@@ -21,6 +23,40 @@ function createMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('chatNavigation', () => {
+    it('builds a recent renderable window while preserving original indexes', () => {
+        const messages = [
+            createMessage({ id: 'system-0', role: 'system', content: 'hidden' }),
+            createMessage({ id: 'user-1', role: 'user', content: 'first prompt' }),
+            createMessage({ id: 'assistant-2', role: 'assistant', content: 'first answer' }),
+            createMessage({
+                id: 'tool-result-3',
+                role: 'user',
+                content: '[tool_result]',
+                raw: {
+                    type: 'user',
+                    message: {
+                        content: [
+                            {
+                                type: 'tool_result',
+                                tool_use_id: 'tool-1',
+                                content: 'hidden result',
+                            },
+                        ],
+                    },
+                },
+            }),
+            createMessage({ id: 'user-4', role: 'user', content: 'latest prompt' }),
+            createMessage({ id: 'assistant-5', role: 'assistant', content: 'latest answer' }),
+        ];
+
+        const window = getRecentRenderableMessages(messages, 2);
+
+        expect(window.renderableMessages.map(({ message }) => message.id)).toEqual(['user-4', 'assistant-5']);
+        expect(window.renderableMessages.map(({ originalIndex }) => originalIndex)).toEqual([4, 5]);
+        expect(window.hiddenRenderableCount).toBe(2);
+        expect(window.totalRenderableCount).toBe(4);
+    });
+
     it('builds search text from raw content blocks as well as top-level content', () => {
         const message = createMessage({
             role: 'assistant',
@@ -56,6 +92,52 @@ describe('chatNavigation', () => {
         expect(renderableMessages).toHaveLength(2);
         expect(filtered).toHaveLength(1);
         expect(filtered[0].message.id).toBe('2');
+    });
+
+    it('builds bounded status context around full-history search matches', () => {
+        const messages = Array.from({length: 100}, (_, index) => {
+            if (index === 11) {
+                return createMessage({
+                    id: `message-${index}`,
+                    role: 'user',
+                    content: '[tool_result]',
+                    raw: {
+                        type: 'user',
+                        message: {
+                            content: [
+                                {
+                                    type: 'tool_result',
+                                    tool_use_id: 'tool-near-match',
+                                    content: 'near match result',
+                                },
+                            ],
+                        },
+                    },
+                });
+            }
+
+            return createMessage({
+                id: `message-${index}`,
+                role: index % 2 === 0 ? 'user' : 'assistant',
+                content: index === 10 || index === 90 ? `needle prompt ${index}` : `ordinary ${index}`,
+            });
+        });
+        const renderableMessages = getRenderableMessages(messages);
+        const matches = filterRenderableMessages(renderableMessages, 'needle');
+
+        const context = getSearchStatusContextMessages(messages, matches, {
+            maxMessages: 5,
+            contextAfterMatch: 3,
+        });
+
+        expect(context.map((message) => message.id)).toEqual([
+            'message-10',
+            'message-11',
+            'message-12',
+            'message-90',
+            'message-91',
+        ]);
+        expect(context.some((message) => message.id === 'message-50')).toBe(false);
     });
 
     it('summarizes user messages into compact anchor labels', () => {

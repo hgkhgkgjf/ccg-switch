@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import ContentBlockRenderer from './ContentBlockRenderer';
+import ContentBlockRenderer, {ImageLightbox} from './ContentBlockRenderer';
 import type {ContentBlock} from '../../types/chat';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -81,6 +81,23 @@ describe('ContentBlockRenderer', () => {
         expect(html).toContain('sr-only');
     });
 
+    it('renders a visible image label inside the lightbox', () => {
+        const html = renderToStaticMarkup(
+            <ImageLightbox
+                image={{
+                    label: 'diagram-100% coverage.png',
+                    mediaType: 'image/png',
+                    src: 'asset://C:/screens/diagram-100% coverage.png',
+                }}
+                closeLabel="Close"
+                onClose={() => undefined}
+            />,
+        );
+
+        expect(html).toContain('diagram-100% coverage.png');
+        expect(html).toContain('chat-image-lightbox-caption');
+    });
+
     it('passes compact rendering through to single tool blocks', () => {
         const blocks = [
             {
@@ -107,6 +124,57 @@ describe('ContentBlockRenderer', () => {
         expect(html).toContain('task-header-compact');
         expect(html).not.toContain('task-details-compact');
         expect(html).not.toContain('file-path-display');
+    });
+
+    it('exposes a stable transcript anchor for a single tool block', () => {
+        const blocks = [
+            {
+                type: 'tool_use',
+                id: 'tool-read-anchor',
+                name: 'Read',
+                input: {
+                    file_path: 'src/components/chat/ContentBlockRenderer.tsx',
+                },
+            },
+        ] as unknown as ContentBlock[];
+
+        const html = renderToStaticMarkup(
+            <ContentBlockRenderer
+                blocks={blocks}
+                findToolResult={() => null}
+                compact
+            />,
+        );
+
+        expect(html).toContain('chat-tool-anchor');
+        expect(html).toContain('data-chat-tool-id="tool-read-anchor"');
+        expect(html).toContain('tabindex="-1"');
+    });
+
+    it('uses stable compact block spacing for assistant transcript flow', () => {
+        const blocks = [
+            {type: 'text', text: '先解释当前状态。'},
+            {
+                type: 'tool_use',
+                id: 'tool-read-spacing',
+                name: 'Read',
+                input: {
+                    file_path: 'src/pages/ChatPage.tsx',
+                },
+            },
+            {type: 'text', text: '再给出下一步。'},
+        ] as unknown as ContentBlock[];
+
+        const html = renderToStaticMarkup(
+            <ContentBlockRenderer
+                blocks={blocks}
+                findToolResult={() => null}
+                compact
+            />,
+        );
+
+        expect(html).toContain('chat-content-blocks');
+        expect(html).toContain('chat-content-blocks-compact');
     });
 
     it('passes compact rendering through to grouped tool blocks', () => {
@@ -136,6 +204,29 @@ describe('ContentBlockRenderer', () => {
         expect(html).not.toContain('src/example-2.ts');
     });
 
+    it('exposes grouped tool ids as one transcript anchor target', () => {
+        const blocks = Array.from({length: 3}, (_, index) => ({
+            type: 'tool_use',
+            id: `tool-group-anchor-${index + 1}`,
+            name: 'Read',
+            input: {
+                file_path: `src/grouped-${index + 1}.ts`,
+            },
+        })) as unknown as ContentBlock[];
+
+        const html = renderToStaticMarkup(
+            <ContentBlockRenderer
+                blocks={blocks}
+                findToolResult={() => null}
+                compact
+            />,
+        );
+
+        expect(html).toContain('chat-tool-anchor');
+        expect(html).toContain('data-chat-tool-ids="tool-group-anchor-1 tool-group-anchor-2 tool-group-anchor-3"');
+        expect(html).toContain('tabindex="-1"');
+    });
+
     it('keeps grouped tool lists expanded outside compact rendering', () => {
         const blocks = Array.from({length: 3}, (_, index) => ({
             type: 'tool_use',
@@ -157,6 +248,26 @@ describe('ContentBlockRenderer', () => {
         expect(html).toContain('task-group-list');
         expect(html).toContain('task-group-actions');
         expect(html).toContain('npm run check:2');
+    });
+
+    it('renders adjacent text blocks as one markdown document', () => {
+        const blocks = [
+            {type: 'text', text: '**上轮进展与阻塞**\n记录里声称完成。'},
+            {type: 'text', text: '- **本轮规划**：先定位根因。'},
+            {type: 'text', text: '- **验证结果**：保留列表。'},
+        ] as unknown as ContentBlock[];
+
+        const html = renderToStaticMarkup(
+            <ContentBlockRenderer
+                blocks={blocks}
+                findToolResult={() => null}
+            />,
+        );
+
+        const markdownBlockCount = html.match(/markdown-block/g)?.length ?? 0;
+        expect(markdownBlockCount).toBe(1);
+        expect(html).toContain('记录里声称完成。\n\n- **本轮规划**：先定位根因。');
+        expect(html).toContain('- **验证结果**：保留列表。');
     });
 
     it('merges repeated edit rows for the same file inside grouped edit output', () => {

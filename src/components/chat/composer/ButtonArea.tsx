@@ -10,11 +10,11 @@ import {
     Loader2,
     type LucideIcon,
     MessageSquare,
+    RefreshCw,
     Rocket,
     Send,
     Sparkles,
     Square,
-    Terminal,
     Zap,
 } from 'lucide-react';
 import {SelectorDropdown, type SelectorOption} from './SelectorDropdown';
@@ -22,12 +22,14 @@ import {
     AVAILABLE_MODES,
     AVAILABLE_PROVIDERS,
     type ChatProviderId,
+    type ModelInfo,
     modelsForProvider,
     type PermissionMode,
     type ReasoningEffort,
     reasoningLevelsFor,
     reasoningVisibleFor,
 } from './constants';
+import {ModelIcon, ProviderBrandIcon} from './ModelIcon';
 
 const MODE_ICONS: Record<string, LucideIcon> = {
     'message-square': MessageSquare,
@@ -48,14 +50,22 @@ interface ButtonAreaProps {
     provider: ChatProviderId;
     permissionMode: PermissionMode;
     model: string;
+    models?: ModelInfo[];
+    modelsLoading?: boolean;
+    modelsError?: string | null;
+    modelsCanRefresh?: boolean;
+    modelsRefreshing?: boolean;
+    modelsRefreshError?: string | null;
     reasoningEffort: ReasoningEffort;
     isLoading: boolean;
+    isSubmitting: boolean;
     isEnhancing: boolean;
     canSubmit: boolean;
     hasPromptText: boolean;
     onProviderChange: (p: ChatProviderId) => void;
     onModeChange: (m: PermissionMode) => void;
     onModelChange: (id: string) => void;
+    onRefreshModels?: () => void;
     onReasoningChange: (e: ReasoningEffort) => void;
     onEnhance: () => void;
     onSubmit: () => void;
@@ -70,14 +80,22 @@ export function ButtonArea({
     provider,
     permissionMode,
     model,
+    models: injectedModels,
+    modelsLoading = false,
+    modelsError = null,
+    modelsCanRefresh = false,
+    modelsRefreshing = false,
+    modelsRefreshError = null,
     reasoningEffort,
     isLoading,
+    isSubmitting,
     isEnhancing,
     canSubmit,
     hasPromptText,
     onProviderChange,
     onModeChange,
     onModelChange,
+    onRefreshModels,
     onReasoningChange,
     onEnhance,
     onSubmit,
@@ -88,7 +106,7 @@ export function ButtonArea({
     const providerOptions: SelectorOption<ChatProviderId>[] = AVAILABLE_PROVIDERS.map((p) => ({
         id: p.id,
         label: p.label,
-        icon: <Terminal size={14} />,
+        icon: <ProviderBrandIcon provider={p.id} size={16} colored />,
     }));
 
     const modeOptions: SelectorOption<PermissionMode>[] = AVAILABLE_MODES.filter(
@@ -104,12 +122,16 @@ export function ButtonArea({
         };
     });
 
-    const models = modelsForProvider(provider);
+    const models = injectedModels && injectedModels.length > 0
+        ? injectedModels
+        : modelsForProvider(provider);
     const modelOptions: SelectorOption<string>[] = models.map((m) => ({
         id: m.id,
         label: m.label,
-        description: t(`chat.models.${m.descKey}`, { defaultValue: '' }) || undefined,
-        icon: <Terminal size={14} />,
+        description: m.descKey
+            ? t(`chat.models.${m.descKey}`, { defaultValue: '' }) || undefined
+            : m.description,
+        icon: <ModelIcon provider={provider} modelId={m.id} size={14} />,
     }));
 
     const reasoningVisible = reasoningVisibleFor(provider, model);
@@ -127,57 +149,93 @@ export function ButtonArea({
     const currentMode = AVAILABLE_MODES.find((m) => m.id === permissionMode);
     const CurrentModeIcon = currentMode ? MODE_ICONS[currentMode.icon] : MessageSquare;
     const currentModel = models.find((m) => m.id === model);
+    const controlsDisabled = isLoading || isSubmitting;
+    const modelStatusError = modelsRefreshError ?? modelsError;
+    const modelStatusFooter = (modelsLoading || modelsRefreshing || modelStatusError) ? (
+        <div
+            className={`border-t border-base-300 px-2 py-1.5 text-[11px] ${
+                modelStatusError ? 'text-error' : 'text-base-content/50'
+            }`}
+            title={modelStatusError ?? undefined}
+        >
+            {modelStatusError ?? (modelsRefreshing ? t('chat.modelsRefreshing') : t('chat.modelsLoading'))}
+        </div>
+    ) : undefined;
+    const showModelRefresh = modelsCanRefresh && Boolean(onRefreshModels);
+    const modelRefreshTitle = modelsRefreshError
+        ?? (modelsRefreshing ? t('chat.modelsRefreshing') : t('chat.modelsRefresh'));
 
     return (
-        <div className="flex flex-nowrap items-center gap-1 px-1 pt-1">
+        <div className="chat-composer-toolbar flex flex-wrap items-center gap-1 px-1 pt-1">
             {/* 左侧选择器组 */}
-            <SelectorDropdown
-                value={provider}
-                options={providerOptions}
-                onChange={onProviderChange}
-                buttonIcon={<Terminal size={14} />}
-                title={t('chat.providerLabel')}
-            />
-
-            <SelectorDropdown
-                value={permissionMode}
-                options={modeOptions}
-                onChange={onModeChange}
-                buttonIcon={<CurrentModeIcon size={14} />}
-                buttonLabel={currentMode ? t(`chat.modes.${currentMode.i18nKey}.label`) : undefined}
-                highlight={permissionMode === 'bypassPermissions'}
-                title={t('chat.modeLabel')}
-            />
-
-            <SelectorDropdown
-                value={model}
-                options={modelOptions}
-                onChange={onModelChange}
-                buttonIcon={<Terminal size={14} />}
-                buttonLabel={currentModel?.label}
-                title={t('chat.modelLabel')}
-            />
-
-            {reasoningVisible && (
+            <div className="chat-composer-toolbar-selectors flex min-w-0 flex-1 flex-wrap items-center gap-1">
                 <SelectorDropdown
-                    value={reasoningEffort}
-                    options={reasoningOptions}
-                    onChange={onReasoningChange}
-                    buttonIcon={<Lightbulb size={14} />}
-                    buttonLabel={t(`chat.reasoning.${reasoningEffort}.label`)}
-                    align="right"
-                    title={t('chat.reasoningLabel')}
+                    value={provider}
+                    options={providerOptions}
+                    onChange={onProviderChange}
+                    buttonIcon={<ProviderBrandIcon provider={provider} size={16} colored />}
+                    compact
+                    title={t('chat.providerLabel')}
+                    disabled={controlsDisabled}
                 />
-            )}
+
+                <SelectorDropdown
+                    value={permissionMode}
+                    options={modeOptions}
+                    onChange={onModeChange}
+                    buttonIcon={<CurrentModeIcon size={14} />}
+                    buttonLabel={currentMode ? t(`chat.modes.${currentMode.i18nKey}.label`) : undefined}
+                    highlight={permissionMode === 'bypassPermissions'}
+                    title={t('chat.modeLabel')}
+                    disabled={controlsDisabled}
+                />
+
+                <SelectorDropdown
+                    value={model}
+                    options={modelOptions}
+                    onChange={onModelChange}
+                    buttonIcon={<ModelIcon provider={provider} modelId={currentModel?.id ?? model} size={14} />}
+                    buttonLabel={currentModel?.label ?? model}
+                    title={t('chat.modelLabel')}
+                    footer={modelStatusFooter}
+                    disabled={controlsDisabled}
+                />
+                {showModelRefresh && (
+                    <button
+                        type="button"
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-base-200 text-base-content/60 transition-colors hover:bg-base-300 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45"
+                        title={modelRefreshTitle}
+                        aria-label={t('chat.modelsRefresh')}
+                        disabled={controlsDisabled || modelsRefreshing}
+                        onClick={onRefreshModels}
+                    >
+                        <RefreshCw size={13} className={modelsRefreshing ? 'animate-spin' : ''} />
+                    </button>
+                )}
+
+                {reasoningVisible && (
+                    <SelectorDropdown
+                        value={reasoningEffort}
+                        options={reasoningOptions}
+                        onChange={onReasoningChange}
+                        buttonIcon={<Lightbulb size={14} />}
+                        buttonLabel={t(`chat.reasoning.${reasoningEffort}.label`)}
+                        align="right"
+                        title={t('chat.reasoningLabel')}
+                        disabled={controlsDisabled}
+                    />
+                )}
+            </div>
 
             {/* 右侧工具按钮 */}
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div className="chat-composer-toolbar-actions ml-auto flex shrink-0 items-center gap-1">
                 <button
                     type="button"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-200 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="chat-composer-action-button flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-200 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent"
                     onClick={onEnhance}
-                    disabled={!hasPromptText || isLoading || isEnhancing}
+                    disabled={!hasPromptText || controlsDisabled || isEnhancing}
                     title={t('chat.enhancePrompt')}
+                    aria-label={t('chat.enhancePrompt')}
                 >
                     {isEnhancing ? (
                         <Loader2 size={16} className="animate-spin" />
@@ -189,21 +247,27 @@ export function ButtonArea({
                 {isLoading ? (
                     <button
                         type="button"
-                        className="btn btn-xs btn-error gap-1"
+                        className="chat-composer-primary-action flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-error text-error-content transition-colors hover:bg-error/90"
                         onClick={onStop}
                         title={t('chat.stop')}
+                        aria-label={t('chat.stop')}
                     >
-                        <Square size={14} />
+                        <Square size={15} />
                     </button>
                 ) : (
                     <button
                         type="button"
-                        className="btn btn-xs btn-primary gap-1"
+                        className="chat-composer-primary-action flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-content transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/40 disabled:hover:bg-base-200"
                         onClick={onSubmit}
-                        disabled={!canSubmit}
+                        disabled={!canSubmit || isSubmitting}
                         title={t('chat.send')}
+                        aria-label={t('chat.send')}
                     >
-                        <Send size={14} />
+                        {isSubmitting ? (
+                            <Loader2 size={15} className="animate-spin" />
+                        ) : (
+                            <Send size={15} />
+                        )}
                     </button>
                 )}
             </div>

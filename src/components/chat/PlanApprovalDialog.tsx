@@ -1,12 +1,45 @@
-import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X, ChevronDown, ChevronUp } from 'lucide-react';
-import { PlanApprovalRequest } from '../../types/permission';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
+import {ChevronDown, ChevronUp, Loader2, X} from 'lucide-react';
+import {PlanApprovalRequest} from '../../types/permission';
+import {
+    type DialogSubmissionRef,
+    isEditableShortcutTarget,
+    isEnterShortcutControl,
+    markDialogSubmitted,
+} from '../../utils/dialogShortcuts';
+
+type PlanApprovalShortcutAction = 'approve' | 'cancel' | null;
 
 interface PlanApprovalDialogProps {
     request: PlanApprovalRequest;
     onApprove: (approved: boolean, targetMode: string) => void;
     onCancel: () => void;
+}
+
+export function resolvePlanApprovalShortcutAction(
+    key: string,
+    target: EventTarget | null,
+): PlanApprovalShortcutAction {
+    if (key === 'Escape') {
+        return isEditableShortcutTarget(target) ? null : 'cancel';
+    }
+    if (key === 'Enter') {
+        return isEnterShortcutControl(target) ? null : 'approve';
+    }
+    return null;
+}
+
+export function submitPlanApprovalDecision(
+    submittedRef: DialogSubmissionRef,
+    onFirstSubmit: () => void,
+    onDecision: (approved: boolean, targetMode: string) => void,
+    approved: boolean,
+    targetMode: string,
+): boolean {
+    if (!markDialogSubmitted(submittedRef, onFirstSubmit)) return false;
+    onDecision(approved, targetMode);
+    return true;
 }
 
 export default function PlanApprovalDialog({
@@ -15,18 +48,56 @@ export default function PlanApprovalDialog({
     onCancel,
 }: PlanApprovalDialogProps) {
     const [planExpanded, setPlanExpanded] = useState(true);
+    const [submitted, setSubmitted] = useState(false);
+    const submittedRef = useRef(false);
 
-    const handleDeny = () => {
-        onApprove(false, 'default');
-    };
+    useEffect(() => {
+        submittedRef.current = false;
+        setSubmitted(false);
+        setPlanExpanded(true);
+    }, [request]);
 
-    const handleApprove = () => {
-        onApprove(true, 'default');
-    };
+    const markSubmitted = useCallback(
+        () => markDialogSubmitted(submittedRef, () => setSubmitted(true)),
+        [],
+    );
 
-    const handleApproveAuto = () => {
-        onApprove(true, 'auto');
-    };
+    const markSubmittedBusy = useCallback(() => {
+        setSubmitted(true);
+    }, []);
+
+    const handleDeny = useCallback(() => {
+        submitPlanApprovalDecision(submittedRef, markSubmittedBusy, onApprove, false, 'default');
+    }, [markSubmittedBusy, onApprove]);
+
+    const handleApprove = useCallback(() => {
+        submitPlanApprovalDecision(submittedRef, markSubmittedBusy, onApprove, true, 'default');
+    }, [markSubmittedBusy, onApprove]);
+
+    const handleApproveAuto = useCallback(() => {
+        submitPlanApprovalDecision(submittedRef, markSubmittedBusy, onApprove, true, 'auto');
+    }, [markSubmittedBusy, onApprove]);
+
+    const handleCancel = useCallback(() => {
+        if (!markSubmitted()) return;
+        onCancel();
+    }, [markSubmitted, onCancel]);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const action = resolvePlanApprovalShortcutAction(event.key, event.target);
+            if (!action) return;
+            event.preventDefault();
+            if (action === 'approve') {
+                handleApprove();
+            } else {
+                handleDeny();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [handleApprove, handleDeny]);
 
     return createPortal(
         <>
@@ -39,10 +110,11 @@ export default function PlanApprovalDialog({
             {/* 背景蒙层 */}
             <div
                 className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-6"
-                onClick={onCancel}
+                onClick={handleCancel}
             >
                 <div
                     className="bg-white dark:bg-base-100 rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+                    aria-busy={submitted}
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* 头部 */}
@@ -51,9 +123,10 @@ export default function PlanApprovalDialog({
                             Plan Approval Required
                         </h3>
                         <button
-                            onClick={onCancel}
+                            onClick={handleCancel}
                             className="btn btn-ghost btn-sm btn-circle"
                             title="取消"
+                            disabled={submitted}
                         >
                             <X className="w-4 h-4" />
                         </button>
@@ -113,20 +186,28 @@ export default function PlanApprovalDialog({
 
                     {/* 底部按钮 */}
                     <div className="flex items-center justify-end gap-3 p-4 border-t border-gray-200 dark:border-base-200">
-                        <button onClick={handleDeny} className="btn btn-ghost btn-sm">
+                        <button
+                            onClick={handleDeny}
+                            className="btn btn-ghost btn-sm"
+                            disabled={submitted}
+                        >
                             Deny
                         </button>
                         <button
                             onClick={handleApprove}
                             className="btn btn-sm bg-gradient-to-r from-green-500 to-emerald-500 text-white border-none hover:from-green-600 hover:to-emerald-600"
+                            disabled={submitted}
                         >
+                            {submitted && <Loader2 className="h-4 w-4 animate-spin" />}
                             Approve
                         </button>
                         <button
                             onClick={handleApproveAuto}
                             className="btn btn-sm bg-gradient-to-r from-blue-500 to-purple-500 text-white border-none hover:from-blue-600 hover:to-purple-600"
                             title="批准并切换到 auto 模式（后续操作自动放行）"
+                            disabled={submitted}
                         >
+                            {submitted && <Loader2 className="h-4 w-4 animate-spin" />}
                             Approve & Auto
                         </button>
                     </div>

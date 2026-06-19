@@ -1,7 +1,9 @@
 pub mod providers;
 
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+const MAX_MESSAGE_WINDOW_LIMIT: usize = 500;
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +31,73 @@ pub struct UnifiedSessionMessage {
     pub ts: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UnifiedSessionMessageWindow {
+    pub messages: Vec<UnifiedSessionMessage>,
+    pub start_index: usize,
+    pub total_count: usize,
+    pub complete: bool,
+}
+
+fn normalize_message_window_limit(tail_limit: usize) -> usize {
+    tail_limit.clamp(1, MAX_MESSAGE_WINDOW_LIMIT)
+}
+
+pub(crate) struct MessageWindowBuilder {
+    limit: usize,
+    total_count: usize,
+    messages: VecDeque<UnifiedSessionMessage>,
+}
+
+impl MessageWindowBuilder {
+    pub(crate) fn new(tail_limit: usize) -> Self {
+        Self {
+            limit: normalize_message_window_limit(tail_limit),
+            total_count: 0,
+            messages: VecDeque::new(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, message: UnifiedSessionMessage) {
+        self.total_count += 1;
+        self.messages.push_back(message);
+        while self.messages.len() > self.limit {
+            self.messages.pop_front();
+        }
+    }
+
+    pub(crate) fn next_index(&self) -> usize {
+        self.total_count
+    }
+
+    pub(crate) fn finish(self) -> UnifiedSessionMessageWindow {
+        let messages: Vec<UnifiedSessionMessage> = self.messages.into_iter().collect();
+        let start_index = self.total_count.saturating_sub(messages.len());
+        UnifiedSessionMessageWindow {
+            complete: start_index == 0,
+            messages,
+            start_index,
+            total_count: self.total_count,
+        }
+    }
+}
+
+fn messages_to_window(
+    messages: Vec<UnifiedSessionMessage>,
+    tail_limit: usize,
+) -> UnifiedSessionMessageWindow {
+    let total_count = messages.len();
+    let limit = normalize_message_window_limit(tail_limit);
+    let start_index = total_count.saturating_sub(limit);
+    UnifiedSessionMessageWindow {
+        messages: messages.into_iter().skip(start_index).collect(),
+        start_index,
+        total_count,
+        complete: start_index == 0,
+    }
 }
 
 /// 按项目路径扫描会话，合并所有 provider 并按 last_active_at 降序排序
@@ -101,6 +170,22 @@ pub fn load_messages(
         "claude" => providers::claude::load_claude_messages(source_path),
         "codex" => providers::codex::load_codex_messages(source_path),
         "gemini" => providers::gemini::load_gemini_messages(source_path),
+        _ => Err(format!("Unknown provider: {}", provider_id)),
+    }
+}
+
+pub fn load_message_window(
+    provider_id: &str,
+    source_path: &str,
+    tail_limit: usize,
+) -> Result<UnifiedSessionMessageWindow, String> {
+    match provider_id {
+        "claude" => providers::claude::load_claude_message_window(source_path, tail_limit),
+        "codex" => providers::codex::load_codex_message_window(source_path, tail_limit),
+        "gemini" => {
+            let messages = providers::gemini::load_gemini_messages(source_path)?;
+            Ok(messages_to_window(messages, tail_limit))
+        }
         _ => Err(format!("Unknown provider: {}", provider_id)),
     }
 }

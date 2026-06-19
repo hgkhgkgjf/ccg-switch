@@ -88,6 +88,21 @@ describe('ChatDiffReviewPane', () => {
         expect(html).toMatch(/do not wrap diff lines|差异内容不换行/i);
     });
 
+    it('renders a copy path action for the selected diff file', () => {
+        const html = renderToStaticMarkup(
+            <ChatDiffReviewPane
+                edit={edit}
+                mode="unified"
+                wrapLines
+                onModeChange={() => undefined}
+                onWrapLinesChange={() => undefined}
+            />,
+        );
+
+        expect(html).toContain('chat-diff-review-copy');
+        expect(html).toMatch(/copy path|复制路径/i);
+    });
+
     it('keeps the parent-controlled no-wrap diff mode after the pane remounts', () => {
         const html = renderToStaticMarkup(
             <ChatDiffReviewPane

@@ -1,6 +1,17 @@
-import {Columns2, ExternalLink, FileDiff, PanelRightClose, Rows3, ScrollText, TextWrap} from 'lucide-react';
+import {useEffect, useRef, useState} from 'react';
+import {
+    Check,
+    Columns2,
+    Copy,
+    ExternalLink,
+    FileDiff,
+    PanelRightClose,
+    Rows3,
+    ScrollText,
+    TextWrap
+} from 'lucide-react';
 import {useTranslation} from 'react-i18next';
-import {openFile} from '../../utils/bridge';
+import {copyToClipboard, openFile} from '../../utils/bridge';
 import type {ChatStatusEditSummary} from '../../utils/chatStatusSummary';
 import {cn} from '../../utils/cn';
 import EditDiffPreview, {type EditDiffPreviewMode} from '../toolBlocks/EditDiffPreview';
@@ -25,10 +36,31 @@ export default function ChatDiffReviewPane({
     onCollapse,
 }: ChatDiffReviewPaneProps) {
     const { t } = useTranslation();
+    const [copied, setCopied] = useState(false);
+    const copyTimerRef = useRef<number | null>(null);
+
+    useEffect(() => () => {
+        if (copyTimerRef.current !== null) {
+            window.clearTimeout(copyTimerRef.current);
+        }
+    }, []);
 
     const handleOpenFile = () => {
         if (!edit) return;
         void openFile(edit.openPath, edit.lineStart, edit.lineEnd, currentCwd);
+    };
+
+    const handleCopyPath = async () => {
+        if (!edit) return;
+        await copyToClipboard(edit.openPath || edit.displayPath);
+        setCopied(true);
+        if (copyTimerRef.current !== null) {
+            window.clearTimeout(copyTimerRef.current);
+        }
+        copyTimerRef.current = window.setTimeout(() => {
+            setCopied(false);
+            copyTimerRef.current = null;
+        }, 2000);
     };
 
     const diffModeButtonClass = (viewMode: EditDiffPreviewMode) => cn(
@@ -100,6 +132,16 @@ export default function ChatDiffReviewPane({
                         onClick={handleOpenFile}
                     >
                         <ExternalLink size={13} />
+                    </button>
+                    <button
+                        type="button"
+                        className={cn('chat-diff-review-copy', copied && 'copied')}
+                        title={copied ? t('tools.copied') : t('tools.copyPath')}
+                        aria-label={copied ? t('tools.copied') : t('tools.copyPath')}
+                        disabled={!edit}
+                        onClick={() => void handleCopyPath()}
+                    >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
                     </button>
                     {onCollapse && (
                         <button

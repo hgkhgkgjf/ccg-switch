@@ -5,6 +5,7 @@ import i18n from '../i18n';
 import {showToast} from '../components/common/ToastContainer';
 
 const CONTROL_CHAR_REGEX = /[\u0000-\u001f]/;
+const LITERAL_PERCENT_REGEX = /%(?![0-9A-Fa-f]{2})/g;
 
 function stripWrappingQuotes(value: string): string {
   const trimmed = value.trim();
@@ -33,14 +34,26 @@ function isValidOpenFileTarget(value: string): boolean {
   return value.length > 0 && !CONTROL_CHAR_REGEX.test(value);
 }
 
+function decodeOpenFileTarget(value: string): string | null {
+  let current = value;
+  for (let pass = 0; pass < 3; pass += 1) {
+    try {
+      const decoded = decodeURIComponent(current.replace(LITERAL_PERCENT_REGEX, '%25'));
+      if (decoded === current) {
+        return decoded;
+      }
+      current = decoded;
+    } catch {
+      return null;
+    }
+  }
+  return current;
+}
+
 function normalizeOpenFileTarget(filePath: string): string | null {
   const stripped = stripWrappingQuotes(filePath);
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(stripped);
-  } catch {
-    return null;
-  }
+  const decoded = decodeOpenFileTarget(stripped);
+  if (!decoded) return null;
 
   const normalized = stripFileUrlPrefix(decoded);
   return isValidOpenFileTarget(normalized) ? normalized : null;

@@ -1,6 +1,11 @@
 import {type ReactNode, useEffect, useRef, useState} from 'react';
 import {Check, ChevronDown, ChevronUp} from 'lucide-react';
 
+const ICON_BOX_LAYOUT_CLASS = 'flex h-4 w-4 shrink-0 items-center justify-center leading-none';
+const TRIGGER_ICON_BOX_CLASS = `selector-dropdown-icon-box selector-dropdown-trigger-icon selector-dropdown-icon-box--trigger ${ICON_BOX_LAYOUT_CLASS}`;
+const OPTION_ICON_BOX_CLASS = `selector-dropdown-icon-box selector-dropdown-option-icon selector-dropdown-icon-box--option ${ICON_BOX_LAYOUT_CLASS}`;
+const CHECK_ICON_BOX_CLASS = `selector-dropdown-icon-box selector-dropdown-check-icon selector-dropdown-icon-box--check ${ICON_BOX_LAYOUT_CLASS} text-primary`;
+
 export interface SelectorOption<T extends string> {
     id: T;
     label: string;
@@ -24,6 +29,9 @@ interface SelectorDropdownProps<T extends string> {
     highlight?: boolean;
     /** 菜单底部附加内容（如 1M 上下文开关） */
     footer?: ReactNode;
+    /** 紧凑模式：只显示触发图标，匹配 provider toolbar button。 */
+    compact?: boolean;
+    disabled?: boolean;
 }
 
 /**
@@ -40,6 +48,8 @@ export function SelectorDropdown<T extends string>({
     align = 'left',
     highlight = false,
     footer,
+    compact = false,
+    disabled = false,
 }: SelectorDropdownProps<T>) {
     const [open, setOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -65,25 +75,42 @@ export function SelectorDropdown<T extends string>({
         };
     }, [open]);
 
+    useEffect(() => {
+        if (disabled) setOpen(false);
+    }, [disabled]);
+
     return (
         <div className="relative inline-block" ref={rootRef}>
             <button
                 type="button"
                 title={title}
+                disabled={disabled}
                 onClick={(e) => {
                     e.stopPropagation();
+                    if (disabled) return;
                     setOpen((v) => !v);
                 }}
-                className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors
+                className={`flex h-6 shrink-0 items-center rounded-md text-xs font-medium transition-colors
+                    ${compact ? 'w-6 justify-center px-0' : 'gap-1 px-1.5'}
                     ${
-                        highlight
+                        disabled
+                            ? 'cursor-not-allowed bg-base-200 text-base-content/35'
+                            : highlight
                             ? 'bg-warning/15 text-warning hover:bg-warning/25'
                             : 'bg-base-200 text-base-content/80 hover:bg-base-300'
-                    }`}
+                }`}
             >
-                {buttonIcon}
-                <span className="max-w-[7rem] truncate">{buttonLabel ?? current?.label}</span>
-                {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                {buttonIcon && (
+                    <span className={TRIGGER_ICON_BOX_CLASS}>
+                        {buttonIcon}
+                    </span>
+                )}
+                {!compact && (
+                    <>
+                        <span className="max-w-[7rem] truncate">{buttonLabel ?? current?.label}</span>
+                        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    </>
+                )}
             </button>
 
             {open && (
@@ -106,7 +133,11 @@ export function SelectorDropdown<T extends string>({
                                 ${opt.disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-base-200'}
                                 ${opt.id === value ? 'bg-base-200/60' : ''}`}
                         >
-                            {opt.icon && <span className="mt-0.5 shrink-0">{opt.icon}</span>}
+                            {opt.icon && (
+                                <span className={OPTION_ICON_BOX_CLASS}>
+                                    {opt.icon}
+                                </span>
+                            )}
                             <span className="flex-1 min-w-0">
                                 <span className="block text-xs font-medium text-base-content">
                                     {opt.label}
@@ -118,7 +149,9 @@ export function SelectorDropdown<T extends string>({
                                 )}
                             </span>
                             {opt.id === value && (
-                                <Check size={14} className="mt-0.5 shrink-0 text-primary" />
+                                <span className={CHECK_ICON_BOX_CLASS}>
+                                    <Check size={14} />
+                                </span>
                             )}
                         </button>
                     ))}

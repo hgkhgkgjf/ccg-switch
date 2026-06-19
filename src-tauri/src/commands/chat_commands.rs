@@ -8,6 +8,14 @@ use tauri::{AppHandle, State};
 
 use crate::chat::ChatManager;
 
+/// 当前聊天工作目录的只读工作区状态。
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct ChatWorkspaceStatus {
+    pub is_git_repository: bool,
+    pub git_root: Option<String>,
+    pub git_branch: Option<String>,
+}
+
 /// 一个工作目录文件项（供 `@` 文件引用补全使用）。
 #[derive(serde::Serialize)]
 pub struct WorkspaceFile {
@@ -31,6 +39,126 @@ pub struct SlashCommandItem {
 /// Shared chat manager, stored in Tauri managed state.
 pub struct ChatState {
     pub manager: ChatManager,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SystemNotificationPayload {
+    title: String,
+    body: String,
+}
+
+fn normalize_system_notification_payload(
+    title: &str,
+    body: &str,
+) -> Result<SystemNotificationPayload, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("发送系统通知失败: 标题不能为空".to_string());
+    }
+
+    Ok(SystemNotificationPayload {
+        title,
+        body: body.trim().to_string(),
+    })
+}
+
+fn empty_chat_workspace_status() -> ChatWorkspaceStatus {
+    ChatWorkspaceStatus {
+        is_git_repository: false,
+        git_root: None,
+        git_branch: None,
+    }
+}
+
+fn find_git_entry(start: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut current = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+
+    loop {
+        let git_entry = current.join(".git");
+        if git_entry.exists() {
+            return Some((current, git_entry));
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn resolve_git_dir(
+    repo_root: &std::path::Path,
+    git_entry: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    if git_entry.is_dir() {
+        return Some(git_entry.to_path_buf());
+    }
+
+    let content = std::fs::read_to_string(git_entry).ok()?;
+    let git_dir = content.trim().strip_prefix("gitdir:")?.trim();
+    if git_dir.is_empty() {
+        return None;
+    }
+
+    let path = std::path::PathBuf::from(git_dir);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        repo_root.join(path)
+    })
+}
+
+fn read_git_branch(git_dir: &std::path::Path) -> Option<String> {
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    if head.is_empty() {
+        return None;
+    }
+
+    if let Some(reference) = head.strip_prefix("ref:") {
+        let reference = reference.trim();
+        return Some(
+            reference
+                .strip_prefix("refs/heads/")
+                .unwrap_or(reference)
+                .to_string(),
+        )
+        .filter(|branch| !branch.is_empty());
+    }
+
+    if head.len() >= 7 {
+        return Some(head.chars().take(7).collect());
+    }
+
+    None
+}
+
+fn resolve_chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceStatus, String> {
+    let Some(cwd) = cwd.map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+    else {
+        return Ok(empty_chat_workspace_status());
+    };
+
+    let path = std::path::PathBuf::from(cwd);
+    if !path.exists() {
+        return Ok(empty_chat_workspace_status());
+    }
+
+    let Some((repo_root, git_entry)) = find_git_entry(&path) else {
+        return Ok(empty_chat_workspace_status());
+    };
+
+    let git_branch = resolve_git_dir(&repo_root, &git_entry)
+        .as_deref()
+        .and_then(read_git_branch);
+
+    Ok(ChatWorkspaceStatus {
+        is_git_repository: true,
+        git_root: Some(repo_root.to_string_lossy().to_string()),
+        git_branch,
+    })
 }
 
 /// Send a chat message and stream the response via "chat://stream"/"chat://done".
@@ -79,18 +207,20 @@ pub fn chat_show_system_notification(
 ) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
 
-    let title = title.trim();
-    let body = body.trim();
-    if title.is_empty() {
-        return Err("发送系统通知失败: 标题不能为空".to_string());
-    }
+    let payload = normalize_system_notification_payload(&title, &body)?;
 
     app.notification()
         .builder()
-        .title(title)
-        .body(body)
+        .title(payload.title)
+        .body(payload.body)
         .show()
         .map_err(|e| format!("发送系统通知失败: {e}"))
+}
+
+/// 返回当前 Chat 工作目录的 Git 状态；非 Git 或路径不可读时返回空状态。
+#[tauri::command]
+pub fn chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceStatus, String> {
+    resolve_chat_workspace_status(cwd)
 }
 
 /// 列出所有 SDK 的安装状态（Claude / Codex）。
@@ -147,16 +277,13 @@ pub fn chat_list_slash_commands(
 #[tauri::command]
 pub async fn permission_respond_ask_user_question(
     request_id: String,
+    session_id: Option<String>,
     answers: std::collections::HashMap<String, String>,
     state: State<'_, ChatState>,
 ) -> Result<(), String> {
     let perm_dir = crate::chat::permission_dir(state.manager.app())?;
-    crate::chat::write_ask_user_question_response(
-        &perm_dir,
-        "default", // TODO: match session ID from manager
-        &request_id,
-        answers,
-    )
+    let session_id = crate::chat::permission_response_session_id(session_id);
+    crate::chat::write_ask_user_question_response(&perm_dir, &session_id, &request_id, answers)
 }
 
 /// 响应普通工具权限请求。
@@ -166,11 +293,13 @@ pub async fn permission_respond_ask_user_question(
 #[tauri::command]
 pub async fn permission_respond_tool(
     request_id: String,
+    session_id: Option<String>,
     allow: bool,
     state: State<'_, ChatState>,
 ) -> Result<(), String> {
     let perm_dir = crate::chat::permission_dir(state.manager.app())?;
-    crate::chat::write_tool_permission_response(&perm_dir, "default", &request_id, allow)
+    let session_id = crate::chat::permission_response_session_id(session_id);
+    crate::chat::write_tool_permission_response(&perm_dir, &session_id, &request_id, allow)
 }
 
 /// 列出工作目录下的文件，用于 `@` 文件引用补全。
@@ -276,18 +405,119 @@ pub async fn chat_enhance_prompt(
 #[tauri::command]
 pub async fn permission_respond_plan_approval(
     request_id: String,
+    session_id: Option<String>,
     approved: bool,
     target_mode: String,
     message: Option<String>,
     state: State<'_, ChatState>,
 ) -> Result<(), String> {
     let perm_dir = crate::chat::permission_dir(state.manager.app())?;
+    let session_id = crate::chat::permission_response_session_id(session_id);
     crate::chat::write_plan_approval_response(
         &perm_dir,
-        "default",
+        &session_id,
         &request_id,
         approved,
         target_mode,
         message,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ccg-switch-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
+
+    fn write_file(path: &Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dir");
+        }
+        fs::write(path, text).expect("write test file");
+    }
+
+    #[test]
+    fn normalizes_system_notification_payload_trims_title_and_body() -> Result<(), String> {
+        let payload = normalize_system_notification_payload("  CCG Switch  ", "  done\n")?;
+
+        assert_eq!(payload.title, "CCG Switch");
+        assert_eq!(payload.body, "done");
+        Ok(())
+    }
+
+    #[test]
+    fn normalizes_system_notification_payload_rejects_empty_title() {
+        let error =
+            normalize_system_notification_payload(" \n\t ", "body").expect_err("empty title");
+
+        assert_eq!(error, "发送系统通知失败: 标题不能为空");
+    }
+
+    #[test]
+    fn normalizes_system_notification_payload_allows_empty_body() -> Result<(), String> {
+        let payload = normalize_system_notification_payload("CCG Switch", " \n\t ")?;
+
+        assert_eq!(payload.title, "CCG Switch");
+        assert_eq!(payload.body, "");
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_workspace_status_none_for_non_git_directory() -> Result<(), String> {
+        let dir = unique_test_dir("workspace-status-no-git");
+        let status = resolve_chat_workspace_status(Some(dir.to_string_lossy().to_string()))?;
+
+        assert!(!status.is_git_repository);
+        assert_eq!(status.git_branch, None);
+        assert_eq!(status.git_root, None);
+
+        fs::remove_dir_all(dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_workspace_status_from_git_head_branch() -> Result<(), String> {
+        let dir = unique_test_dir("workspace-status-git-branch");
+        let nested = dir.join("packages").join("app");
+        fs::create_dir_all(&nested).expect("create nested dir");
+        write_file(&dir.join(".git").join("HEAD"), "ref: refs/heads/feature/chat-status\n");
+
+        let status = resolve_chat_workspace_status(Some(nested.to_string_lossy().to_string()))?;
+
+        assert!(status.is_git_repository);
+        assert_eq!(status.git_branch.as_deref(), Some("feature/chat-status"));
+        assert_eq!(status.git_root.as_deref(), Some(dir.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_workspace_status_from_gitdir_file() -> Result<(), String> {
+        let dir = unique_test_dir("workspace-status-gitdir-file");
+        let actual_git_dir = dir.join(".git-worktrees").join("app");
+        write_file(&dir.join(".git"), "gitdir: .git-worktrees/app\n");
+        write_file(&actual_git_dir.join("HEAD"), "ref: refs/heads/worktree/status-strip\n");
+
+        let status = resolve_chat_workspace_status(Some(dir.to_string_lossy().to_string()))?;
+
+        assert!(status.is_git_repository);
+        assert_eq!(status.git_branch.as_deref(), Some("worktree/status-strip"));
+        assert_eq!(status.git_root.as_deref(), Some(dir.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(dir).ok();
+        Ok(())
+    }
 }

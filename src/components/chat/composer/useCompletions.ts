@@ -205,6 +205,17 @@ export interface CompletionState {
     close: () => void;
 }
 
+export function shouldConsumeCompletionKey(
+    key: string,
+    isOpen: boolean,
+    _itemCount: number,
+): boolean {
+    if (!isOpen) return false;
+    if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Escape') return true;
+    if (key === 'Enter' || key === 'Tab') return true;
+    return false;
+}
+
 /**
  * 输入框补全控制器。集中处理 @ / # / ! / / 四类触发的检测、数据拉取、
  * 键盘导航与文本替换。数据源：
@@ -366,7 +377,7 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
             }
             // Enter / Tab 确认由调用方负责文本替换（需要拿到 textarea 值），
             // 这里只标记“已消费”，交给 ChatComposer 调 applySelection。
-            if ((e.key === 'Enter' || e.key === 'Tab') && items.length > 0) {
+            if (shouldConsumeCompletionKey(e.key, isOpen, items.length)) {
                 e.preventDefault();
                 return true;
             }

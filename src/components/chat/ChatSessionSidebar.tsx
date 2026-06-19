@@ -11,6 +11,7 @@ import {
     normalizeProjectPathForCache,
     rememberProjectSessions,
     sessionTitle,
+    shouldAcceptSessionListResponse,
     shouldIgnoreSessionClick,
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
@@ -50,6 +51,7 @@ export default function ChatSessionSidebar({
     const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
     const sessionRequestSeqRef = useRef(0);
     const sessionInFlightKeyRef = useRef<string | null>(null);
+    const selectedProjectKeyRef = useRef(normalizeProjectPathForCache(currentCwd));
     const hasManualProjectSelectionRef = useRef(false);
 
     const loadProjects = useCallback(async () => {
@@ -69,14 +71,17 @@ export default function ChatSessionSidebar({
         options: {clearOnMiss?: boolean; force?: boolean} = {},
     ) => {
         const projectCacheKey = normalizeProjectPathForCache(projectPath);
-        if (!options.force && projectCacheKey && sessionInFlightKeyRef.current === projectCacheKey) {
+        const cached = getCachedProjectSessions(sessionCacheRef.current, projectPath, options.force);
+        if (cached) {
+            sessionRequestSeqRef.current += 1;
+            sessionInFlightKeyRef.current = null;
+            setLoadingSessions(false);
+            setSessionsProjectPath(projectPath);
+            setSessions(cached);
             return;
         }
 
-        const cached = getCachedProjectSessions(sessionCacheRef.current, projectPath, options.force);
-        if (cached) {
-            setSessionsProjectPath(projectPath);
-            setSessions(cached);
+        if (!options.force && projectCacheKey && sessionInFlightKeyRef.current === projectCacheKey) {
             return;
         }
 
@@ -91,13 +96,23 @@ export default function ChatSessionSidebar({
         setLoadingSessions(true);
         try {
             const data = await invoke<SessionMeta[]>('list_sessions', {projectPath});
-            if (sessionRequestSeqRef.current !== requestSeq) return;
+            if (!shouldAcceptSessionListResponse({
+                requestSeq,
+                latestRequestSeq: sessionRequestSeqRef.current,
+                requestProjectPath: projectPath,
+                selectedProjectPath: selectedProjectKeyRef.current,
+            })) return;
 
             const supportedSessions = rememberProjectSessions(sessionCacheRef.current, projectPath, data);
             setSessionsProjectPath(projectPath);
             setSessions(supportedSessions);
         } catch (error) {
-            if (sessionRequestSeqRef.current !== requestSeq) return;
+            if (!shouldAcceptSessionListResponse({
+                requestSeq,
+                latestRequestSeq: sessionRequestSeqRef.current,
+                requestProjectPath: projectPath,
+                selectedProjectPath: selectedProjectKeyRef.current,
+            })) return;
             console.error('[ChatSessionSidebar] load sessions failed:', error);
             sessionCacheRef.current.delete(normalizeProjectPathForCache(projectPath));
             setSessionsProjectPath(projectPath);
@@ -111,6 +126,10 @@ export default function ChatSessionSidebar({
             }
         }
     }, []);
+
+    useEffect(() => {
+        selectedProjectKeyRef.current = normalizeProjectPathForCache(selectedProjectPath);
+    }, [selectedProjectPath]);
 
     useEffect(() => {
         void loadProjects();
@@ -138,6 +157,7 @@ export default function ChatSessionSidebar({
         }
 
         hasManualProjectSelectionRef.current = false;
+        selectedProjectKeyRef.current = currentProjectKey;
         setSelectedProjectPath(currentCwd);
         setSessionQuery('');
         void loadSessions(currentCwd, {clearOnMiss: true});
@@ -180,6 +200,7 @@ export default function ChatSessionSidebar({
         }
 
         hasManualProjectSelectionRef.current = true;
+        selectedProjectKeyRef.current = nextProjectKey;
         setSelectedProjectPath(project.path);
         setSessionQuery('');
         void loadSessions(project.path, {clearOnMiss: true});

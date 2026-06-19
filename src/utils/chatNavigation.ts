@@ -17,6 +17,12 @@ export interface RenderableMessage {
     originalIndex: number;
 }
 
+export interface RenderableMessageWindow {
+    renderableMessages: RenderableMessage[];
+    hiddenRenderableCount: number;
+    totalRenderableCount: number;
+}
+
 export type AnchorPreviewKind = 'text' | 'image' | 'mixed' | 'empty';
 
 export interface AnchorPreview {
@@ -66,6 +72,35 @@ export function getRenderableMessages(messages: ChatMessage[]): RenderableMessag
         .filter(({ message }) => shouldRenderChatMessage(message));
 }
 
+export function getRecentRenderableMessages(
+    messages: ChatMessage[],
+    visibleCount: number,
+): RenderableMessageWindow {
+    const maxVisible = Math.max(0, Math.floor(visibleCount));
+    const renderableMessages: RenderableMessage[] = [];
+    let hiddenRenderableCount = 0;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (!shouldRenderChatMessage(message)) continue;
+
+        if (renderableMessages.length < maxVisible) {
+            renderableMessages.push({ message, originalIndex: index });
+            continue;
+        }
+
+        hiddenRenderableCount += 1;
+    }
+
+    renderableMessages.reverse();
+
+    return {
+        renderableMessages,
+        hiddenRenderableCount,
+        totalRenderableCount: hiddenRenderableCount + renderableMessages.length,
+    };
+}
+
 export function filterRenderableMessages(
     renderableMessages: RenderableMessage[],
     normalizedSearchQuery: string,
@@ -75,6 +110,50 @@ export function filterRenderableMessages(
     return renderableMessages.filter(({ message }) => (
         getMessageSearchText(message).includes(normalizedSearchQuery)
     ));
+}
+
+interface SearchStatusContextOptions {
+    maxMessages?: number;
+    contextAfterMatch?: number;
+}
+
+const DEFAULT_SEARCH_STATUS_CONTEXT_MAX_MESSAGES = 80;
+const DEFAULT_SEARCH_STATUS_CONTEXT_AFTER_MATCH = 16;
+
+export function getSearchStatusContextMessages(
+    sourceMessages: ChatMessage[],
+    matchedMessages: RenderableMessage[],
+    options: SearchStatusContextOptions = {},
+): ChatMessage[] {
+    if (sourceMessages.length === 0 || matchedMessages.length === 0) return [];
+
+    const maxMessages = Math.max(
+        0,
+        Math.floor(options.maxMessages ?? DEFAULT_SEARCH_STATUS_CONTEXT_MAX_MESSAGES),
+    );
+    if (maxMessages === 0) return [];
+
+    const contextAfterMatch = Math.max(
+        1,
+        Math.floor(options.contextAfterMatch ?? DEFAULT_SEARCH_STATUS_CONTEXT_AFTER_MATCH),
+    );
+    const selectedIndexes = new Set<number>();
+    const sortedMatches = [...matchedMessages]
+        .sort((a, b) => a.originalIndex - b.originalIndex);
+
+    for (const {originalIndex} of sortedMatches) {
+        if (selectedIndexes.size >= maxMessages) break;
+
+        const startIndex = Math.max(0, Math.min(sourceMessages.length - 1, originalIndex));
+        const endIndex = Math.min(sourceMessages.length, startIndex + contextAfterMatch);
+        for (let index = startIndex; index < endIndex && selectedIndexes.size < maxMessages; index += 1) {
+            selectedIndexes.add(index);
+        }
+    }
+
+    return [...selectedIndexes]
+        .sort((a, b) => a - b)
+        .map((index) => sourceMessages[index]);
 }
 
 export function getVisibleAnchorMessages(

@@ -100,8 +100,17 @@ See `src/components/providers/ProviderCard.tsx` and
   appear unchanged after a project switch. The rendered session list must track
   the project path that produced it, so old-project rows are hidden immediately
   if the user switches projects while another scan or cache update is still
-  settling. Repeated clicks on the active or
-  pending session should short-circuit before resetting transcript navigation.
+  settling. Cache hits count as a new ownership decision: increment or otherwise
+  invalidate the previous session-list request before rendering cached rows, and
+  accept async `list_sessions(projectPath)` responses only when both the request
+  sequence and the currently selected normalized project key still match.
+  Repeated clicks on the pending session should short-circuit before resetting
+  transcript navigation. Repeated clicks on the active session should
+  short-circuit only when no different session load is pending; if another
+  session is pending, reselecting the active session is a valid user intent to
+  cancel/override the pending selection. Keep this decision in a shared helper
+  used by both the sidebar and `ChatPage`, otherwise the sidebar can allow the
+  click while the page silently drops it.
   If a `list_sessions(projectPath)` request is already in flight for the
   normalized project path, do not start another scan unless the user explicitly
   forces a refresh. Forced refreshes should keep the existing session list
@@ -128,6 +137,11 @@ See `src/components/providers/ProviderCard.tsx` and
   expansion chevrons; do not introduce emoji icons in new tool-block UI. On
   narrow screens, keep a truncated primary summary visible and hide only
   secondary badges/statistics.
+  `openFile()` path normalization should decode valid percent-encoded hrefs
+  while preserving legal literal percent signs in normal filesystem paths
+  (for example `100% coverage.md`). A malformed encoded path should not block a
+  plain literal percent filename from reaching the Tauri editor command, but
+  control characters must still be rejected before invoking the backend.
 - Status-panel edit history should not be a flat pile of rows when the file
   count grows. Render touched files as a tree with folder-level collapse /
   expand controls, keep the tree body inside its own scrollable pane, and show
@@ -159,7 +173,116 @@ See `src/components/providers/ProviderCard.tsx` and
   readable without constant horizontal scrolling, while still exposing a compact
   no-wrap toggle for exact long-line review. The wrap/no-wrap preference belongs
   to `ChatPage` state, not local pane state, so collapsing and remounting the
-  central diff pane preserves the user's review mode.
+  central diff pane preserves the user's review mode. The central diff pane
+  should expose the same low-friction file operations users expect from
+  Read/Edit tool rows: at minimum Open File and Copy Path. Keep these controls
+  icon-sized and reuse existing bridge helpers/i18n keys instead of adding a
+  second command style.
+- Chat daemon lifecycle status must be rendered as a recoverable state, not only
+  a raw diagnostic string. Use shared helpers such as
+  `getChatDaemonStatusKind()` and `canReconnectChatDaemon()` so the header and
+  `StatusPanel` agree on `ready` / `starting` / `offline` / `error`. When the
+  daemon is offline or failed, expose a compact reconnect action in both the
+  top header and the right status panel if the panel is visible; keep it
+  icon-first, low-noise, and disabled/spinning while `daemonReconnecting` is
+  true. Surface a compact sanitized diagnostic from the store `error` or the
+  meaningful daemon status text next to the recovery action, and reuse the same
+  diagnostic as the top-header tooltip. If the store uses a known i18n key for a
+  frontend-generated daemon diagnostic, translate it at the rendering boundary;
+  backend/raw errors remain literal diagnostic strings. Do not label `shutdown`
+  as `Starting...`, because that hides the recovery path after daemon stdout
+  closes.
+- Chat status panels should expose basic runtime readiness before the user sends
+  a prompt. Provider, selected model, permission mode, reasoning effort,
+  workspace path, SDK installation state, daemon state, and MCP
+  configuration availability belong in the same compact status surface. Runtime
+  context rows are display-only: they should consume existing `useChatStore` /
+  `useSdkStore` state passed through `ChatPage`, not trigger model refreshes,
+  SDK installs, or backend checks while rendering the panel. Render runtime
+  context as a compact tile grid in the right `StatusPanel` rather than a tall
+  vertical key/value list; keep full values in `title` attributes so truncated
+  model ids and Windows workspace paths remain inspectable. Pending and failed
+  tool counts belong in the `currentActivity` card header as compact pills when
+  non-zero; do not duplicate those counts as standalone rows in the top status
+  grid. The `currentActivity` card itself is trigger-based: render it only when
+  an active tool exists, a reply is streaming, pending/failed tool counts are
+  non-zero, or the loaded status summary has recent non-agent tool history to
+  inspect. On desktop, this card is the primary task-list surface because the
+  composer tasks tab is only a small-screen fallback; show a compact recent task
+  list from `statusSummary.toolTimeline` excluding `agent` tools, keep the active
+  tool as the primary row, and show a hidden-count row when older tasks are
+  clipped. Subagent / Task activity should be shown as a separate compact list
+  from `statusSummary.agentTools` inside the same card, not mixed into the normal
+  task list and not hidden solely behind the composer subagents tab. Keep the
+  active tool as the primary row so a currently running subagent is not repeated
+  immediately below itself. When these activity lists are present, keep them in
+  an internal scroll region with a local height cap so dense task history does
+  not push recent edits, MCP, or runtime diagnostics out of the right pane. The
+  scroll region itself must be keyboard-focusable and exposed as a named
+  `region`, so users can focus the activity history and scroll the task /
+  subagent list without first tabbing through every row.
+  Recent task and subagent rows must also be real
+  desktop navigation targets:
+  clicking or keyboard-activating a row should jump to the corresponding
+  transcript tool block instead of duplicating full tool details inside the
+  right pane. These jump rows must use accurate accessible labels: subagent
+  activity should not be announced as a generic tool task. Message-flow tool
+  renderers must expose stable
+  `data-chat-tool-id` anchors for single tools and `data-chat-tool-ids` anchors
+  for grouped tools so status surfaces can locate the existing transcript block.
+  After a status-panel jump, apply only a short-lived highlight to the target
+  transcript anchor so users can confirm where they landed; do not turn the
+  transcript row into a persistent selected state or duplicate the tool details
+  in the status panel.
+  Do not keep a full idle card in steady state just to say the chat is
+  idle. The recent-edits card is also trigger-based: render it only when there
+  are touched files, edit summaries, or a collapsed diff pane can be reopened.
+  Do not keep a full card just to say there are no edits. MCP availability
+  shown in Chat is a configuration summary for the active provider, derived from
+  `useMcpStoreV2` and `buildChatMcpAvailabilitySummary()`: total configured
+  servers, servers enabled for the current provider, loading state, and loading
+  errors. The summary row must be expandable so users can inspect each
+  configured server's name, transport/config type, and enabled/disabled state
+  for the active provider without leaving Chat. Implement this expansion as an
+  explicit controlled button with `aria-expanded` and conditional detail
+  rendering, not as a native `<details>` disclosure, so the click target and
+  rendered detail state stay testable and reliable inside the fixed status
+  panel. Do not present this as a live
+  connectivity check unless the UI is
+  explicitly wired to `check_mcp_status`; live checks may spawn stdio MCP
+  commands and should be user-triggered or otherwise carefully bounded. When a
+  manual live check is exposed, keep it inside the MCP details surface, check
+  only servers enabled for the active provider, and render the returned
+  `online` / `offline` / `timeout` / `error` / `unknown` plus latency as a
+  secondary signal next to the configuration enabled/disabled pill.
+- Chat model selectors should follow cc-gui's compact icon + label pattern.
+  The selector trigger and each option should render the same provider/vendor
+  brand glyph set used by the provider selector via `ModelIcon`, not decorative
+  capability icons such as Sparkles/Gem/Feather or a generic Terminal icon.
+  Claude/Anthropic models use the Claude LobeHub glyph; Codex/OpenAI/GPT models
+  use the shared Codex/OpenAI glyph. Keep `data-chat-model-icon` as the stable
+  model-family semantic kind (for example `claude-sonnet` or `codex-codex`) and
+  expose the actual rendered glyph through `data-chat-model-icon-glyph` so tests
+  can guard both the model family and the vendor glyph. `ButtonArea` must receive
+  a `models` prop from its parent and use the
+  hardcoded built-in arrays only as a local fallback; do not make toolbar
+  components fetch provider data or read provider stores directly. Keep the
+  selected model visible even when it came from a loaded session or custom
+  config that is not in the current dynamic list. `ModelIcon` and
+  `SelectorDropdown` must wrap trigger, option, and checkmark icons in fixed
+  icon boxes instead of tuning one-off SVG margins; the shared wrapper class is
+  `selector-dropdown-icon-box` with trigger/option/check variants. Model-family
+  glyphs have different intrinsic bounds and otherwise drift out of alignment in
+  the compact toolbar.
+- Chat provider selectors should follow cc-gui's compact provider icon pattern.
+  The provider switch trigger should be icon-only with a tooltip, while dropdown
+  options keep the provider label plus the same provider-specific icon. Claude
+  Code and Codex must render distinct provider icons; do not use one generic
+  `Terminal` icon for every provider. The Claude icon should match the
+  `@lobehub/icons` Claude glyph used by cc-gui, not a generic starburst or
+  other placeholder path. This is a presentational contract only: provider
+  switching state remains owned by `useChatStore` and `ButtonArea` should
+  receive it through props.
 - `ContentBlockRenderer.compact` must be propagated to every tool surface,
   including single tool blocks, grouped Bash/Read/Edit/Search blocks, and
   Agent/Task blocks. Compact mode should be a component contract, not only a
@@ -171,7 +294,11 @@ See `src/components/providers/ProviderCard.tsx` and
   Grouped compact tool blocks must also collapse the group body by default:
   render only the group header/summary row first, then reveal child rows and
   bulk expand/collapse actions only after the group header is explicitly
-  expanded.
+  expanded. The renderer root should expose stable spacing classes such as
+  `chat-content-blocks` and `chat-content-blocks-compact`; compact mode may be
+  dense, but it must still leave enough gap between adjacent text, thinking,
+  image, and tool rows so historical assistant output does not collapse into an
+  unreadable clump.
 - Generic tool result display must normalize MCP text-block wrappers before
   rendering. Decode arrays or wrapper objects such as `{ content: [{ type:
   "text", text: "..." }] }`, and restore literal escaped newlines in codegraph
@@ -208,6 +335,127 @@ See `src/components/providers/ProviderCard.tsx` and
   instead of becoming hero-scale typography. In assistant flow, tool blocks
   should use low-contrast operation-row styling (for example a subtle rail and
   one-line summary) rather than visually competing with the answer body.
+- Large historical transcripts must not force the first Chat render to derive
+  anchors, status summaries, search text, or tool-result lookups from the full
+  `messages` array. In normal browsing mode, use the shared recent-window helper
+  from `chatNavigation` to render only the visible tail plus any explicitly
+  revealed earlier page, preserving each item's `originalIndex` for stable
+  anchor behavior. Search is the explicit full-history mode and may scan all
+  renderable messages, but only after `ChatPage` has triggered
+  `useChatStore.loadActiveSessionFullHistory()` for a `windowed` session and
+  received a complete search source. Normal-browsing status summaries should be
+  built from the raw message slice that starts at the visible window's first
+  original index so hidden `tool_result` records for visible tools remain
+  available without summarizing unrelated older turns. Search-mode status
+  summaries must not receive the complete search source again after filtering;
+  derive them from a bounded context around matched renderable messages so
+  matching tool results stay available without a second full-history scan. Tool
+  result lookup should be pre-indexed for the
+  visible/tail window at the list level instead of scanning the full transcript
+  once per rendered tool block. Store-level history caches may keep complete
+  mapped transcripts, but repeated session loads must still pass only the
+  recent display window into `messages`; do not treat a cache hit as permission
+  to hydrate React with the full transcript. Component code must continue
+  treating `messages` as immutable data so cached message references cannot be
+  invalidated by accidental in-place changes. First-paint history windowing is
+  a store/backend contract: components should render the loaded `messages`
+  window they receive and should not issue their own full-history command to
+  compensate for a partial first paint. Partial large histories are a completed
+  normal-browsing state: `useChatStore` reports them as `windowed` and must not
+  automatically issue `get_unified_session_messages()` for cache/diagnostics.
+  Full-history reads must be tied to an explicit search/reveal intent with its
+  own paging or indexing boundary; the current search path uses the complete
+  history as a temporary `MessageList` search source without replacing the
+  normal visible `messages` window. While a `windowed` session search is
+  loading its complete history, the transcript search summary must say that
+  complete history is still being searched instead of presenting current-window
+  matches as final. If that explicit full-history search fails, keep the loaded
+  window searchable and expose a compact retry affordance owned by `ChatPage`;
+  `MessageList` should receive this as display props and must not invoke the
+  store directly. The right `StatusPanel` may show
+  the latest session-load performance snapshot from `useChatStore`, including
+  cache hits, first-paint window counts, windowed status, map times, and total
+  elapsed time. This is diagnostic display only: rendering the panel must not
+  trigger another history read, remote check, or cache mutation. Keep completed
+  or windowed session-load metrics collapsed behind an explicit diagnostic
+  toggle so normal status scanning stays compact; automatically expand the
+  metrics only while a load is still running or when an error must remain
+  visible.
+- Chat composer completion menus own Enter/Tab while open, including the loading
+  state before items arrive. A user typing `/`, `@path`, or `#agent` should not
+  accidentally send the half-completed token just because the async completion
+  query has not returned yet. Keep the keyboard-consumption decision in a shared
+  helper so `/`, `@`, `#`, and `!` triggers follow the same behavior. If
+  `useChatStore.send()` reports failure before a backend request id exists,
+  `ChatComposer` should restore the local attachments it cleared for optimistic
+  sending, merging them with any attachments the user added while the send was
+  pending and avoiding duplicates. Restore draft text only when the current
+  store draft is still empty so a user-typed replacement is not overwritten.
+  `ChatComposer` must also hold a local pre-request submit guard before
+  `activeRequestId` is available. `useChatStore.send()` sets `activeRequestId`
+  only after `chat_send` returns a backend request id, so double-clicking the
+  send button or pressing Enter twice in that gap can otherwise send the same
+  draft twice. Represent this state separately from streaming: while waiting
+  for the request id, disable send/enhance/selectors and show a disabled sending
+  affordance, not the Stop button, because `chat_abort` cannot target a request
+  id that does not exist yet. Prompt enhancement needs the same immediate
+  ref-level guard in addition to rendered `enhancing` state: double-clicking the
+  Sparkles button before React commits the loading state must not issue multiple
+  `chat_enhance_prompt` invokes for the same prompt. On enhancement failure,
+  keep the original draft intact and close the comparison dialog so users do not
+  mistake an empty enhanced result for a valid rewrite. Once the enhanced prompt
+  is available, the comparison dialog should support `Enter` to use the enhanced
+  prompt and `Escape` to close, matching cc-gui's keyboard-speed path. Route
+  these through a pure helper and do not steal `Enter` from focused buttons or
+  editable controls, otherwise a focused footer button can invoke both native
+  click behavior and the global shortcut.
+- Plan approval dialogs should support the same keyboard-speed path as cc-gui:
+  `Enter` approves the default execution mode and `Escape` denies/cancels the
+  plan. Keep shortcut routing in a pure helper so it is testable without a DOM
+  renderer. Do not steal `Enter` from focused buttons or editable controls;
+  those elements should keep their native behavior. The store-level
+  `approvePlan()` idempotence guard remains mandatory and is the final
+  duplicate-response boundary. The component should still mark itself submitted
+  on the first approve/deny/cancel path, disable response controls, and ignore
+  repeated keyboard/backdrop/button triggers while the store writes the response.
+  This mirrors cc-gui's `markSubmitted()` pattern and prevents users from seeing
+  an apparently clickable blocking dialog after they have already answered it.
+  Reset submitted state when the `request` object changes, not only when
+  `requestId` changes; store failure recovery deliberately restores the same
+  request id with a fresh object reference so the user can retry.
+- Tool permission dialogs should offer the same fast path for the common
+  allow/deny decision: `Enter` allows once and `Escape` denies. Keep the
+  keyboard routing in a pure helper, avoid stealing `Enter` from focused buttons
+  or editable controls, and rely on `answerToolPermission()` as the final
+  request-id idempotence boundary. The component should also mark itself
+  submitted on the first allow/deny/backdrop path, disable response controls,
+  and ignore repeated keyboard/backdrop/button triggers until the store clears
+  or restores the pending request. Reset submitted state when the `request`
+  object changes, not only when `requestId` changes.
+- AskUserQuestion dialogs should follow cc-gui's safer question flow: `Escape`
+  cancels when focus is outside editable controls, but `Enter` must not be a
+  global submit because question options and custom text inputs own their native
+  keyboard behavior. The component should mark itself submitted on the first
+  submit/cancel path, disable answer controls, and show a lightweight submitting
+  state while the store-level `answerAskUserQuestion()` idempotence guard writes
+  the response. Keep shared editable-target and single-submit primitives in
+  `src/utils/dialogShortcuts.ts` so plan approval, tool permission, and
+  AskUserQuestion dialogs do not drift into three different shortcut rules.
+  Like the other blocking permission dialogs, reset submitted state when the
+  `request` object changes so failure restoration of the same request id
+  re-enables answer controls.
+- `ChatPage` must mount only one blocking permission dialog at a time even when
+  multiple pending permission events exist in the store. Use
+  `getActivePermissionDialog()` to select the newest pending request by
+  timestamp, with the visual fallback priority `tool-permission > plan-approval
+  > ask-user-question` for ties, missing timestamps, or invalid timestamps.
+  Candidate inclusion must be based on whether the pending request object
+  exists, not on timestamp truthiness; an empty or malformed timestamp should
+  still surface the blocking dialog and only lose ordering priority. Hidden
+  pending requests stay in the store and surface after the active dialog
+  responds. Do not render all permission portals simultaneously, because each
+  dialog owns a global keyboard listener and one `Escape` / `Enter` press could
+  otherwise answer multiple daemon-blocking requests.
 - Chat history must treat uploaded images as structured content blocks, not as
   filename-only prompt text. `ContentBlockRenderer` owns `image` /
   `input_image` rendering: show a bounded thumbnail in the transcript, open a
@@ -215,7 +463,11 @@ See `src/components/providers/ProviderCard.tsx` and
   image-block helpers. Local `file:///C:/...` style image URLs from historical
   Codex/Claude payloads must be normalized to filesystem paths before calling
   Tauri asset conversion; do not feed the `file://` wrapper into the WebView as
-  the final image source. System-role history messages are protocol context and
+  the final image source. The full-size lightbox must retain visible source
+  context by rendering the image label/file name as a caption in addition to
+  `alt`/`aria-label`, so users can inspect multiple screenshots or historical
+  attachments without losing which file they opened. System-role history
+  messages are protocol context and
   must be filtered out before transcript rendering or anchor generation. Some
   historical providers replay runtime context as user text instead of `system`;
   hide recognizable Codex/Claude system prompts, Tools/Skills/Plugins/Heartbeats
@@ -233,6 +485,13 @@ See `src/components/providers/ProviderCard.tsx` and
   `input_image` block, pure placeholder text such as `<image name=...>` and
   `</image>` should be filtered from rendering, merged visible content, search,
   and anchor labels while preserving the image block and the user's real prompt.
+- Chat history text blocks are Markdown document fragments, not independent
+  cards. After filtering non-user-visible image residue or protocol context,
+  adjacent `text` blocks must be merged before `ContentBlockRenderer` calls
+  `MarkdownBlock`; otherwise headings, blank lines, and list items from the same
+  assistant answer can render as several cramped Markdown islands. Do not merge
+  across `image`, `thinking`, `tool_use`, or other non-text blocks, because those
+  boundaries represent real transcript structure.
 - Long-session anchor rails should stay readable under dense histories. Generate
   anchors from renderable user messages in the currently revealed transcript
   window, then sample dense anchor lists through a pure helper that preserves
@@ -276,7 +535,16 @@ See `src/components/providers/ProviderCard.tsx` and
   not only a `max-height` cap, otherwise an empty draft appears non-resizable.
   Keep the default compact height near a single-row input, clamp the drag range
   through shared helpers, and keep the final height free of horizontal overflow
-  in the central conversation column.
+  in the central conversation column. The bottom composer toolbar should keep
+  selectors in a flexible left group and prompt-enhance/send/stop actions in a
+  fixed right group; under tight widths, selectors may wrap before primary
+  actions are pushed off-screen. The toolbar wrappers should expose stable
+  layout classes (`chat-composer-toolbar`,
+  `chat-composer-toolbar-selectors`, `chat-composer-toolbar-actions`) so tests
+  can guard the layout contract. Enhance/send/stop are icon-only action buttons:
+  keep them fixed square (`h-7 w-7 shrink-0`) with `aria-label`, and do not
+  reintroduce auto-width DaisyUI button classes for the primary send/stop
+  affordance.
 - Chat composer slash completions must not be maintained as a short frontend-only
   hardcoded list. The `/` trigger should call `chat_list_slash_commands` with
   the current `cwd` and provider, then normalize the backend registry payload
@@ -286,6 +554,14 @@ See `src/components/providers/ProviderCard.tsx` and
   `/update-config`, and Codex `/diff`. Project command files from
   `.claude/commands/**/*.md` should show their source suffix (for example
   `[project]`) so users can distinguish built-in and local commands.
+- Chat composer model selection should not be limited to the static fallback
+  arrays in `constants.ts`. The selector should merge active Provider model
+  fields, locally cached dynamic models, and fallback models through
+  `chatModels.ts`. Remote model discovery must stay behind an explicit
+  user-triggered refresh icon next to the model selector because it calls a
+  provider API with the configured key. The refresh control is icon-only with a
+  tooltip/accessible label, shows a spinner while pending, and surfaces concise
+  errors without rendering API keys or other secrets.
 - Transcript history reveal should prefer scroll-triggered paging over repeated
   click-only affordances when the chat page owns a dedicated scroll container.
   When prepending older messages, preserve the user's viewport by capturing the
@@ -322,6 +598,64 @@ See `src/components/providers/ProviderCard.tsx` and
   "more files" row that can expand to the complete `allEdits` list and collapse
   back to recent edits, so the user can inspect every touched file without
   making the default sidebar dense.
+- The chat input area must expose a compact status strip directly above the
+  composer, but the strip is trigger-driven rather than always filled with zero
+  placeholders. Show the current Git branch only when the current `cwd` resolves
+  to a Git repository and a branch or detached-head label is available. Show the
+  tasks, subagents, and edits entries only when their underlying data exists:
+  tasks come from non-agent tools in the loaded `toolTimeline`, subagents come
+  from `agentTools`, and edits come from `allEdits` / edit totals. Do not list
+  agent/subagent runs in the tasks panel as well as the subagents panel; users
+  read those as two different queues. The strip may also show an MCP entry when
+  `ChatMcpAvailabilitySummary` has configured servers, a loading state, or an
+  error; this is the small-screen fallback for the right
+  `StatusPanel` MCP details. If none of those signals exist, do not render the
+  strip at all. Keep the default surface compact and treat each tab as a quick
+  entry chip: icon, short label, compact count pill, and a full `aria-label` /
+  tooltip. On small widths the visual label may hide while the count pill stays
+  visible. The Git branch chip follows the same density rule even though it is
+  not expandable: hide its visual "branch" label on small widths, keep the
+  branch value truncated, and put the full branch/root context in `aria-label`
+  and `title`. Full diagnostic detail belongs in the expanded quick-detail
+  popover and the right `StatusPanel`, not in the collapsed composer strip. The
+  strip's quick-detail surface must be anchored to the strip container and
+  absolutely positioned above the toolbar so opening tasks/subagents/edits/MCP
+  details does not push, resize, or reflow the composer. Because this surface is
+  transient, it should close when the user clicks outside the strip/panel or
+  presses `Escape`, matching the popover behavior users expect from cc-gui.
+  The popover's scroll container must also be keyboard-focusable and exposed as
+  a named `region`, so users can focus and scroll task, subagent, edit, or MCP
+  details without first tabbing through every row.
+  Task and subagent rows inside this small-screen fallback should reuse the
+  page-level transcript jump handler instead of becoming static duplicates:
+  render them with `data-target-tool-id`, accurate task/subagent `aria-label`
+  keys, and disabled read-only semantics only when no selection handler is
+  available. After a successful task/subagent jump, close the transient
+  quick-detail popover so the bottom-anchored panel does not obscure the
+  highlighted transcript target on narrow screens. Selecting an edited file
+  from this strip should reuse the page-level diff selection handler instead of
+  opening a separate diff implementation. Edit rows must stay disabled and
+  read-only when that handler is unavailable, and a successful edit selection
+  should close the transient quick-detail popover so the selected page-level
+  diff/context is not obscured. MCP details in the composer strip must list
+  configuration availability only (server name,
+  transport/config type, enabled/disabled) and must not run live connectivity
+  checks. Do not add destructive controls such as undo, discard all, or keep all
+  to this composer strip without a separate design review.
+  For large historical sessions, the strip should render from the visible-tail
+  summary in normal browsing. If explicit full-history search restores
+  task/subagent/edit triggers from earlier collapsed messages, that merge must
+  remain page-owned and display-only; do not move full-history scanning into
+  the first-paint render path or trigger it merely because the strip is mounted.
+  Automatically loaded `windowed` histories should also skip the idle
+  complete-status-summary pass; ordinary browsing should keep using the visible
+  tail until the user makes an explicit full-history request. On the desktop
+  `xl` breakpoint where the right `StatusPanel` is visible, the
+  composer strip's expandable tasks/subagents/edits/MCP tabs should act as a
+  small-screen fallback and carry `xl:hidden` so the same detail surfaces are
+  not duplicated above the composer. The Git branch chip may remain visible on
+  desktop because it is a lightweight send-context signal rather than another
+  expandable status panel.
 - Conditional classes are composed with template strings today. A `cn()` helper
   (clsx + tailwind-merge) exists at `src/utils/cn.ts` — prefer it for new
   components with conditional class logic.

@@ -7,6 +7,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime};
 
+pub const DEFAULT_PERMISSION_SESSION_ID: &str = "default";
+
 /// Polls the permission directory for request files written by the daemon
 /// (claude-agent-sdk), parses them, and emits Tauri events to the frontend.
 ///
@@ -27,6 +29,8 @@ pub struct PermissionWatcher<R: Runtime> {
 #[serde(rename_all = "camelCase")]
 pub struct AskUserQuestionRequest {
     pub request_id: String,
+    #[serde(default)]
+    pub session_id: String,
     pub tool_name: String,
     pub questions: Vec<Question>,
     pub timestamp: String,
@@ -52,6 +56,8 @@ pub struct QuestionOption {
 #[serde(rename_all = "camelCase")]
 pub struct PlanApprovalRequest {
     pub request_id: String,
+    #[serde(default)]
+    pub session_id: String,
     pub tool_name: String,
     pub plan: String,
     pub allowed_prompts: Vec<AllowedPrompt>,
@@ -86,6 +92,8 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct ToolPermissionRequest {
     pub request_id: String,
+    #[serde(default)]
+    pub session_id: String,
     pub tool_name: String,
     #[serde(
         default = "empty_tool_inputs",
@@ -119,6 +127,26 @@ struct PlanApprovalResponse {
 #[derive(Serialize)]
 struct ToolPermissionResponse {
     allow: bool,
+}
+
+fn normalize_session_id_value(session_id: &str, fallback: &str) -> String {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn permission_response_session_id(session_id: Option<String>) -> String {
+    normalize_session_id_value(
+        session_id.as_deref().unwrap_or_default(),
+        DEFAULT_PERMISSION_SESSION_ID,
+    )
+}
+
+fn fill_missing_request_session_id(session_id: &mut String, fallback: &str) {
+    *session_id = normalize_session_id_value(session_id, fallback);
 }
 
 impl<R: Runtime> PermissionWatcher<R> {
@@ -163,26 +191,27 @@ impl<R: Runtime> PermissionWatcher<R> {
                         && name.ends_with(".json")
                         && !name.contains("-response-")
                     {
-                        Self::handle_ask_user_question(&path, app);
+                        Self::handle_ask_user_question(&path, session_id, app);
                     } else if name.starts_with(&format!("plan-approval-{}-", session_id))
                         && name.ends_with(".json")
                         && !name.contains("-response-")
                     {
-                        Self::handle_plan_approval(&path, app);
+                        Self::handle_plan_approval(&path, session_id, app);
                     } else if name.starts_with(&format!("request-{}-", session_id))
                         && name.ends_with(".json")
                     {
-                        Self::handle_tool_permission(&path, app);
+                        Self::handle_tool_permission(&path, session_id, app);
                     }
                 }
             }
         }
     }
 
-    fn handle_ask_user_question(file: &Path, app: &AppHandle<R>) {
+    fn handle_ask_user_question(file: &Path, session_id: &str, app: &AppHandle<R>) {
         match std::fs::read_to_string(file) {
             Ok(content) => match serde_json::from_str::<AskUserQuestionRequest>(&content) {
-                Ok(req) => {
+                Ok(mut req) => {
+                    fill_missing_request_session_id(&mut req.session_id, session_id);
                     eprintln!("[PermissionWatcher] AskUserQuestion: {}", req.request_id);
                     let _ = app.emit("permission://ask-user-question", req);
                     // Delete request file after emitting (daemon won't re-read it).
@@ -194,10 +223,11 @@ impl<R: Runtime> PermissionWatcher<R> {
         }
     }
 
-    fn handle_plan_approval(file: &Path, app: &AppHandle<R>) {
+    fn handle_plan_approval(file: &Path, session_id: &str, app: &AppHandle<R>) {
         match std::fs::read_to_string(file) {
             Ok(content) => match serde_json::from_str::<PlanApprovalRequest>(&content) {
-                Ok(req) => {
+                Ok(mut req) => {
+                    fill_missing_request_session_id(&mut req.session_id, session_id);
                     eprintln!("[PermissionWatcher] PlanApproval: {}", req.request_id);
                     let _ = app.emit("permission://plan-approval", req);
                     let _ = std::fs::remove_file(file);
@@ -208,10 +238,11 @@ impl<R: Runtime> PermissionWatcher<R> {
         }
     }
 
-    fn handle_tool_permission(file: &Path, app: &AppHandle<R>) {
+    fn handle_tool_permission(file: &Path, session_id: &str, app: &AppHandle<R>) {
         match std::fs::read_to_string(file) {
             Ok(content) => match serde_json::from_str::<ToolPermissionRequest>(&content) {
-                Ok(req) => {
+                Ok(mut req) => {
+                    fill_missing_request_session_id(&mut req.session_id, session_id);
                     eprintln!(
                         "[PermissionWatcher] ToolPermission: {} {}",
                         req.tool_name, req.request_id
@@ -320,5 +351,89 @@ mod tests {
             serde_json::from_value(request).expect("missing inputs should default");
 
         assert_eq!(parsed.inputs, empty_tool_inputs());
+    }
+
+    #[test]
+    fn permission_response_session_id_defaults_missing_or_blank() {
+        assert_eq!(
+            permission_response_session_id(None),
+            DEFAULT_PERMISSION_SESSION_ID
+        );
+        assert_eq!(
+            permission_response_session_id(Some(" \n\t ".to_string())),
+            DEFAULT_PERMISSION_SESSION_ID
+        );
+    }
+
+    #[test]
+    fn permission_response_session_id_trims_custom_session() {
+        assert_eq!(
+            permission_response_session_id(Some("  session-custom  ".to_string())),
+            "session-custom"
+        );
+    }
+
+    #[test]
+    fn ask_user_question_request_preserves_session_id() {
+        let request = serde_json::json!({
+            "requestId": "ask-1",
+            "sessionId": "session-custom",
+            "toolName": "AskUserQuestion",
+            "questions": [],
+            "timestamp": "2026-06-18T09:00:00.000Z",
+            "cwd": "C:/guodevelop/ccg-switch"
+        });
+
+        let parsed: AskUserQuestionRequest =
+            serde_json::from_value(request).expect("parse ask request");
+        let value = serde_json::to_value(parsed).expect("serialize ask request");
+
+        assert_eq!(
+            value.get("sessionId").and_then(|v| v.as_str()),
+            Some("session-custom")
+        );
+    }
+
+    #[test]
+    fn plan_approval_request_preserves_session_id() {
+        let request = serde_json::json!({
+            "requestId": "plan-1",
+            "sessionId": "session-custom",
+            "toolName": "ExitPlanMode",
+            "plan": "1. Inspect\n2. Verify",
+            "allowedPrompts": [],
+            "timestamp": "2026-06-18T09:00:00.000Z",
+            "cwd": "C:/guodevelop/ccg-switch"
+        });
+
+        let parsed: PlanApprovalRequest =
+            serde_json::from_value(request).expect("parse plan request");
+        let value = serde_json::to_value(parsed).expect("serialize plan request");
+
+        assert_eq!(
+            value.get("sessionId").and_then(|v| v.as_str()),
+            Some("session-custom")
+        );
+    }
+
+    #[test]
+    fn tool_permission_request_preserves_session_id() {
+        let request = serde_json::json!({
+            "requestId": "perm-3",
+            "sessionId": "session-custom",
+            "toolName": "Bash",
+            "inputs": {"command": "npm test"},
+            "timestamp": "2026-06-18T09:00:00.000Z",
+            "cwd": "C:/guodevelop/ccg-switch"
+        });
+
+        let parsed: ToolPermissionRequest =
+            serde_json::from_value(request).expect("parse tool request");
+        let value = serde_json::to_value(parsed).expect("serialize tool request");
+
+        assert_eq!(
+            value.get("sessionId").and_then(|v| v.as_str()),
+            Some("session-custom")
+        );
     }
 }

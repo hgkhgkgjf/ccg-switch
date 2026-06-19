@@ -5,21 +5,87 @@
 //! Frontend event channels (listen on these):
 //!   "chat://stream"    — { requestId, kind: "line"|"stderr", text }
 //!   "chat://done"      — { requestId, success, error? }
+//!   "chat://message"   — { requestId, json }
 //!   "chat://daemon"    — { event, pid?, message?, provider? }
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::OnceCell;
+use tokio::sync::{mpsc, OnceCell};
 
-use super::daemon_client::DaemonClient;
+use crate::models::chat::ChatMessageEvent;
+
+use super::daemon_client::{DaemonClient, EventSink, SESSION_ID};
 use super::permission_watcher::PermissionWatcher;
+use super::protocol::StreamLine;
 use super::resources;
+
+type ClientFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+type ClientResultFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
+
+trait ManagerDaemonClient: Send + Sync {
+    fn is_running(&self) -> bool;
+    fn set_event_sink(&self, sink: EventSink) -> ClientFuture<'_, ()>;
+    fn start(&self) -> ClientResultFuture<'_, ()>;
+    fn restart(&self) -> ClientResultFuture<'_, ()>;
+    fn heartbeat(&self) -> ClientResultFuture<'_, ()>;
+    fn send_streaming(
+        &self,
+        method: String,
+        params: Value,
+    ) -> ClientResultFuture<'_, (String, mpsc::UnboundedReceiver<StreamLine>)>;
+    fn abort(&self) -> ClientResultFuture<'_, ()>;
+    fn stop(&self) -> ClientFuture<'_, ()>;
+}
+
+impl ManagerDaemonClient for DaemonClient {
+    fn is_running(&self) -> bool {
+        DaemonClient::is_running(self)
+    }
+
+    fn set_event_sink(&self, sink: EventSink) -> ClientFuture<'_, ()> {
+        Box::pin(async move {
+            DaemonClient::set_event_sink(self, sink).await;
+        })
+    }
+
+    fn start(&self) -> ClientResultFuture<'_, ()> {
+        Box::pin(async move { DaemonClient::start(self).await })
+    }
+
+    fn restart(&self) -> ClientResultFuture<'_, ()> {
+        Box::pin(async move { DaemonClient::restart(self).await })
+    }
+
+    fn heartbeat(&self) -> ClientResultFuture<'_, ()> {
+        Box::pin(async move { DaemonClient::heartbeat(self).await })
+    }
+
+    fn send_streaming(
+        &self,
+        method: String,
+        params: Value,
+    ) -> ClientResultFuture<'_, (String, mpsc::UnboundedReceiver<StreamLine>)> {
+        Box::pin(async move { DaemonClient::send_streaming(self, method, params).await })
+    }
+
+    fn abort(&self) -> ClientResultFuture<'_, ()> {
+        Box::pin(async move { DaemonClient::abort(self).await })
+    }
+
+    fn stop(&self) -> ClientFuture<'_, ()> {
+        Box::pin(async move {
+            DaemonClient::stop(self).await;
+        })
+    }
+}
 
 pub struct ChatManager {
     app: AppHandle,
-    client: OnceCell<Arc<DaemonClient>>,
+    client: OnceCell<Arc<dyn ManagerDaemonClient>>,
     permission_watcher: OnceCell<PermissionWatcher<tauri::Wry>>,
 }
 
@@ -38,7 +104,7 @@ impl ChatManager {
     }
 
     /// Get the daemon client, starting the daemon on first use.
-    async fn client(&self) -> Result<Arc<DaemonClient>, String> {
+    async fn client(&self) -> Result<Arc<dyn ManagerDaemonClient>, String> {
         self.client
             .get_or_try_init(|| async {
                 let node = resources::detect_node()?;
@@ -51,7 +117,7 @@ impl ChatManager {
 
                 let client = Arc::new(DaemonClient::new(
                     node, bridge, deps, perm_dir, api_key, base_url,
-                ));
+                )) as Arc<dyn ManagerDaemonClient>;
 
                 // Forward lifecycle events to the frontend.
                 let app = self.app.clone();
@@ -75,19 +141,36 @@ impl ChatManager {
                 // Start permission watcher (only once, on first daemon start).
                 if self.permission_watcher.get().is_none() {
                     let perm_dir = resources::permission_dir(&self.app)?;
-                    let watcher = PermissionWatcher::new(
-                        perm_dir,
-                        "default".to_string(), // TODO: use random session ID
-                        self.app.clone(),
-                    );
+                    let watcher =
+                        PermissionWatcher::new(perm_dir, SESSION_ID.to_string(), self.app.clone());
                     watcher.start();
                     let _ = self.permission_watcher.set(watcher);
                 }
 
-                Ok::<Arc<DaemonClient>, String>(client)
+                Ok::<Arc<dyn ManagerDaemonClient>, String>(client)
             })
             .await
             .map(|c| c.clone())
+    }
+
+    /// Get the daemon client and restart it if the cached process has exited.
+    async fn running_client(&self) -> Result<Arc<dyn ManagerDaemonClient>, String> {
+        let client = self.client().await?;
+        Self::ensure_running_client_with_heartbeat(client, Self::spawn_heartbeat).await
+    }
+
+    async fn ensure_running_client_with_heartbeat<F>(
+        client: Arc<dyn ManagerDaemonClient>,
+        spawn_heartbeat: F,
+    ) -> Result<Arc<dyn ManagerDaemonClient>, String>
+    where
+        F: FnOnce(Arc<dyn ManagerDaemonClient>),
+    {
+        if !client.is_running() {
+            client.restart().await?;
+            spawn_heartbeat(client.clone());
+        }
+        Ok(client)
     }
 
     /// Get active Provider config (API Key and base URL)
@@ -107,7 +190,7 @@ impl ChatManager {
 
     /// Periodic heartbeat so the daemon can detect a dead parent and we can
     /// detect a dead daemon. Mirrors DaemonBridge's 15s interval.
-    fn spawn_heartbeat(client: Arc<DaemonClient>) {
+    fn spawn_heartbeat(client: Arc<dyn ManagerDaemonClient>) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
@@ -128,7 +211,7 @@ impl ChatManager {
     /// ai-bridge command expects. Returns the request id immediately; lines
     /// arrive via the "chat://stream" / "chat://done" events.
     pub async fn send(&self, method: String, params: Value) -> Result<String, String> {
-        let client = self.client().await?;
+        let client = self.running_client().await?;
         let (id, mut rx) = client.send_streaming(method, params).await?;
 
         let app = self.app.clone();
@@ -142,7 +225,13 @@ impl ChatManager {
                         if let Some(json) = text.strip_prefix("[MESSAGE]") {
                             let json_trimmed = json.trim();
                             if !json_trimmed.is_empty() {
-                                let _ = app.emit("chat://message", json!({ "json": json_trimmed }));
+                                let _ = app.emit(
+                                    "chat://message",
+                                    ChatMessageEvent {
+                                        request_id: request_id.clone(),
+                                        json: json_trimmed.to_string(),
+                                    },
+                                );
                             }
                         }
 
@@ -180,7 +269,7 @@ impl ChatManager {
 
     /// Force daemon startup without sending a command (lazy init trigger).
     pub async fn warm_up(&self) -> Result<(), String> {
-        self.client().await.map(|_| ())
+        self.running_client().await.map(|_| ())
     }
 
     /// Whether the daemon is currently running.
@@ -353,5 +442,146 @@ impl ChatManager {
             "prompt-enhancer 未返回结果。stderr: {}",
             stderr.trim()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    struct FakeDaemonClient {
+        running: AtomicBool,
+        restart_calls: AtomicUsize,
+        fail_restart: bool,
+    }
+
+    impl FakeDaemonClient {
+        fn new(running: bool) -> Self {
+            Self {
+                running: AtomicBool::new(running),
+                restart_calls: AtomicUsize::new(0),
+                fail_restart: false,
+            }
+        }
+
+        fn with_restart_failure() -> Self {
+            Self {
+                running: AtomicBool::new(false),
+                restart_calls: AtomicUsize::new(0),
+                fail_restart: true,
+            }
+        }
+    }
+
+    impl ManagerDaemonClient for FakeDaemonClient {
+        fn is_running(&self) -> bool {
+            self.running.load(Ordering::SeqCst)
+        }
+
+        fn set_event_sink(&self, _sink: EventSink) -> ClientFuture<'_, ()> {
+            Box::pin(async {})
+        }
+
+        fn start(&self) -> ClientResultFuture<'_, ()> {
+            Box::pin(async {
+                self.running.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn restart(&self) -> ClientResultFuture<'_, ()> {
+            Box::pin(async {
+                self.restart_calls.fetch_add(1, Ordering::SeqCst);
+                if self.fail_restart {
+                    return Err("restart failed".into());
+                }
+                self.running.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+
+        fn heartbeat(&self) -> ClientResultFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn send_streaming(
+            &self,
+            _method: String,
+            _params: Value,
+        ) -> ClientResultFuture<'_, (String, mpsc::UnboundedReceiver<StreamLine>)> {
+            Box::pin(async {
+                let (_tx, rx) = mpsc::unbounded_channel();
+                Ok(("req-fake".into(), rx))
+            })
+        }
+
+        fn abort(&self) -> ClientResultFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn stop(&self) -> ClientFuture<'_, ()> {
+            Box::pin(async {
+                self.running.store(false, Ordering::SeqCst);
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn running_client_restarts_stopped_cached_client_and_spawns_heartbeat() {
+        let fake = Arc::new(FakeDaemonClient::new(false));
+        let client: Arc<dyn ManagerDaemonClient> = fake.clone();
+        let heartbeat_spawns = Arc::new(AtomicUsize::new(0));
+        let captured_spawns = heartbeat_spawns.clone();
+
+        ChatManager::ensure_running_client_with_heartbeat(client, move |_| {
+            captured_spawns.fetch_add(1, Ordering::SeqCst);
+        })
+        .await
+        .expect("stopped cached client should restart");
+
+        assert!(fake.is_running());
+        assert_eq!(fake.restart_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(heartbeat_spawns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn running_client_keeps_running_cached_client_without_restart() {
+        let fake = Arc::new(FakeDaemonClient::new(true));
+        let client: Arc<dyn ManagerDaemonClient> = fake.clone();
+        let heartbeat_spawns = Arc::new(AtomicUsize::new(0));
+        let captured_spawns = heartbeat_spawns.clone();
+
+        ChatManager::ensure_running_client_with_heartbeat(client, move |_| {
+            captured_spawns.fetch_add(1, Ordering::SeqCst);
+        })
+        .await
+        .expect("running cached client should be reused");
+
+        assert_eq!(fake.restart_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(heartbeat_spawns.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn running_client_does_not_spawn_heartbeat_when_restart_fails() {
+        let fake = Arc::new(FakeDaemonClient::with_restart_failure());
+        let client: Arc<dyn ManagerDaemonClient> = fake.clone();
+        let heartbeat_spawns = Arc::new(AtomicUsize::new(0));
+        let captured_spawns = heartbeat_spawns.clone();
+
+        let result = ChatManager::ensure_running_client_with_heartbeat(client, move |_| {
+            captured_spawns.fetch_add(1, Ordering::SeqCst);
+        })
+        .await;
+        let error = match result {
+            Ok(_) => panic!("restart failure should propagate"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "restart failed");
+        assert!(!fake.is_running());
+        assert_eq!(fake.restart_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(heartbeat_spawns.load(Ordering::SeqCst), 0);
     }
 }

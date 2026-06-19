@@ -621,6 +621,43 @@
   color: #334155;
 }
 
+.status-daemon-reconnect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.status-daemon-reconnect:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+}
+
+.status-daemon-reconnect:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.status-mcp-toggle {
+  appearance: none;
+}
+
+.status-mcp-chevron {
+  transition: transform 120ms ease;
+}
+
+.status-mcp-summary-expanded .status-mcp-chevron {
+  transform: rotate(90deg);
+}
+
 .status-diff-pane-reopen-header {
   border-color: rgba(59, 130, 246, 0.34);
   background: rgba(59, 130, 246, 0.12);
@@ -804,6 +841,18 @@
   border-color: rgba(147, 197, 253, 0.5);
   background: rgba(37, 99, 235, 0.28);
   color: #eff6ff;
+}
+
+[data-theme="dark"] .status-daemon-reconnect {
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+
+[data-theme="dark"] .status-daemon-reconnect:hover:not(:disabled) {
+  border-color: rgba(252, 165, 165, 0.5);
+  background: rgba(153, 27, 27, 0.38);
+  color: #fee2e2;
 }
 
 [data-theme="dark"] .status-edit-tree-folder {
@@ -1328,6 +1377,7 @@
 }
 
 .chat-diff-review-open,
+.chat-diff-review-copy,
 .chat-diff-review-collapse,
 .chat-diff-review-wrap-toggle {
   display: inline-flex;
@@ -1344,6 +1394,8 @@
 
 .chat-diff-review-open:hover:not(:disabled),
 .chat-diff-review-open:focus-visible:not(:disabled),
+.chat-diff-review-copy:hover:not(:disabled),
+.chat-diff-review-copy:focus-visible:not(:disabled),
 .chat-diff-review-collapse:hover,
 .chat-diff-review-collapse:focus-visible,
 .chat-diff-review-wrap-toggle:hover,
@@ -1353,9 +1405,16 @@
   color: oklch(var(--bc) / 0.84);
 }
 
-.chat-diff-review-open:disabled {
+.chat-diff-review-open:disabled,
+.chat-diff-review-copy:disabled {
   cursor: default;
   opacity: 0.42;
+}
+
+.chat-diff-review-copy.copied {
+  border-color: rgba(34, 197, 94, 0.48);
+  background: rgba(34, 197, 94, 0.12);
+  color: rgb(22, 163, 74);
 }
 
 .chat-diff-review-body {
@@ -2400,7 +2459,7 @@
 }
 
 .assistant-message-content > :not(:first-child) {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .assistant-message-flow .task-header {

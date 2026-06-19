@@ -1,5 +1,7 @@
-use super::utils::{home_dir, sanitize_session_text, truncate_text};
-use crate::session_manager::{SessionMeta, UnifiedSessionMessage};
+use super::utils::{home_dir, sanitize_session_markdown_text, sanitize_session_text, truncate_text};
+use crate::session_manager::{
+    MessageWindowBuilder, SessionMeta, UnifiedSessionMessage, UnifiedSessionMessageWindow,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::{json, Value};
@@ -412,151 +414,171 @@ pub fn load_codex_messages(source_path: &str) -> Result<Vec<UnifiedSessionMessag
 
     for line in reader.lines() {
         let line = line.map_err(|e| format!("读取行失败: {}", e))?;
-        let line = line.trim().to_string();
-        if line.is_empty() {
-            continue;
-        }
-
-        let json: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let line_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if line_type != "response_item" {
-            continue;
-        }
-
-        let payload = match json.get("payload") {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let ts = json
-            .get("timestamp")
-            .or_else(|| json.get("ts"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let payload_type = payload.get("type").and_then(|v| v.as_str());
-        match payload_type {
-            Some("message") => {
-                let role = payload
-                    .get("role")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let role = normalize_role(role);
-
-                let blocks = match payload.get("content") {
-                    Some(c) => codex_message_content_blocks(c),
-                    None => Vec::new(),
-                };
-                let content = extract_text_from_blocks(&blocks);
-                if content.is_empty() && blocks.is_empty() {
-                    continue;
-                }
-
-                messages.push(UnifiedSessionMessage {
-                    role: role.to_string(),
-                    content,
-                    ts: ts.clone(),
-                    raw: if blocks.is_empty() {
-                        None
-                    } else {
-                        Some(message_raw(role, blocks, ts))
-                    },
-                });
-            }
-            Some("reasoning") => {
-                let thinking = extract_codex_reasoning(payload);
-                if thinking.is_empty() {
-                    continue;
-                }
-
-                messages.push(UnifiedSessionMessage {
-                    role: "assistant".to_string(),
-                    content: String::new(),
-                    ts: ts.clone(),
-                    raw: Some(message_raw(
-                        "assistant",
-                        vec![json!({
-                            "type": "thinking",
-                            "thinking": thinking,
-                        })],
-                        ts,
-                    )),
-                });
-            }
-            Some("function_call") | Some("custom_tool_call") => {
-                let tool_id = codex_tool_id(payload, &format!("codex-tool-{}", messages.len()));
-                let (name, input) = match extract_codex_patch(payload) {
-                    Some(patch) => ("apply_patch", json!({ "patch": patch })),
-                    None => {
-                        let name = payload
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("function_call");
-                        let input = if payload_type == Some("custom_tool_call") {
-                            parse_codex_custom_tool_input(payload.get("input"))
-                        } else {
-                            parse_codex_arguments(payload.get("arguments"))
-                        };
-                        (name, input)
-                    }
-                };
-
-                messages.push(UnifiedSessionMessage {
-                    role: "assistant".to_string(),
-                    content: String::new(),
-                    ts: ts.clone(),
-                    raw: Some(message_raw(
-                        "assistant",
-                        vec![json!({
-                            "type": "tool_use",
-                            "id": tool_id,
-                            "name": name,
-                            "input": input,
-                        })],
-                        ts,
-                    )),
-                });
-            }
-            Some("function_call_output") | Some("custom_tool_call_output") => {
-                let tool_id =
-                    codex_tool_id(payload, &format!("codex-tool-result-{}", messages.len()));
-                let output = extract_codex_output(payload);
-                let is_error = payload
-                    .get("is_error")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or_else(|| {
-                        payload
-                            .get("status")
-                            .and_then(|v| v.as_str())
-                            .map(|status| status.eq_ignore_ascii_case("failed"))
-                            .unwrap_or(false)
-                    });
-
-                messages.push(UnifiedSessionMessage {
-                    role: "user".to_string(),
-                    content: TOOL_RESULT_CONTENT.to_string(),
-                    ts: ts.clone(),
-                    raw: Some(message_raw(
-                        "user",
-                        vec![json!({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": output,
-                            "is_error": is_error,
-                        })],
-                        ts,
-                    )),
-                });
-            }
-            _ => continue,
+        if let Some(message) = parse_codex_history_line(&line, messages.len()) {
+            messages.push(message);
         }
     }
 
     Ok(messages)
+}
+
+pub fn load_codex_message_window(
+    source_path: &str,
+    tail_limit: usize,
+) -> Result<UnifiedSessionMessageWindow, String> {
+    let file = fs::File::open(source_path).map_err(|e| format!("打开文件失败: {}", e))?;
+    let reader = BufReader::new(file);
+    let mut window = MessageWindowBuilder::new(tail_limit);
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("读取行失败: {}", e))?;
+        if let Some(message) = parse_codex_history_line(&line, window.next_index()) {
+            window.push(message);
+        }
+    }
+
+    Ok(window.finish())
+}
+
+fn parse_codex_history_line(line: &str, message_index: usize) -> Option<UnifiedSessionMessage> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_str(line).ok()?;
+
+    let line_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if line_type != "response_item" {
+        return None;
+    }
+
+    let payload = json.get("payload")?;
+
+    let ts = json
+        .get("timestamp")
+        .or_else(|| json.get("ts"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let payload_type = payload.get("type").and_then(|v| v.as_str());
+    match payload_type {
+        Some("message") => {
+            let role = payload
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let role = normalize_role(role);
+
+            let blocks = match payload.get("content") {
+                Some(c) => codex_message_content_blocks(c),
+                None => Vec::new(),
+            };
+            let content = extract_text_from_blocks(&blocks);
+            if content.is_empty() && blocks.is_empty() {
+                return None;
+            }
+
+            Some(UnifiedSessionMessage {
+                role: role.to_string(),
+                content,
+                ts: ts.clone(),
+                raw: if blocks.is_empty() {
+                    None
+                } else {
+                    Some(message_raw(role, blocks, ts))
+                },
+            })
+        }
+        Some("reasoning") => {
+            let thinking = extract_codex_reasoning(payload);
+            if thinking.is_empty() {
+                return None;
+            }
+
+            Some(UnifiedSessionMessage {
+                role: "assistant".to_string(),
+                content: String::new(),
+                ts: ts.clone(),
+                raw: Some(message_raw(
+                    "assistant",
+                    vec![json!({
+                        "type": "thinking",
+                        "thinking": thinking,
+                    })],
+                    ts,
+                )),
+            })
+        }
+        Some("function_call") | Some("custom_tool_call") => {
+            let tool_id = codex_tool_id(payload, &format!("codex-tool-{}", message_index));
+            let (name, input) = match extract_codex_patch(payload) {
+                Some(patch) => ("apply_patch", json!({ "patch": patch })),
+                None => {
+                    let name = payload
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("function_call");
+                    let input = if payload_type == Some("custom_tool_call") {
+                        parse_codex_custom_tool_input(payload.get("input"))
+                    } else {
+                        parse_codex_arguments(payload.get("arguments"))
+                    };
+                    (name, input)
+                }
+            };
+
+            Some(UnifiedSessionMessage {
+                role: "assistant".to_string(),
+                content: String::new(),
+                ts: ts.clone(),
+                raw: Some(message_raw(
+                    "assistant",
+                    vec![json!({
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": name,
+                        "input": input,
+                    })],
+                    ts,
+                )),
+            })
+        }
+        Some("function_call_output") | Some("custom_tool_call_output") => {
+            let tool_id = codex_tool_id(
+                payload,
+                &format!("codex-tool-result-{}", message_index),
+            );
+            let output = extract_codex_output(payload);
+            let is_error = payload
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| {
+                    payload
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .map(|status| status.eq_ignore_ascii_case("failed"))
+                        .unwrap_or(false)
+                });
+
+            Some(UnifiedSessionMessage {
+                role: "user".to_string(),
+                content: TOOL_RESULT_CONTENT.to_string(),
+                ts: ts.clone(),
+                raw: Some(message_raw(
+                    "user",
+                    vec![json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": output,
+                        "is_error": is_error,
+                    })],
+                    ts,
+                )),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// 从 Codex content 字段提取文本（支持 string 和 array 格式）
@@ -596,7 +618,7 @@ fn text_from_value(value: &Value) -> Option<String> {
 
 fn codex_message_content_blocks(content: &Value) -> Vec<Value> {
     if let Some(text) = content.as_str() {
-        let clean = sanitize_session_text(text);
+        let clean = sanitize_session_markdown_text(text);
         if clean.is_empty() {
             return Vec::new();
         }
@@ -621,7 +643,7 @@ fn codex_message_content_blocks(content: &Value) -> Vec<Value> {
 
             if matches!(item_type, "text" | "input_text" | "output_text") {
                 let text = text_from_value(item)?;
-                let clean = sanitize_session_text(&text);
+                let clean = sanitize_session_markdown_text(&text);
                 if clean.is_empty() {
                     return None;
                 }
@@ -681,7 +703,7 @@ fn extract_text_from_blocks(blocks: &[Value]) -> String {
 
 fn extract_codex_reasoning(payload: &Value) -> String {
     if let Some(text) = payload.get("content").and_then(text_from_value) {
-        return sanitize_session_text(&text);
+        return sanitize_session_markdown_text(&text);
     }
 
     payload
@@ -691,7 +713,7 @@ fn extract_codex_reasoning(payload: &Value) -> String {
             items
                 .iter()
                 .filter_map(text_from_value)
-                .map(|text| sanitize_session_text(&text))
+                .map(|text| sanitize_session_markdown_text(&text))
                 .filter(|text| !text.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -1152,6 +1174,53 @@ mod tests {
         assert_eq!(
             messages[2].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"],
             "call-1"
+        );
+    }
+
+    #[test]
+    fn load_codex_messages_preserves_markdown_line_breaks() {
+        let path = write_temp_session(
+            r#"{"type":"response_item","timestamp":"2026-06-17T08:00:00.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"**上轮进展与阻塞**\n记录里声称完成。\n\n- **本轮规划**：先定位根因。\n- **验证结果**：保留列表。"}]}}"#,
+        );
+
+        let messages = load_codex_messages(&path.to_string_lossy()).expect("load messages");
+        fs::remove_file(path).ok();
+
+        let expected = "**上轮进展与阻塞**\n记录里声称完成。\n\n- **本轮规划**：先定位根因。\n- **验证结果**：保留列表。";
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, expected);
+        assert_eq!(
+            messages[0].raw.as_ref().unwrap()["message"]["content"][0]["text"],
+            expected
+        );
+    }
+
+    #[test]
+    fn load_codex_message_window_keeps_tail_and_stable_fallback_tool_ids() {
+        let path = write_temp_session(
+            r#"{"type":"response_item","timestamp":"2026-06-17T08:00:00.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#
+                .to_owned()
+                + "\n"
+                + r#"{"type":"response_item","timestamp":"2026-06-17T08:00:01.000Z","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"npm test\"}"}}"#
+                + "\n"
+                + r#"{"type":"response_item","timestamp":"2026-06-17T08:00:02.000Z","payload":{"type":"function_call_output","output":"ok"}}"#,
+        );
+
+        let full = load_codex_messages(&path.to_string_lossy()).expect("load full");
+        let window = load_codex_message_window(&path.to_string_lossy(), 2).expect("load window");
+        fs::remove_file(path).ok();
+
+        assert_eq!(window.total_count, 3);
+        assert_eq!(window.start_index, 1);
+        assert!(!window.complete);
+        assert_eq!(window.messages.len(), 2);
+        assert_eq!(
+            window.messages[0].raw.as_ref().unwrap()["message"]["content"][0]["id"],
+            full[1].raw.as_ref().unwrap()["message"]["content"][0]["id"]
+        );
+        assert_eq!(
+            window.messages[1].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"],
+            full[2].raw.as_ref().unwrap()["message"]["content"][0]["tool_use_id"]
         );
     }
 

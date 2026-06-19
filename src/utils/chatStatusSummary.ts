@@ -46,6 +46,8 @@ export interface ChatStatusEditSummary {
 
 export interface ChatStatusSummary {
     activeTool?: ChatStatusToolSummary;
+    toolTimeline?: ChatStatusToolSummary[];
+    agentTools?: ChatStatusToolSummary[];
     recentEdits: ChatStatusEditSummary[];
     allEdits: ChatStatusEditSummary[];
     touchedFileCount: number;
@@ -58,6 +60,49 @@ export interface ChatStatusSummary {
 
 export function getChatStatusEditKey(edit: ChatStatusEditSummary): string {
     return `${edit.openPath || edit.displayPath}:${edit.toolId}`;
+}
+
+function hasCompleteInputStatusSignal(summary: ChatStatusSummary): boolean {
+    return Boolean(
+        (summary.toolTimeline?.length ?? 0) > 0
+        || (summary.agentTools?.length ?? 0) > 0
+        || summary.allEdits.length > 0,
+    );
+}
+
+export function mergeChatInputStatusSummary(
+    visibleSummary: ChatStatusSummary,
+    completeSummary?: ChatStatusSummary | null,
+): ChatStatusSummary {
+    if (!completeSummary || !hasCompleteInputStatusSignal(completeSummary)) {
+        return visibleSummary;
+    }
+
+    return {
+        activeTool: visibleSummary.activeTool?.status === 'pending'
+            ? visibleSummary.activeTool
+            : completeSummary.activeTool ?? visibleSummary.activeTool,
+        toolTimeline: completeSummary.toolTimeline ?? visibleSummary.toolTimeline,
+        agentTools: completeSummary.agentTools ?? visibleSummary.agentTools,
+        recentEdits: completeSummary.allEdits.length > 0
+            ? completeSummary.recentEdits
+            : visibleSummary.recentEdits,
+        allEdits: completeSummary.allEdits.length > 0
+            ? completeSummary.allEdits
+            : visibleSummary.allEdits,
+        touchedFileCount: completeSummary.allEdits.length > 0
+            ? completeSummary.touchedFileCount
+            : visibleSummary.touchedFileCount,
+        totalAdditions: completeSummary.allEdits.length > 0
+            ? completeSummary.totalAdditions
+            : visibleSummary.totalAdditions,
+        totalDeletions: completeSummary.allEdits.length > 0
+            ? completeSummary.totalDeletions
+            : visibleSummary.totalDeletions,
+        pendingToolCount: completeSummary.pendingToolCount,
+        completedToolCount: completeSummary.completedToolCount,
+        errorToolCount: completeSummary.errorToolCount,
+    };
 }
 
 interface ToolTimelineEntry {
@@ -170,21 +215,28 @@ function summarizeToolEntry(entry: ToolTimelineEntry): ChatStatusToolSummary {
     }
 
     if (toolType === 'agent') {
+        const meta = extractAgentToolMeta(entry.block.input, entry.result);
+        const toolKind = entry.block.name.toLowerCase().includes('task') || entry.block.name.toLowerCase().includes('spawn')
+            ? 'task'
+            : 'agent';
         const summary = summarizeAgentToolHeader(
-            extractAgentToolMeta(entry.block.input, entry.result),
+            meta,
             entry.result,
-            entry.block.name.toLowerCase().includes('task') || entry.block.name.toLowerCase().includes('spawn')
-                ? 'task'
-                : 'agent',
+            toolKind,
         );
+        const visibleIdentity = [meta.subagentType, meta.nickname].filter(Boolean).join(' · ');
+        const visibleDetail = [
+            visibleIdentity || summary.secondarySummary,
+            summary.runtimeSummary,
+        ].filter(Boolean).join(' · ');
 
         return {
             toolId: entry.block.id,
             type: 'agent',
-            label: 'Agent',
+            label: toolKind === 'task' ? 'Task' : 'Agent',
             accentClass: 'tool-command-plan',
             summary: summary.primarySummary || entry.block.name,
-            detail: summary.secondarySummary || summary.runtimeSummary,
+            detail: visibleDetail,
             status: entry.status,
         };
     }
@@ -225,6 +277,7 @@ function collectEditSummaries(entries: ToolTimelineEntry[]): ChatStatusEditSumma
 
 export function buildChatStatusSummary(messages: ChatMessage[]): ChatStatusSummary {
     const timeline = collectToolTimeline(messages);
+    const toolTimeline = timeline.map(summarizeToolEntry);
     const editSummaries = collectEditSummaries(timeline);
     const recentEdits = editSummaries.slice(0, RECENT_EDIT_LIMIT);
     const pendingTool = [...timeline].reverse().find((entry) => entry.status === 'pending');
@@ -233,6 +286,8 @@ export function buildChatStatusSummary(messages: ChatMessage[]): ChatStatusSumma
 
     return {
         activeTool: activeEntry ? summarizeToolEntry(activeEntry) : undefined,
+        toolTimeline,
+        agentTools: toolTimeline.filter((tool) => tool.type === 'agent'),
         recentEdits,
         allEdits: editSummaries,
         touchedFileCount: editSummaries.length,

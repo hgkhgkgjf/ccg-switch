@@ -1,9 +1,9 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {AlertTriangle, Check, Copy, User} from 'lucide-react';
-import type {ChatMessage, ContentBlock, TextBlock, ThinkingBlock} from '../../types/chat';
+import type {ChatMessage, ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock} from '../../types/chat';
 import {cn} from '../../utils/cn';
-import {findToolResult, getRenderableContentBlocks, shouldRenderChatMessage,} from '../../utils/chatMessageFlow';
+import {getRenderableContentBlocks, shouldRenderChatMessage,} from '../../utils/chatMessageFlow';
 import ContentBlockRenderer from './ContentBlockRenderer';
 import MarkdownBlock from './MarkdownBlock';
 import MessageMeta from './MessageMeta';
@@ -11,12 +11,11 @@ import StreamingPlaceholder from './StreamingPlaceholder';
 
 interface MessageItemProps {
     message: ChatMessage;
-    messages: ChatMessage[];
-    messageIndex: number;
     isLast: boolean;
     isSearchMatch?: boolean;
     anchorId?: string;
     onAnchorRef?: (messageId: string, node: HTMLElement | null) => void;
+    findToolResult: (toolId: string | undefined) => ToolResultBlock | null;
 }
 
 function isTextBlock(block: ContentBlock): block is TextBlock {
@@ -53,12 +52,11 @@ function getLastThinkingBlockIndex(blocks: ContentBlock[]): number | undefined {
 
 export default function MessageItem({
     message,
-    messages,
-    messageIndex,
     isLast,
     isSearchMatch = false,
     anchorId,
     onAnchorRef,
+    findToolResult,
 }: MessageItemProps) {
     const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
@@ -145,14 +143,14 @@ export default function MessageItem({
         <div
             className={cn(
                 'min-w-0 text-sm font-normal leading-relaxed text-base-content',
-                isAssistant ? 'assistant-message-content space-y-1.5 pr-9' : 'space-y-2',
+                isAssistant ? 'assistant-message-content pr-9' : 'space-y-2',
                 isUser && 'user-message-content',
             )}
         >
             {hasBlocks ? (
                 <ContentBlockRenderer
                     blocks={blocks}
-                    findToolResult={(toolId) => findToolResult(messages, toolId, messageIndex)}
+                    findToolResult={findToolResult}
                     expandThinkingBlockIndex={expandedThinkingBlockIndex}
                     compact={isAssistant}
                     imageDisplay={isUser ? 'user-thumbnail' : undefined}
@@ -218,7 +216,7 @@ export default function MessageItem({
         return (
             <article
                 className={cn(
-                    'chat-message-row assistant-message-flow group relative mx-auto w-full max-w-4xl px-4 py-2.5 transition-colors',
+                    'chat-message-row assistant-message-flow group relative mx-auto w-full max-w-4xl px-4 py-3 transition-colors',
                     isSearchMatch && 'rounded-lg bg-primary/5 ring-1 ring-primary/15',
                     message.error && 'rounded-lg bg-error/5 ring-1 ring-error/20',
                 )}

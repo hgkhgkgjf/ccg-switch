@@ -10,6 +10,7 @@ import {
     rememberProjectSessions,
     sessionTitle,
     shortSessionId,
+    shouldAcceptSessionListResponse,
     shouldIgnoreSessionClick,
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
@@ -199,6 +200,29 @@ describe('chatSessionSidebarUtils', () => {
             'C:/workspace/current',
             'C:/workspace/current/',
         ).map((session) => session.sessionId)).toEqual(['current-project']);
+    });
+
+    it('accepts session list responses only for the latest selected project request', () => {
+        expect(shouldAcceptSessionListResponse({
+            requestSeq: 2,
+            latestRequestSeq: 2,
+            requestProjectPath: 'C:/workspace/current',
+            selectedProjectPath: 'C:\\workspace\\current\\',
+        })).toBe(true);
+
+        expect(shouldAcceptSessionListResponse({
+            requestSeq: 1,
+            latestRequestSeq: 2,
+            requestProjectPath: 'C:/workspace/current',
+            selectedProjectPath: 'C:/workspace/current',
+        })).toBe(false);
+
+        expect(shouldAcceptSessionListResponse({
+            requestSeq: 2,
+            latestRequestSeq: 2,
+            requestProjectPath: 'C:/workspace/previous',
+            selectedProjectPath: 'C:/workspace/current',
+        })).toBe(false);
     });
 
     it('normalizes project paths for stable sidebar cache keys', () => {

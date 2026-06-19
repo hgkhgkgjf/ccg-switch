@@ -25,7 +25,8 @@ mod slash_commands;
 
 pub use manager::ChatManager;
 pub use permission_watcher::{
-    write_ask_user_question_response, write_plan_approval_response, write_tool_permission_response,
+    permission_response_session_id, write_ask_user_question_response, write_plan_approval_response,
+    write_tool_permission_response,
 };
 pub use resources::permission_dir;
 pub use sdk_installer::SdkStatus;

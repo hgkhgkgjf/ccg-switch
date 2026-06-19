@@ -4,6 +4,7 @@ import {X} from 'lucide-react';
 import {useTranslation} from 'react-i18next';
 import {convertFileSrc} from '@tauri-apps/api/core';
 import type {ContentBlock, ImageBlock, ToolResultBlock, ToolUseBlock} from '../../types/chat';
+import {mergeAdjacentTextContentBlocks} from '../../utils/chatMessageFlow';
 import {groupToolBlocks} from '../../utils/toolGrouping';
 import {getToolType} from '../../types/tools';
 import {
@@ -36,10 +37,37 @@ interface ContentBlockRendererProps {
     imageDisplay?: 'default' | 'compact' | 'user-thumbnail';
 }
 
-interface ImageRenderData {
+export interface ImageRenderData {
     label: string;
     mediaType: string;
     src: string | null;
+}
+
+interface ImageLightboxProps {
+    image: ImageRenderData;
+    closeLabel: string;
+    onClose: () => void;
+}
+
+function getToolAnchorProps(toolIds: string[]) {
+    const safeToolIds = toolIds.filter(Boolean);
+    const anchorProps: {
+        className: string;
+        tabIndex: number;
+        'data-chat-tool-id'?: string;
+        'data-chat-tool-ids'?: string;
+    } = {
+        className: 'chat-tool-anchor scroll-mt-6 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/35',
+        tabIndex: -1,
+    };
+
+    if (safeToolIds.length === 1) {
+        anchorProps['data-chat-tool-id'] = safeToolIds[0];
+    } else if (safeToolIds.length > 1) {
+        anchorProps['data-chat-tool-ids'] = safeToolIds.join(' ');
+    }
+
+    return anchorProps;
 }
 
 function normalizeLocalImagePath(url: string): string {
@@ -131,6 +159,46 @@ function ImageBlockRenderer({
     );
 }
 
+export function ImageLightbox({image, closeLabel, onClose}: ImageLightboxProps) {
+    return (
+        <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label={image.label}
+            onClick={onClose}
+        >
+            <button
+                type="button"
+                className="btn btn-ghost btn-sm btn-square absolute right-4 top-4 text-white hover:bg-white/10"
+                title={closeLabel}
+                aria-label={closeLabel}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onClose();
+                }}
+            >
+                <X size={18} />
+            </button>
+            <div className="flex max-h-[92vh] max-w-[94vw] flex-col items-center gap-3">
+                <img
+                    src={image.src ?? undefined}
+                    alt={image.label}
+                    className="max-h-[86vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
+                />
+                <div
+                    className="chat-image-lightbox-caption max-w-[92vw] truncate rounded-md bg-black/55 px-3 py-1 text-xs text-white/85"
+                    title={image.label}
+                    onClick={(event) => event.stopPropagation()}
+                >
+                    {image.label}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 /**
  * 内容块渲染器 - 根据块类型路由到对应组件
  * 支持 text、image、tool_use、tool_result、thinking 内容块
@@ -160,8 +228,10 @@ export default function ContentBlockRenderer({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [lightboxImage]);
 
+    const renderableBlocks = useMemo(() => mergeAdjacentTextContentBlocks(blocks), [blocks]);
+
     // 应用分组算法
-    const groupedBlocks = useMemo(() => groupToolBlocks(blocks), [blocks]);
+    const groupedBlocks = useMemo(() => groupToolBlocks(renderableBlocks), [renderableBlocks]);
 
     // 渲染单个工具块
     const renderToolBlock = (block: ToolUseBlock, result: ToolResultBlock | null | undefined) => {
@@ -249,7 +319,7 @@ export default function ContentBlockRenderer({
     };
 
     return (
-        <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+        <div className={compact ? 'chat-content-blocks chat-content-blocks-compact' : 'chat-content-blocks chat-content-blocks-default'}>
             {groupedBlocks.map((grouped, index) => {
                 if (grouped.type === 'single') {
                     const block = grouped.block;
@@ -288,7 +358,7 @@ export default function ContentBlockRenderer({
                         case 'tool_use':
                             const result = findToolResult(block.id);
                             return (
-                                <div key={block.id}>
+                                <div key={block.id} {...getToolAnchorProps([block.id])}>
                                     {renderToolBlock(block, result)}
                                 </div>
                             );
@@ -312,42 +382,46 @@ export default function ContentBlockRenderer({
                     switch (toolType) {
                         case 'bash':
                             return (
-                                <BashToolGroupBlock
-                                    key={`group-${index}`}
-                                    blocks={groupBlocks}
-                                    findToolResult={findToolResult}
-                                    compact={compact}
-                                />
+                                <div key={`group-${index}`} {...getToolAnchorProps(groupBlocks.map((block) => block.id))}>
+                                    <BashToolGroupBlock
+                                        blocks={groupBlocks}
+                                        findToolResult={findToolResult}
+                                        compact={compact}
+                                    />
+                                </div>
                             );
 
                         case 'read':
                             return (
-                                <ReadToolGroupBlock
-                                    key={`group-${index}`}
-                                    blocks={groupBlocks}
-                                    findToolResult={findToolResult}
-                                    compact={compact}
-                                />
+                                <div key={`group-${index}`} {...getToolAnchorProps(groupBlocks.map((block) => block.id))}>
+                                    <ReadToolGroupBlock
+                                        blocks={groupBlocks}
+                                        findToolResult={findToolResult}
+                                        compact={compact}
+                                    />
+                                </div>
                             );
 
                         case 'edit':
                             return (
-                                <EditToolGroupBlock
-                                    key={`group-${index}`}
-                                    blocks={groupBlocks}
-                                    findToolResult={findToolResult}
-                                    compact={compact}
-                                />
+                                <div key={`group-${index}`} {...getToolAnchorProps(groupBlocks.map((block) => block.id))}>
+                                    <EditToolGroupBlock
+                                        blocks={groupBlocks}
+                                        findToolResult={findToolResult}
+                                        compact={compact}
+                                    />
+                                </div>
                             );
 
                         case 'search':
                             return (
-                                <SearchToolGroupBlock
-                                    key={`group-${index}`}
-                                    blocks={groupBlocks}
-                                    findToolResult={findToolResult}
-                                    compact={compact}
-                                />
+                                <div key={`group-${index}`} {...getToolAnchorProps(groupBlocks.map((block) => block.id))}>
+                                    <SearchToolGroupBlock
+                                        blocks={groupBlocks}
+                                        findToolResult={findToolResult}
+                                        compact={compact}
+                                    />
+                                </div>
                             );
 
                         default:
@@ -357,7 +431,7 @@ export default function ContentBlockRenderer({
                                     {groupBlocks.map(block => {
                                         const result = findToolResult(block.id);
                                         return (
-                                            <div key={block.id}>
+                                            <div key={block.id} {...getToolAnchorProps([block.id])}>
                                                 {renderToolBlock(block, result)}
                                             </div>
                                         );
@@ -368,29 +442,11 @@ export default function ContentBlockRenderer({
                 }
             })}
             {lightboxImage?.src && typeof document !== 'undefined' && createPortal(
-                <div
-                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={lightboxImage.label}
-                    onClick={() => setLightboxImage(null)}
-                >
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-sm btn-square absolute right-4 top-4 text-white hover:bg-white/10"
-                        title={t('common.close')}
-                        aria-label={t('common.close')}
-                        onClick={() => setLightboxImage(null)}
-                    >
-                        <X size={18} />
-                    </button>
-                    <img
-                        src={lightboxImage.src}
-                        alt={lightboxImage.label}
-                        className="max-h-[90vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
-                        onClick={(event) => event.stopPropagation()}
-                    />
-                </div>,
+                <ImageLightbox
+                    image={lightboxImage}
+                    closeLabel={t('common.close')}
+                    onClose={() => setLightboxImage(null)}
+                />,
                 document.body,
             )}
         </div>
