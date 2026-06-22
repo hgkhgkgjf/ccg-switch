@@ -1,6 +1,7 @@
 import {Search, X} from 'lucide-react';
 import {forwardRef, type KeyboardEvent} from 'react';
 import {useTranslation} from 'react-i18next';
+import {getChatNavigationControlLabel} from '../../utils/chatUiBehavior';
 
 interface ConversationSearchProps {
     value: string;
@@ -12,6 +13,14 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
     ref,
 ) {
     const { t } = useTranslation();
+    const searchPlaceholderLabel = getChatNavigationControlLabel({
+        control: 'search-placeholder',
+        translate: (key, options) => t(key, options),
+    });
+    const clearSearchLabel = getChatNavigationControlLabel({
+        control: 'clear-search',
+        translate: (key, options) => t(key, options),
+    });
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Escape' && value) {
@@ -29,8 +38,8 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
                     type="search"
                     className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-base-content/40"
                     value={value}
-                    placeholder={t('chat.layout.searchPlaceholder')}
-                    aria-label={t('chat.layout.searchPlaceholder')}
+                    placeholder={searchPlaceholderLabel}
+                    aria-label={searchPlaceholderLabel}
                     onChange={(event) => onChange(event.target.value)}
                     onKeyDown={handleKeyDown}
                 />
@@ -38,8 +47,8 @@ const ConversationSearch = forwardRef<HTMLInputElement, ConversationSearchProps>
                     <button
                         type="button"
                         className="btn btn-ghost btn-xs h-6 min-h-0 w-6 rounded-full p-0 text-base-content/45 hover:text-base-content"
-                        title={t('chat.layout.clearSearch')}
-                        aria-label={t('chat.layout.clearSearch')}
+                        title={clearSearchLabel}
+                        aria-label={clearSearchLabel}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => onChange('')}
                     >

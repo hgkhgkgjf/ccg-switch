@@ -244,8 +244,9 @@ describe('tool presentation', () => {
             fileCount: 2,
         });
         expect(summary.files).toEqual([
-            {path: 'src/pages/ChatPage.tsx', lineStart: 122},
-            {path: 'src/utils/bridge.ts', lineStart: 18},
+            {path: 'src/pages/ChatPage.tsx', lineStart: 122, snippet: 'openFile(target.openPath)'},
+            {path: 'src/utils/bridge.ts', lineStart: 18, snippet: 'await invoke("open_file_in_editor")'},
+            {path: 'src/pages/ChatPage.tsx', lineStart: 124, snippet: 'another match'},
         ]);
     });
 
@@ -255,7 +256,7 @@ describe('tool presentation', () => {
         );
 
         expect(summary.files).toEqual([
-            {path: 'C:\\guodevelop\\ccg-switch\\src\\utils\\bridge.ts', lineStart: 18},
+            {path: 'C:\\guodevelop\\ccg-switch\\src\\utils\\bridge.ts', lineStart: 18, snippet: 'await invoke'},
         ]);
     });
 
@@ -534,6 +535,45 @@ describe('tool presentation', () => {
             secondarySummary: '15 matches · 3 files',
             firstFileSummary: 'src/App.tsx',
         });
+    });
+
+    it('keeps multiple visible search result rows from the same file while counting unique files', () => {
+        expect(summarizeSearchResultText([
+            'src/App.tsx:12:const [value, setValue] = useState(false);',
+            'src/App.tsx:48:const [count, setCount] = useState(0);',
+        ].join('\n'))).toEqual({
+            matchCount: 2,
+            fileCount: 1,
+            files: [
+                {
+                    path: 'src/App.tsx',
+                    lineStart: 12,
+                    snippet: 'const [value, setValue] = useState(false);',
+                },
+                {
+                    path: 'src/App.tsx',
+                    lineStart: 48,
+                    snippet: 'const [count, setCount] = useState(0);',
+                },
+            ],
+        });
+    });
+
+    it('reports omitted search result rows when the visible quick list is capped', () => {
+        const summary = summarizeSearchResultText(Array.from(
+            {length: 10},
+            (_, index) => `src/App.tsx:${index + 1}:match ${index + 1}`,
+        ).join('\n'));
+
+        expect(summary.matchCount).toBe(10);
+        expect(summary.fileCount).toBe(1);
+        expect(summary.files).toHaveLength(8);
+        expect(summary.files[summary.files.length - 1]).toMatchObject({
+            path: 'src/App.tsx',
+            lineStart: 8,
+            snippet: 'match 8',
+        });
+        expect(summary.omittedResultCount).toBe(2);
     });
 
     it('falls back to tool result summaries when agent inputs do not carry descriptions', () => {

@@ -7,14 +7,24 @@ import {
     CONVERSATION_PANE_MAX_WIDTH,
     CONVERSATION_PANE_MIN_WIDTH,
     getActivePermissionDialog,
+    getChatComposerInputLabel,
+    getChatComposerModeText,
+    getChatComposerReasoningText,
+    getChatComposerToolbarLabel,
+    getChatNavigationControlLabel,
+    getChatTopChromeActionLabel,
     getClampedRevealState,
     getCollapsedMessageWindow,
     getComposerHeightFromDrag,
+    getDiffPaneReopenLabel,
     getEffectiveRevealedCount,
     getNextRevealState,
+    getPaneResizeHandleLabel,
     getPaneWidthsAfterResize,
     getScrollTopAfterPrepend,
+    getSdkMissingBannerText,
     highlightTranscriptToolAnchor,
+    queueDiffPaneFocusAfterOpen,
     shouldAutoRevealEarlierMessages,
     shouldBuildCompleteChatStatusSummary,
     shouldIgnoreChatSessionSelection,
@@ -302,6 +312,338 @@ describe('chat UI behavior', () => {
             diffPaneCollapsed: true,
             hasSelectedEdit: false,
         })).toBe(false);
+    });
+
+    it('keeps the global diff reopen label readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getDiffPaneReopenLabel({
+            displayPath: 'src/components/chat/ChatDiffReviewPane.tsx',
+            translate: keyOnlyTranslate,
+        })).toBe('Open file diff: src/components/chat/ChatDiffReviewPane.tsx');
+
+        expect(getDiffPaneReopenLabel({
+            displayPath: null,
+            translate: keyOnlyTranslate,
+        })).toBe('Open file diff panel');
+    });
+
+    it('keeps pane resize handle labels readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getPaneResizeHandleLabel({
+            edge: 'conversation-diff',
+            translate: keyOnlyTranslate,
+        })).toBe('Resize conversation and diff panes');
+
+        expect(getPaneResizeHandleLabel({
+            edge: 'diff-status',
+            translate: keyOnlyTranslate,
+        })).toBe('Resize diff and right panes');
+
+        expect(getPaneResizeHandleLabel({
+            edge: 'conversation-status',
+            translate: keyOnlyTranslate,
+        })).toBe('Resize conversation and right panes');
+    });
+
+    it('keeps chat top chrome action labels readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getChatTopChromeActionLabel({
+            action: 'sdk-manage',
+            translate: keyOnlyTranslate,
+        })).toBe('Manage SDKs');
+
+        expect(getChatTopChromeActionLabel({
+            action: 'clear-chat',
+            translate: keyOnlyTranslate,
+        })).toBe('Clear chat');
+
+        expect(getChatTopChromeActionLabel({
+            action: 'sdk-install',
+            translate: keyOnlyTranslate,
+        })).toBe('Install SDK');
+
+        expect(getSdkMissingBannerText({
+            sdkName: 'Claude SDK',
+            translate: (key) => key,
+        })).toBe('Claude SDK is not installed yet. Install it to start chatting.');
+    });
+
+    it('keeps chat navigation control labels readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getChatNavigationControlLabel({
+            control: 'search-placeholder',
+            translate: keyOnlyTranslate,
+        })).toBe('Search this conversation');
+
+        expect(getChatNavigationControlLabel({
+            control: 'clear-search',
+            translate: keyOnlyTranslate,
+        })).toBe('Clear search');
+
+        expect(getChatNavigationControlLabel({
+            control: 'anchor-rail',
+            translate: keyOnlyTranslate,
+        })).toBe('Message timeline');
+
+        expect(getChatNavigationControlLabel({
+            control: 'current-anchor',
+            translate: keyOnlyTranslate,
+        })).toBe('Current message');
+
+        expect(getChatNavigationControlLabel({
+            control: 'scroll-to-top',
+            translate: keyOnlyTranslate,
+        })).toBe('Scroll to top');
+
+        expect(getChatNavigationControlLabel({
+            control: 'scroll-to-bottom',
+            translate: keyOnlyTranslate,
+        })).toBe('Scroll to bottom');
+
+        expect(getChatNavigationControlLabel({
+            control: 'jump-to-message',
+            index: 3,
+            translate: (_key, options) => String(options?.index),
+        })).toBe('3');
+
+        expect(getChatNavigationControlLabel({
+            control: 'jump-to-message',
+            index: 3,
+            translate: (key) => key,
+        })).toBe('Jump to message 3');
+    });
+
+    it('keeps chat composer toolbar labels readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getChatComposerToolbarLabel({
+            control: 'provider',
+            translate: keyOnlyTranslate,
+        })).toBe('AI provider');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'mode',
+            translate: keyOnlyTranslate,
+        })).toBe('Permission mode');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'model',
+            translate: keyOnlyTranslate,
+        })).toBe('Model');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'reasoning',
+            translate: keyOnlyTranslate,
+        })).toBe('Reasoning effort');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'models-refresh',
+            translate: keyOnlyTranslate,
+        })).toBe('Refresh models');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'models-refreshing',
+            translate: keyOnlyTranslate,
+        })).toBe('Refreshing models...');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'models-loading',
+            translate: keyOnlyTranslate,
+        })).toBe('Loading models...');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'enhance',
+            translate: keyOnlyTranslate,
+        })).toBe('Enhance prompt');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'send',
+            translate: keyOnlyTranslate,
+        })).toBe('Send');
+
+        expect(getChatComposerToolbarLabel({
+            control: 'stop',
+            translate: keyOnlyTranslate,
+        })).toBe('Stop');
+    });
+
+    it('keeps chat composer mode and reasoning option text readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getChatComposerModeText({
+            mode: 'default',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('Default Mode');
+
+        expect(getChatComposerModeText({
+            mode: 'default',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Requires manual confirmation for each operation');
+
+        expect(getChatComposerModeText({
+            mode: 'acceptEdits',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('Agent Mode');
+
+        expect(getChatComposerModeText({
+            mode: 'acceptEdits',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Auto-accept file creation/editing, fewer confirmations');
+
+        expect(getChatComposerModeText({
+            mode: 'plan',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('Plan Mode');
+
+        expect(getChatComposerModeText({
+            mode: 'plan',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Read-only tools only, generates plan for user approval');
+
+        expect(getChatComposerModeText({
+            mode: 'bypassPermissions',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('Auto Mode');
+
+        expect(getChatComposerModeText({
+            mode: 'bypassPermissions',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Fully automated, bypasses all permission checks');
+
+        expect(getChatComposerReasoningText({
+            effort: 'high',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('High');
+
+        expect(getChatComposerReasoningText({
+            effort: 'high',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Deep reasoning for complex tasks');
+
+        expect(getChatComposerReasoningText({
+            effort: 'xhigh',
+            field: 'label',
+            translate: keyOnlyTranslate,
+        })).toBe('XHigh');
+
+        expect(getChatComposerReasoningText({
+            effort: 'max',
+            field: 'description',
+            translate: keyOnlyTranslate,
+        })).toBe('Maximum reasoning depth');
+    });
+
+    it('keeps chat composer input surface labels readable when translations return keys', () => {
+        const keyOnlyTranslate = (key: string) => key;
+
+        expect(getChatComposerInputLabel({
+            control: 'attach',
+            translate: keyOnlyTranslate,
+        })).toBe('Add attachment');
+
+        expect(getChatComposerInputLabel({
+            control: 'remove-attachment',
+            translate: keyOnlyTranslate,
+        })).toBe('Remove attachment');
+
+        expect(getChatComposerInputLabel({
+            control: 'collapse-panel',
+            translate: keyOnlyTranslate,
+        })).toBe('Collapse status panel');
+
+        expect(getChatComposerInputLabel({
+            control: 'expand-panel',
+            translate: keyOnlyTranslate,
+        })).toBe('Expand status panel');
+
+        expect(getChatComposerInputLabel({
+            control: 'resize-composer',
+            translate: keyOnlyTranslate,
+        })).toBe('Drag to resize the input');
+
+        expect(getChatComposerInputLabel({
+            control: 'placeholder',
+            translate: keyOnlyTranslate,
+        })).toBe('Type a message... @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline');
+
+        expect(getChatComposerInputLabel({
+            control: 'completion-empty',
+            translate: keyOnlyTranslate,
+        })).toBe('No matches');
+
+        expect(getChatComposerInputLabel({
+            control: 'completion-menu',
+            translate: keyOnlyTranslate,
+        })).toBe('Completion suggestions');
+
+        expect(getChatComposerInputLabel({
+            control: 'completion-loading',
+            translate: keyOnlyTranslate,
+        })).toBe('Loading suggestions...');
+
+        expect(getChatComposerInputLabel({
+            control: 'drop-file',
+            translate: keyOnlyTranslate,
+        })).toBe('Drop to attach image');
+
+        expect(getChatComposerInputLabel({
+            control: 'history-hint',
+            translate: keyOnlyTranslate,
+        })).toBe('Press Up to restore the previous input, Down to return to an empty draft');
+    });
+
+    it('queues diff pane focus only when the desktop pane is visible', () => {
+        const calls: FocusOptions[] = [];
+        const target = {
+            focus: (options?: FocusOptions) => {
+                calls.push(options ?? {});
+            },
+        };
+        const queuedCallbacks: Array<() => void> = [];
+
+        expect(queueDiffPaneFocusAfterOpen(() => target, {
+            matchMedia: () => ({matches: true}),
+            requestAnimationFrame: (callback) => {
+                queuedCallbacks.push(callback);
+                return 1;
+            },
+        })).toBe(true);
+        expect(calls).toEqual([]);
+
+        queuedCallbacks[0]();
+        expect(calls).toEqual([{preventScroll: true}]);
+
+        expect(queueDiffPaneFocusAfterOpen(() => target, {
+            matchMedia: () => ({matches: false}),
+            requestAnimationFrame: (callback) => {
+                queuedCallbacks.push(callback);
+                return 2;
+            },
+        })).toBe(false);
+
+        expect(queueDiffPaneFocusAfterOpen(() => null, {
+            matchMedia: () => ({matches: true}),
+            requestAnimationFrame: (callback) => {
+                queuedCallbacks.push(callback);
+                return 3;
+            },
+        })).toBe(true);
+        queuedCallbacks[1]();
+        expect(calls).toEqual([{preventScroll: true}]);
     });
 
     it('selects a single active permission dialog when multiple blocking requests are pending', () => {

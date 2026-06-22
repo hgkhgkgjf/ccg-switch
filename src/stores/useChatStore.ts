@@ -343,6 +343,32 @@ function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function syncAssistantRawWithStreamingContent(raw: MessageRaw | undefined, content: string): MessageRaw | undefined {
+    if (!raw || raw.type !== 'assistant' || !content.trim()) return raw;
+
+    let syncedText = false;
+    const contentBlocks = raw.message.content.reduce<ContentBlock[]>((blocks, block) => {
+        if (block.type !== 'text') {
+            blocks.push(block);
+            return blocks;
+        }
+        if (syncedText) return blocks;
+        syncedText = true;
+        blocks.push(block.text === content ? block : {...block, text: content});
+        return blocks;
+    }, []);
+
+    return {
+        ...raw,
+        message: {
+            ...raw.message,
+            content: syncedText
+                ? contentBlocks
+                : [{type: 'text', text: content}, ...contentBlocks],
+        },
+    };
+}
+
 /**
  * 把文本增量追加到最后一条流式 assistant 消息。
  * 不依赖 requestId 映射：daemon 响应极快，按 streaming 状态定位最稳。
@@ -355,9 +381,11 @@ function appendToStreamingAssistant(
         const messages = [...state.messages];
         for (let i = messages.length - 1; i >= 0; i--) {
             if (messages[i].role === 'assistant' && messages[i].streaming) {
+                const content = messages[i].content + delta;
                 messages[i] = {
                     ...messages[i],
-                    content: messages[i].content + delta,
+                    content,
+                    raw: syncAssistantRawWithStreamingContent(messages[i].raw, content),
                 };
                 break;
             }

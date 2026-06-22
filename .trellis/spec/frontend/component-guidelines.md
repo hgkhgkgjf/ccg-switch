@@ -117,6 +117,143 @@ See `src/components/providers/ProviderCard.tsx` and
   visible and show a lightweight refresh status row instead of replacing the
   detail pane with a full spinner; otherwise users cannot tell whether they are
   seeing stale results or an in-progress reload.
+  Session sidebar chrome follows the same readable i18n fallback rule as other
+  Chat controls: the panel title, refresh/new-chat buttons, project/session
+  search placeholders, section headings, empty states, project session counts,
+  refreshing-session status, and pending-session loading labels must fall back
+  to readable text such as `Session Management`, `Refresh`, `New chat`,
+  `Search projects...`, `Projects`, `No projects`, `Sessions`, `No sessions`,
+  `Refreshing sessions...`, and `Loading...` instead of raw
+  `chat.sessionPanel.*` or `common.*` keys.
+  SDK dependency recovery UI follows this same rule. The SDK modal title,
+  close action, panel heading, hint, refresh action, installed/not-installed
+  state, install/uninstall action, and installing log placeholder must use a
+  shared fallback helper so users see readable text such as `SDK Dependencies`,
+  `Close`, `Refresh`, `Installed`, `Not installed`, `Install`, `Uninstall`, and
+  `Installing...` instead of `chat.sdk.*` / `common.close` keys while i18n is
+  still loading or incomplete.
+  Tool permission dialogs follow the same recovery-path rule: the title, tool
+  description, parameters heading, raw-input disclosure, working-directory
+  label, deny action, and allow-once action must use a helper-owned fallback so
+  a blocked daemon request never asks the user to decide from raw
+  `chat.permission.*` keys.
+  Because tool permission dialogs block daemon execution on a safety decision,
+  their modal container must expose explicit dialog semantics
+  (`role="dialog"` and `aria-modal="true"`) and connect
+  `aria-labelledby` / `aria-describedby` to the visible permission title and
+  description banner.
+  Since Enter and Escape are global shortcuts for allowing once and denying a
+  tool permission request, render compact visible `Enter` / `Esc` hints in the
+  footer using readable fallback labels such as `Allow once` and `Deny`. Do not
+  make users discover blocking safety-decision shortcuts by trial and error.
+  Tool permission dialogs should also expose cc-gui-style numeric shortcuts for
+  the decisions this app actually supports: `1` maps to `Allow once` and `2`
+  maps to `Deny`. Do not add a visible `Always allow` / `3` option unless the
+  frontend store, backend response file, and bridge contract all support a
+  remembered permission response instead of the current boolean `allow` payload.
+  Footer action buttons should include the same shortcut context in their
+  `title` / `aria-label` values, for example `Allow once (1 / Enter)` and
+  `Deny (2 / Esc)`. The visible hint row is not enough for focused controls or
+  assistive-technology users.
+  If `inputs.cwd` is the same as the request-level working directory, omit it
+  from the parameter preview because the dialog already renders a dedicated
+  working-directory row. Keep differing `inputs.cwd` values visible and leave
+  the raw input disclosure unchanged so users can still inspect the full
+  provider payload.
+  Primary tool input fields (`command`, then `content`, then `text`) should be
+  promoted into a dedicated compact preview box and omitted from the ordinary
+  parameter preview. Safety decisions depend most on this primary action, while
+  the raw input disclosure remains the place to inspect the full payload.
+  That primary preview box should expose an icon-only copy affordance with
+  readable fallback labels (for example `Copy primary input` / `Copied primary
+  input`) so users can reuse the exact command or text payload without opening
+  raw JSON. Copying must not change permission response state or remove the raw
+  input disclosure.
+  Ask-user-question dialogs follow the same rule for modal chrome: request
+  headers/questions/options remain daemon-provided content, but the fallback
+  title, close title/aria-label, cancel action, submit action, and submitting
+  state must use i18n keys with helper-owned readable fallbacks such as
+  `Permission request`, `Close`, `Cancel`, `Submit`, and `Submitting...`.
+  Because ask-user-question dialogs block daemon execution until the user
+  answers, their modal container must expose explicit dialog semantics
+  (`role="dialog"` and `aria-modal="true"`) and connect
+  `aria-labelledby` / `aria-describedby` to the visible title and first
+  question prompt. Keep daemon-provided question and option text intact; this
+  rule only names the existing visible content for assistive technology.
+  Since Escape is the global cancel shortcut for this dialog, render a compact
+  visible `Esc` hint in the footer using a readable fallback label such as
+  `Cancel`; users should not have to guess the keyboard path out of a blocking
+  question prompt. The footer cancel button's `title` / `aria-label` must carry
+  the same shortcut context, for example `Cancel (Esc)`, so focused controls and
+  assistive technology expose the same contract as the visible hint.
+  Do not allow an ask-user-question dialog to submit an empty answer set. The
+  submit button disabled state and the `handleSubmit` guard must reuse the same
+  helper so mouse clicks, keyboard activation, and future callback paths cannot
+  write `{}` back to the daemon when every visible question is still unanswered.
+  Ask-user-question dialogs should also provide a custom answer textarea with a
+  bounded input length for cases where the provided options are incomplete or a
+  question has no options. Keep the backend response contract as
+  `Record<string, string>`: single-select custom text replaces the selected
+  option, multi-select custom text is appended to the comma-separated selected
+  values, and the submit guard must accept custom text through the same shared
+  payload helper used by `handleSubmit`. When options are present, label this
+  textarea as `Other` because it supplements the available choices; when a
+  question has no options, label it as `Answer` because it is the primary input,
+  not an alternative choice.
+  If an ask-user-question request contains no questions, render a readable
+  invalid-format state with only the cancel path instead of showing a disabled
+  Submit button or an `Answer 0 required questions` hint. The daemon cannot
+  proceed from an empty answer payload, so the UI should make cancellation the
+  explicit recovery action.
+  If a question payload includes a non-empty `header`, render it as a compact
+  per-question tag next to that question instead of only using the first header
+  as the dialog title. The header is daemon-provided context that helps users
+  scan multi-question prompts; skip empty headers and do not include the tag in
+  the answer payload.
+  For multiple ask-user-question prompts, show a lightweight answered-count
+  summary and per-question progress labels such as `0 / 2 answered` and
+  `Question 1 of 2`. This is a presentation aid only: do not switch to
+  cc-gui-style step navigation, change `Record<string, string>` payloads, or
+  create a second answer-completion algorithm separate from the submit guard.
+  Each visible question should also expose a compact `Required` / `Answered`
+  state badge when multiple questions are shown so users can locate the
+  unanswered prompt that keeps Submit disabled. The badge must reuse the same
+  answer payload helper as the submit guard; do not infer status from DOM state
+  or option count alone. When Submit is disabled because required questions are
+  still unanswered, the footer must also expose a visible reason that includes
+  the remaining required-question count, and the Submit button's `title` /
+  `aria-label` must include that same reason. Do not leave users to infer the
+  disabled state only from scattered per-question badges.
+  Plan-approval dialogs follow the same rule: plan text and allowed prompt
+  bodies remain daemon-provided content, but the modal title, subtitle, close
+  title/aria, plan line summary, allowed action count, working-directory label,
+  deny action, approve action, approve-and-auto action, and approve-and-auto
+  title must use i18n keys with helper-owned readable fallbacks such as `Plan
+  approval required`, `Review the plan before approving execution.`,
+  `Plan (3 lines)`, `Allowed actions (2)`, `Working directory:`, `Deny`,
+  `Approve`, and `Approve & Auto`.
+  If the dialog supports global keyboard shortcuts, render compact visible
+  hints for the active keys (currently `Enter` approve and `Esc` deny/reject)
+  using the same readable-fallback label boundary; do not make users discover
+  blocking approval shortcuts by trial and error. Footer approval/rejection
+  action buttons must include the same shortcut context in their `title` /
+  `aria-label` values, for example `Approve (Enter)` and `Deny (Esc)`.
+  Any auto-approval action must carry the risk in both places users encounter
+  it: a visible footer hint and the focused button's `title` / `aria-label`.
+  For the current `Approve & Auto` action, use a readable fallback such as
+  `Auto mode will allow future operations automatically after this approval.`
+  and keep the response payload as `approved=true,targetMode=auto`; do not
+  introduce a new response mode from UI copy alone.
+  Because plan approval blocks execution, the modal container must expose
+  explicit dialog semantics (`role="dialog"` and `aria-modal="true"`) and
+  connect `aria-labelledby` / `aria-describedby` to the visible title and
+  subtitle so assistive technology users hear the approval context before the
+  action buttons.
+  Plan body rendering in that dialog must reuse the chat `MarkdownBlock`
+  instead of a plain `<pre>` blob, because approval plans commonly contain
+  headings, lists, links, file paths, and fenced code blocks that users need to
+  scan before approving execution. Keep the plan content itself
+  daemon-provided; this rule is only about rendering the already-provided text.
 - Tool block list renderers must group by the visible items users need to scan,
   not only by raw `tool_use` count. Edit tools must expand `MultiEdit` /
   `edit_file` `input.edits[]` and `apply_patch` patch hunks into file rows; if
@@ -129,8 +266,11 @@ See `src/components/providers/ProviderCard.tsx` and
   `SearchToolGroupBlock` even for a single search so the query and first matched
   file remain visible. Search result text that includes `path:line[:column]`
   rows should be normalized through shared presentation helpers and rendered as
-  compact clickable file rows, passing `currentCwd` to `openFile(...)` just like
-  Read/Edit tools. Read/Edit/Generic file targets must pass
+  compact clickable file rows with path, line, and a truncated match snippet
+  when the result line provides one. Search result buttons should pass
+  `currentCwd` to `openFile(...)` just like Read/Edit tools and expose an
+  action label such as `Open search result: src/App.tsx · L12 · const value`.
+  Read/Edit/Generic file targets must pass
   `currentCwd` to `openFile(path, start, end, currentCwd)` and stop click
   propagation for file links and action buttons so opening/copying does not also
   collapse the block. Prefer lucide icons for structural tool icons and
@@ -150,7 +290,85 @@ See `src/components/providers/ProviderCard.tsx` and
   expanded for immediate inspection; once the user manually expands/collapses
   folders, preserve that choice during subsequent transcript updates. Diff
   hover previews used from this panel should be solid, high-contrast surfaces
-  that can sit outside the scroll pane without being clipped. When a
+  that can sit outside the scroll pane without being clipped; the preview body
+  and added/removed/context diff rows should also use opaque high-contrast
+  backgrounds so the code remains readable over busy chat/status surfaces.
+  Status-panel hover previews also need a wider readable-width variant than
+  compact tooltip chrome, because users are scanning actual code lines and
+  paths, not only labels or counts. Since these hover previews are temporary
+  non-interactive surfaces, long code lines should wrap instead of ellipsizing;
+  users cannot reliably scroll a pointer-events-disabled tooltip to recover the
+  hidden text. After wrapping is enabled, use a viewport-aware readable-height
+  variant for the status preview body so useful diff context is not clipped at
+  a small fixed tooltip height while still avoiding full-screen obstruction.
+  Folder rows in this edit tree must expose an action label that names both the
+  expand/collapse action and the target folder path; `aria-expanded` plus a bare
+  path title is not enough for keyboard or assistive-technology users.
+  The floating top calculation must account for the full preview shell
+  (header, borders, and viewport padding), not only the body max-height, so
+  rows near the bottom edge do not open a preview that is clipped off-screen. If
+  the preview still caps lines, surface the hidden-line count in the header
+  stats area as well as the body/footer, because the body can be clipped before
+  the footer clue is visible. For status-panel hover previews specifically,
+  prefer the header hidden-line clue and do not duplicate a footer-only clue
+  inside the clipped preview body; ordinary transcript hover previews can keep
+  the compact footer clue. Match the status preview's default line budget to
+  that taller body instead of reusing the compact tooltip limit; ordinary
+  transcript hover previews should remain tighter. When a status-panel file row
+  renders a hover diff tooltip, give the tooltip a stable id and connect the row
+  with `aria-describedby`; rows without tooltip content must not emit dangling
+  references. File rows that select the
+  central diff review pane must expose an accessible action label that says
+  they inspect the full diff for that file; do not leave the row announced only
+  as a file path. File-row status pills inside this tree should also include
+  the target file path in their `title` / `aria-label`, for example
+  `src/App.tsx: Success` or `src/App.tsx: Failed`, because repeated compact
+  status pills are otherwise announced as isolated state tokens. The same target
+  label rule applies to status edit tree stats: folder and file `+N` / `-M`
+  groups may stay visually compact, but their `title` / `aria-label` should
+  carry the target path and change scale, for example
+  `Edit stats: src/components · +5 / -1` or
+  `Edit stats: src/App.tsx · +2 / -1`.
+  On desktop, selecting one of those rows should move
+  programmatic focus to the central diff review pane after the pane opens or
+  updates, so keyboard users land on the newly selected review surface and can
+  immediately reach wrap/copy/open/collapse controls. Do not focus the central
+  pane below the desktop breakpoint, because the status panel is hidden and
+  composer fallback selections must not send focus to an invisible region. Keep
+  the central diff pane root as a named programmatic focus target
+  (`tabIndex={-1}` with a stable data selector) rather than adding it to the
+  normal tab order. Programmatic focus targets still need visible focus
+  feedback; the central diff review pane should expose a `:focus-visible`
+  outline/shadow so users can see where the status edit tree handed them off.
+  When a file is selected, the pane's accessible name should include that file
+  path, not only the generic diff-panel label, so assistive technology users
+  know which full diff received focus. The central diff review pane follows the
+  same readable i18n fallback rule as the status edit tree: if translations are
+  not initialized, the pane name, visible heading, diff-line summary, diff view
+  mode controls, wrap/no-wrap toggle, Open File, Copy Path, copied feedback, and
+  collapse action must still expose labels such as `File diff: <file>`,
+  `File diff`, `40 diff lines`, `Diff view mode`, `Unified diff view`,
+  `Split diff view`, `Do not wrap diff lines; use horizontal scrolling`,
+  `Open file: <file>`, `Copy path: <file>`, `Copied path: <file>`, and
+  `Collapse file diff panel` instead of raw `chat.layout.*` / `tools.*` keys.
+  The selected file row in the status edit tree should also use a distinct
+  accessible label that names it as the current full diff, not only rely on
+  `aria-current`, because screen reader output differs on whether and when
+  `aria-current` is announced for custom `role="button"` rows.
+  Composer/input status fallback edit rows should use the same file-specific
+  full-diff action labels as the status panel, including the current-selected
+  variant, so small-screen and fallback entry points do not lose context.
+  Composer/input status fallback task and subagent jump rows should likewise
+  keep the target task summary in their accessible labels, including an English
+  fallback when the i18n boundary returns the key itself. The fallback tab
+  buttons above the composer need the same treatment at the category level:
+  when i18n returns the key itself, keep a human-readable category and real
+  count/stat in the tab `aria-label`/`title` (for example `Tasks 2/2`,
+  `Subagents 0/1`, `Edits +5 / -2`) instead of announcing two translation
+  keys before the user opens the popover. Non-tab chips in the same status
+  strip follow the same rule; the Git branch chip should fall back to `Git:
+  <branch>` / `Git <branch>` instead of exposing `inputStatusGitBranch`.
+  When a
   split/unified diff view toggle is added, keep it compact and icon-driven so it
   reads like a control, not a second card. The Chat page layout should keep all
   visible desktop panes resizable: when the central diff pane is open, expose
@@ -158,7 +376,11 @@ See `src/components/providers/ProviderCard.tsx` and
   collapsed or absent, expose a conversation-status handle so the fixed right
   sidebar can give space back to the transcript. Width clamping belongs in
   shared UI behavior helpers and must be unit-tested rather than hand-coded only
-  inside `ChatPage`. Collapsing the diff pane must also leave an explicit reopen
+  inside `ChatPage`. Resize handle `title` / `aria-label` text follows the same
+  helper-owned fallback rule: if translations return keys, show labels such as
+  `Resize conversation and diff panes`, `Resize diff and right panes`, and
+  `Resize conversation and right panes` instead of raw `chat.layout.resize*`
+  keys. Collapsing the diff pane must also leave an explicit reopen
   affordance on the right side of the status-panel edit header whenever the
   loaded transcript window has any edit record; do not rely on a selected edit
   key or clicking a file row as the hidden way to restore the central diff pane.
@@ -167,7 +389,16 @@ See `src/components/providers/ProviderCard.tsx` and
   page-level right-edge restore control whenever the diff pane is collapsed and
   there is a selected edit to reopen. This global control should float over the
   review layout instead of reserving a diff column, preserving the "collapsed
-  means no central space used" contract.
+  means no central space used" contract. Diff pane restore controls should use
+  a file-specific accessible label when the target edit is known, so users do
+  not have to reopen the pane before discovering which file diff will return.
+  Those restore labels must also keep readable i18n fallbacks; if translations
+  return keys, show labels like `Open file diff: <file>` or `Open file diff
+  panel` instead of `chat.layout.expandDiffPanelForFile` /
+  `chat.layout.expandDiffPanel`.
+  Restoring the pane from those controls should reuse the same desktop
+  programmatic focus handoff as selecting a file from the edit tree; otherwise
+  keyboard focus can remain on a button that disappears after the pane opens.
   The full central diff
   pane should default to wrapped code lines so narrow three-pane layouts remain
   readable without constant horizontal scrolling, while still exposing a compact
@@ -177,7 +408,13 @@ See `src/components/providers/ProviderCard.tsx` and
   should expose the same low-friction file operations users expect from
   Read/Edit tool rows: at minimum Open File and Copy Path. Keep these controls
   icon-sized and reuse existing bridge helpers/i18n keys instead of adding a
-  second command style.
+  second command style. When the selected edit is known, those file-action
+  buttons must include the target file path in their accessible labels and
+  titles (for example, "Open file: <path>" / "Copy path: <path>"); copied-state
+  feedback should keep the same target path instead of falling back to a generic
+  "Copied" label. Status edit tree row-level file action buttons follow the
+  same rule: if the target file is known, use the file-specific label rather
+  than a generic "Open file" title.
 - Chat daemon lifecycle status must be rendered as a recoverable state, not only
   a raw diagnostic string. Use shared helpers such as
   `getChatDaemonStatusKind()` and `canReconnectChatDaemon()` so the header and
@@ -188,10 +425,34 @@ See `src/components/providers/ProviderCard.tsx` and
   true. Surface a compact sanitized diagnostic from the store `error` or the
   meaningful daemon status text next to the recovery action, and reuse the same
   diagnostic as the top-header tooltip. If the store uses a known i18n key for a
-  frontend-generated daemon diagnostic, translate it at the rendering boundary;
-  backend/raw errors remain literal diagnostic strings. Do not label `shutdown`
-  as `Starting...`, because that hides the recovery path after daemon stdout
-  closes.
+  frontend-generated daemon diagnostic, translate it at the rendering boundary
+  with a readable fallback, such as `Daemon did not become ready in time` for
+  `chat.daemon.readyTimeoutError`; backend/raw errors remain literal diagnostic
+  strings. Do not label `shutdown` as `Starting...`, because that hides the
+  recovery path after daemon stdout closes. The top-header daemon visible status
+  text must also keep readable
+  i18n fallbacks; if translations return keys, show labels such as `Ready`,
+  `Starting`, `Offline`, and `Daemon error` instead of `chat.ready`,
+  `chat.starting`, or `chat.daemon.*` keys, while preserving meaningful unknown
+  daemon status strings verbatim. The top-header daemon reconnect action follows
+  the same boundary rule for `title`, `aria-label`, and visible short label:
+  fall back to `Reconnect daemon`, `Reconnecting daemon`, `Reconnect`, and
+  `Reconnecting` rather than exposing `chat.daemon.reconnect*` keys.
+  The right `StatusPanel` daemon status value should also carry a target label
+  such as `Daemon: Success`, `Daemon: Daemon offline`, or `Daemon: Daemon error`
+  through `aria-label`, because the visible value is a short status token inside
+  a dense key/value row.
+  The adjacent top chrome actions and SDK recovery banner follow the same
+  readable fallback contract: SDK management, clear chat, SDK missing copy, and
+  SDK install actions should fall back to labels such as `Manage SDKs`,
+  `Clear chat`, `<SDK name> is not installed yet. Install it to start chatting.`,
+  and `Install SDK` instead of exposing `chat.sdk.*` or `chat.clear` keys.
+  Conversation navigation controls follow the same rule: search placeholder /
+  label, clear-search, anchor rail label, current-anchor marker,
+  jump-to-message buttons, and scroll-to-top/bottom buttons must use shared
+  helper-owned fallbacks such as `Search this conversation`, `Clear search`,
+  `Message timeline`, `Current message`, `Jump to message <n>`,
+  `Scroll to top`, and `Scroll to bottom` instead of raw `chat.layout.*` keys.
 - Chat status panels should expose basic runtime readiness before the user sends
   a prompt. Provider, selected model, permission mode, reasoning effort,
   workspace path, SDK installation state, daemon state, and MCP
@@ -201,7 +462,29 @@ See `src/components/providers/ProviderCard.tsx` and
   SDK installs, or backend checks while rendering the panel. Render runtime
   context as a compact tile grid in the right `StatusPanel` rather than a tall
   vertical key/value list; keep full values in `title` attributes so truncated
-  model ids and Windows workspace paths remain inspectable. Pending and failed
+  model ids and Windows workspace paths remain inspectable. Runtime context
+  tile values should also carry target labels in `title` / `aria-label`, such as
+  `Model: claude-sonnet-4-6`, `Permission mode: Auto Mode`, `Workspace:
+  C:/repo`, and `SDK: Claude Code SDK · Installed`, so truncated compact values
+  remain meaningful outside their visual tile label. When the SDK tile tooltip
+  uses an installation path, keep the source context too, for example
+  `SDK: C:/deps/claude-sdk`, instead of exposing a bare path. The top status
+  chrome and runtime context tile labels must use readable fallback text when
+  i18n returns keys: users should still see labels such as `Session status`,
+  `AI provider`, `Messages`, `Message anchors`, `Daemon`, `Reconnect daemon`,
+  `Runtime context`, `Model`, `Permission mode`, `Reasoning effort`,
+  `Workspace`, `SDK`, and SDK install state instead of raw translation keys.
+  The provider, message count, and anchor count values in the top status chrome
+  may stay visually compact, but their `title` and `aria-label` must include
+  the left-side label, for example `AI provider: claude`, `Messages: 4`, and
+  `Message anchors: 3`.
+  The daemon status value follows the same rule: its `title` and `aria-label`
+  should include the daemon label, for example `Daemon: Success` or
+  `Daemon: Daemon offline`; if a diagnostic detail is present, append it to the
+  title after the status, for example `Daemon: Daemon error · <detail>`.
+  Permission and reasoning values should also fall back to user-facing labels
+  such as `Auto Mode` and `High` rather than exposing `chat.modes.*` or
+  `chat.reasoning.*` keys. Pending and failed
   tool counts belong in the `currentActivity` card header as compact pills when
   non-zero; do not duplicate those counts as standalone rows in the top status
   grid. The `currentActivity` card itself is trigger-based: render it only when
@@ -226,7 +509,42 @@ See `src/components/providers/ProviderCard.tsx` and
   clicking or keyboard-activating a row should jump to the corresponding
   transcript tool block instead of duplicating full tool details inside the
   right pane. These jump rows must use accurate accessible labels: subagent
-  activity should not be announced as a generic tool task. Message-flow tool
+  activity should not be announced as a generic tool task. The row button's
+  `title` and `aria-label` must both describe the jump action, for example
+  `Jump to tool task: npm test` or `Jump to subagent activity: review risks`;
+  keep summary/detail as visible row content instead of using it as the
+  control tooltip. They must also keep readable fallback labels and status pills when i18n returns keys, matching
+  composer fallback rows: `Jump to tool task: <summary>`, `Jump to subagent
+  activity: <summary>`, `Pending`, `Failed`, and `Success` should remain
+  visible/announced instead of raw translation keys. The primary active tool
+  status pill and the status pill inside each activity-history row should
+  additionally expose the tool type and target summary in `title` /
+  `aria-label`, for example `Bash: npm run build · Pending` or
+  `Task: write regression coverage · Pending`, so compact states remain
+  meaningful when read or hovered outside the adjacent summary line. The activity card chrome
+  follows the same rule: the card title, pending/error count titles, scroll
+  region label, task/subagent section headers, and clipped-history footers must
+  fall back to readable text such as `Current activity`, `Pending tools`,
+  `Failed tools`, `Activity history`, `Tasks`, `Subagents`, and
+  `<count> earlier tool task hidden from activity history` /
+  `<count> earlier subagent hidden from activity history` instead of raw
+  translation keys. Because the composer quick-detail overflow uses its own
+  `inputStatusMore*` semantics, desktop activity-history clipped footers should
+  use activity-specific keys such as `activityHistoryMoreTools` and
+  `activityHistoryMoreSubagents` rather than reusing generic input-status
+  overflow strings.
+  Clipped-history footers should also mirror that readable footer text into
+  both `title` and `aria-label`, because the footer sits in a narrow scroll
+  region and otherwise reads as a detached, potentially truncated sentence.
+  The task/subagent section ratio values in that scroll region may stay visually
+  compact as `5 / 6`, but their `title` and `aria-label` should include the
+  section heading, for example `Tasks: 5 / 6` or `Subagents: 2 / 3`.
+  The transient rows inside the same card follow the same boundary rule:
+  streaming and idle states must fall back to readable text such as
+  `Streaming reply` and `Idle` instead of `chat.layout.streamingReply` or
+  `chat.layout.idle`. The active-anchor summary below the activity/edit cards
+  must also fall back to a readable heading such as `Current message`.
+  Message-flow tool
   renderers must expose stable
   `data-chat-tool-id` anchors for single tools and `data-chat-tool-ids` anchors
   for grouped tools so status surfaces can locate the existing transcript block.
@@ -255,6 +573,10 @@ See `src/components/providers/ProviderCard.tsx` and
   only servers enabled for the active provider, and render the returned
   `online` / `offline` / `timeout` / `error` / `unknown` plus latency as a
   secondary signal next to the configuration enabled/disabled pill.
+  The expanded MCP details header count for configured servers may stay
+  visually compact as a bare number, but its `title` and `aria-label` must carry
+  the group label, for example `Configured servers: 2`, so the count remains
+  meaningful when hovered or read independently from the left label.
 - Chat model selectors should follow cc-gui's compact icon + label pattern.
   The selector trigger and each option should render the same provider/vendor
   brand glyph set used by the provider selector via `ModelIcon`, not decorative
@@ -299,18 +621,128 @@ See `src/components/providers/ProviderCard.tsx` and
   dense, but it must still leave enough gap between adjacent text, thinking,
   image, and tool rows so historical assistant output does not collapse into an
   unreadable clump.
+- Collapsible tool-block headers must not be click-only `div`s. When a tool row
+  toggles details, expose `role="button"`, `tabIndex={0}`, `aria-expanded`, and
+  Enter/Space keyboard handling while preserving the existing mouse click
+  behavior. This applies first to high-frequency single tool blocks such as
+  Bash, Read, and Edit, and must also apply to Generic when it has expandable
+  input or result detail. Task and Agent tool headers also follow this contract,
+  because expanding them can reveal prompt metadata and subagent history; keep
+  keyboard activation on the same `expanded` state path as mouse clicks so
+  history loading semantics do not diverge. Group blocks have the same
+  requirement for both the group-level header and any expandable item rows
+  inside the group, such as individual Bash commands, Read files, Search result
+  entries, or Edit changed-file entries. Tool rows without expandable detail
+  should not expose button semantics; avoid creating a focusable control that
+  cannot reveal anything.
+- Tool-block detail action buttons must carry a stable accessible name and
+  tooltip, even when their visible label changes after feedback. For example,
+  Bash `Copy Command` / `Copy Output` plus Read/Edit `Copy Path` buttons should
+  keep `title` and `aria-label` on the underlying action while the visible text
+  may briefly switch to `Copied`. This prevents screen-reader and mouse-tooltip
+  users from losing the button's purpose during transient success states. When
+  the copied value is a file path, include both the copy action and target path
+  in `title` / `aria-label` (for example, `Copy path: src/App.tsx`). Bash command
+  and output copy actions should do the same with a representative command target
+  when known (for example, `Copy command: npm test` or
+  `Copy output from command: npm test`). Generic tool input/output copy actions
+  should also include the representative tool target used by the header when
+  known (for example, `Copy input for tool: chat ui parity`) while keeping the
+  visible button text compact if needed. When one tool block renders multiple
+  copy buttons, copied feedback must be keyed by the copied target rather than
+  a shared boolean. For example, Bash command/output actions should use
+  `command` / `output` copied targets and Generic input/output actions should
+  use `input` / `output` copied targets, so clicking one button does not make
+  its sibling show `Copied`.
+  Bash tool header command/result summary spans follow the same compact-summary
+  rule: keep the visible command/result short, but mirror the full command and
+  result summary into both `title` and `aria-label`.
+  Bash group compact summaries follow the same rule. The command-count chip
+  should expose a count label such as `4 commands` through both `title` and
+  `aria-label`; header primary/status summaries should mirror their full text;
+  row command/result summaries should mirror the full command or result
+  summary; and each row status pill should include the command context, for
+  example `Bash: npm test · Success`, instead of announcing a repeated bare
+  `Success` / `Failed` / `Pending` token.
+  Read tool header line-range summary spans follow the same rule: keep the
+  visible value compact as `L11-L30`, but mirror that exact line range into both
+  `title` and `aria-label`. Read file targets that open a file remain semantic
+  open-file buttons with action labels; directory or other non-file target
+  summaries may remain plain spans, but their `title` and `aria-label` should
+  mirror the full target path.
+  Edit tool header stat summaries follow the same target-label rule used by
+  status surfaces: keep the visible `+N` / `-M` pills compact, expose a wrapper
+  label such as `Edit stats: src/App.tsx · +1 / -1` through both `title` and
+  `aria-label`, and mark the inner numeric pills `aria-hidden` to avoid
+  duplicate unqualified numbers.
+  Edit group total and item stat summaries follow the same contract. The group
+  total target should make the aggregate scope explicit, for example
+  `Edit stats: src/App.tsx · 3 files · +3 / -3`, while each item badge should
+  use that row's file target, for example `Edit stats: src/App.tsx · +1 / -1`.
+  Keep the visible `+N` / `-M` pills compact and mark them `aria-hidden` because
+  the wrapper label carries the contextual announcement.
+  Generic tool header summary spans that are not real controls follow the same
+  compact-summary rule as Agent/Task headers: keep the visible text dense, but
+  mirror the full summary into both `title` and `aria-label`. This applies to
+  non-clickable path/directory summaries, command summaries, generic action
+  summaries, and result summaries. File targets that open a file should remain
+  semantic buttons with action labels such as `Open file: src/App.tsx`; do not
+  turn those interactive targets back into plain spans just to share summary
+  markup.
+- Grouped tool-block bulk action buttons must also keep stable `title` and
+  `aria-label` values that combine the visible `Expand All` / `Collapse All`
+  action with the group target. These controls may later be compacted or
+  iconized, and repeated groups can otherwise expose several identical
+  `Expand all` buttons to assistive technology. Bash, Read, Edit, and Search
+  group blocks should use labels such as `Expand all in group: npm test` while
+  keeping the visible button text compact.
+- Grouped tool-block bulk actions must be disabled when the target state is
+  already satisfied: disable `Collapse All` when no rows are expanded, and
+  disable `Expand All` when every valid row is expanded. Keep the action +
+  target `title` / `aria-label` on disabled buttons so users still understand
+  why the control exists in the group. Reuse the shared bulk-action state helper
+  instead of duplicating index filtering in each grouped tool component; Edit
+  groups must pass the visible edit-row count, not raw tool-use count.
+  Grouped tool components should also reuse the shared expanded-index helpers
+  when expanding all rows or toggling one row, so the state transition and the
+  disabled-state calculation use the same valid-index contract. Edit groups
+  must pass the visible edit-row count to both helpers.
+  Tool-block headers and grouped tool item rows that render custom
+  `role="button"` toggles must also reuse the shared keyboard-activation helper
+  for Enter/Space handling, instead of duplicating key comparisons in each
+  component. This includes Bash, Read, Edit, Generic with expandable content,
+  Task, Agent, group headers, and expandable group item rows.
+- Search-result file buttons that call `openFile()` must include both the
+  action and target in `title` and `aria-label`, for example `Open file:
+  src/App.tsx`. The visible label may stay as the compact path, but focused
+  controls should not read as a bare path with no action context.
+- Any tool-block header target that calls `openFile()` must be a semantic
+  control, not a click-only `span`. Prefer a native
+  `<button type="button">` with the existing path-link classes reset to match
+  inline text styling, call `event.stopPropagation()` before opening the file,
+  and expose the same action + target label in `title` and `aria-label`.
+  Non-file targets such as directories may remain plain summary text unless
+  they have a real action.
 - Generic tool result display must normalize MCP text-block wrappers before
   rendering. Decode arrays or wrapper objects such as `{ content: [{ type:
   "text", text: "..." }] }`, and restore literal escaped newlines in codegraph
   output before handing the text to a `<pre>`. Do this in shared presentation
   helpers, not inside individual tool components.
+- Generic `AskUserQuestion` tool blocks are user-interaction records, not failed
+  execution records. If the SDK reports the matching `tool_result` with
+  `is_error: true`, `GenericToolBlock` should still render the status as
+  completed unless the tool was explicitly denied by the user. Ordinary generic
+  tools must continue to render `is_error: true` as an error state.
 - Agent-like tool blocks (`AgentGroupBlock`, `TaskExecutionBlock`) must share
   their transcript-summary shaping through `extractAgentToolMeta()`,
   `summarizeAgentToolMeta()`, `summarizeAgentToolHeader()`, and
   `getAgentToolExtraParams()` in `src/utils/toolPresentation.ts`. Do not
   hand-roll separate header-summary or input-filter logic per component, or the
   assistant flow will drift back into inconsistent chips/badges between
-  `agent`, `task`, and `spawn_agent`.
+  `agent`, `task`, and `spawn_agent`. Compact header summaries in these blocks
+  are often truncated, so visible primary, secondary, and runtime summary spans
+  should mirror their displayed text into both `title` and `aria-label`; the
+  parent header keeps the action label such as `Toggle task details: <target>`.
 - Subagent execution summaries should keep display text and interaction targets
   separate. If a process card shows compact file paths such as `…/src/foo.ts`,
   the backing model must still preserve the real `openPath` used by
@@ -372,7 +804,22 @@ See `src/components/providers/ProviderCard.tsx` and
   matches as final. If that explicit full-history search fails, keep the loaded
   window searchable and expose a compact retry affordance owned by `ChatPage`;
   `MessageList` should receive this as display props and must not invoke the
-  store directly. The right `StatusPanel` may show
+  store directly. MessageList search/reveal chrome must use readable i18n
+  fallbacks at the rendering boundary: search result summaries, no-result
+  states, full-history loading/error text, retry button `aria-label`/text, and
+  collapsed-earlier message notices should fall back to labels such as
+  `Found 2 matching messages`, `No matching messages found`, `Searching
+  complete history for older matches...`, `Complete history search failed.
+  Current results only cover the loaded window.`, `Retry`, and `2 earlier
+  messages are collapsed. Scroll to the top to load 2 more` instead of raw
+  `chat.layout.search*` or `chat.message.showEarlier` keys. Message transcript
+  chrome follows the same fallback rule: role labels, copy/copied actions, empty
+  user placeholders, waiting indicators, and streaming-connected chips must
+  fall back to readable labels such as `You`, `AI Assistant`, `System`, `Copy`,
+  `Copied`, `Empty message`, `Waiting for response...`, and `Connected,
+  generating response...` instead of raw `chat.message.*` keys when i18n returns
+  a key. The right
+  `StatusPanel` may show
   the latest session-load performance snapshot from `useChatStore`, including
   cache hits, first-paint window counts, windowed status, map times, and total
   elapsed time. This is diagnostic display only: rendering the panel must not
@@ -380,7 +827,33 @@ See `src/components/providers/ProviderCard.tsx` and
   or windowed session-load metrics collapsed behind an explicit diagnostic
   toggle so normal status scanning stays compact; automatically expand the
   metrics only while a load is still running or when an error must remain
-  visible.
+  visible. The session-load diagnostic card must also use readable fallback
+  labels when i18n returns keys: users should still see compact text such as
+  `History load`, `Loading`, `Load failed`, `Window first paint`, `Cache hit`,
+  `Source`, `Window`, `Cache`, `Full`, `Elapsed`, and `Map 7ms` instead of raw
+  `chat.layout.sessionLoad*` keys. Its diagnostic toggle must also carry an
+  action-specific `title` / `aria-label`, such as `Expand history load details`
+  or `Collapse history load details`, instead of relying only on `aria-expanded`
+  and the visible summary text. The session-load status pill should also carry
+  a target label such as `History load: Loading` or `History load: Complete`,
+  because the visible pill text is intentionally short inside a dense
+  diagnostic row. The session-load diagnostic card container should expose a
+  composite target label such as `History load: Window first paint · 120 / 5000
+  · 161ms · Source · <path>` through both `title` and `aria-label`; a bare JSONL
+  path is hard to interpret when read outside the visible diagnostic card, while
+  the compact summary is the value users scan first. The collapsed session-load summary value should
+  expose its compact text as `History load: <summary>` through both `title` and
+  `aria-label`, because it may truncate independently from the source-path
+  container and otherwise reads as bare counts/timing. Expanded session-load
+  detail value rows should follow the same field + value target-label rule:
+  keep visible values compact, but expose labels such as `History load: Window ·
+  120 / 5000 · 40ms · Map 7ms`, `History load: Full · 5000 · 50ms · Map 11ms`,
+  and `History load: Cache · 5000 · 2ms` through both `title` and `aria-label`.
+  If session-load details include an error message,
+  keep the visible error text raw but give the row a contextual `title` /
+  `aria-label` such as `History load: Load failed · Cache read failed`; the
+  error line is truncated in the compact panel and otherwise loses the
+  diagnostic source.
 - Chat composer completion menus own Enter/Tab while open, including the loading
   state before items arrive. A user typing `/`, `@path`, or `#agent` should not
   accidentally send the half-completed token just because the async completion
@@ -492,6 +965,10 @@ See `src/components/providers/ProviderCard.tsx` and
   assistant answer can render as several cramped Markdown islands. Do not merge
   across `image`, `thinking`, `tool_use`, or other non-text blocks, because those
   boundaries represent real transcript structure.
+  Markdown code-block copy controls must also keep readable i18n fallbacks at
+  the DOM-effect boundary: button `title` and `aria-label` should fall back to
+  `Copy code` and `Copied code` instead of raw `chat.markdown.copyCode` /
+  `chat.markdown.copiedCode` keys when translations are not initialized.
 - Long-session anchor rails should stay readable under dense histories. Generate
   anchors from renderable user messages in the currently revealed transcript
   window, then sample dense anchor lists through a pure helper that preserves
@@ -544,7 +1021,36 @@ See `src/components/providers/ProviderCard.tsx` and
   can guard the layout contract. Enhance/send/stop are icon-only action buttons:
   keep them fixed square (`h-7 w-7 shrink-0`) with `aria-label`, and do not
   reintroduce auto-width DaisyUI button classes for the primary send/stop
-  affordance.
+  affordance. Composer toolbar selector and action labels must use the shared
+  fallback helper contract at the rendering boundary: if i18n returns keys,
+  provider/mode/model/reasoning titles, model refresh/loading states, enhance,
+  send, and stop controls should still expose readable labels such as
+  `AI provider`, `Permission mode`, `Model`, `Reasoning effort`,
+  `Refresh models`, `Refreshing models...`, `Loading models...`,
+  `Enhance prompt`, `Send`, and `Stop` instead of raw `chat.*` keys. The
+  mode/reasoning selector's visible current value and option menu text follow
+  the same rule: if i18n returns keys, show labels/descriptions such as
+  `Default Mode`, `Agent Mode`, `Auto Mode`, `Requires manual confirmation for
+  each operation`, `High`, and `Deep reasoning for complex tasks` instead of
+  `chat.modes.*` or `chat.reasoning.*` keys. Composer input-surface chrome must
+  also use the same rendering-boundary fallback contract: attachment buttons,
+  remove-attachment chips, status-panel toggle, resize handle, rich placeholder,
+  completion empty state, drop overlay, and draft-history hint should remain
+  readable as `Add attachment`, `Remove attachment`, `Collapse status panel`,
+  `Expand status panel`, `Drag to resize the input`, `No matches`, or equivalent
+  plain-language fallback text instead of raw `chat.attach`,
+  `chat.resizeComposer`, `chat.richPlaceholder`, or `chat.completion.*` keys.
+  Completion menus should expose a named `listbox` region, announce loading with
+  a readable `role="status"` text such as `Loading suggestions...`, and mark
+  selectable rows as `role="option"` with accurate `aria-selected` state.
+  Option accessible labels should include both the item label and its
+  description when present, so slash commands, files, agents, and prompt presets
+  stay understandable without requiring visual tooltip inspection. Prompt
+  enhancer modal chrome follows the same fallback rule: the modal title, close
+  button title, original/enhanced column headings, loading text, and footer
+  actions must stay readable as `Enhance prompt`, `Close`, `Original prompt`,
+  `Enhanced prompt`, `Enhancing prompt...`, `Keep original`, and `Use enhanced`
+  instead of raw `chat.enhancer.*` or `common.close` keys.
 - Chat composer slash completions must not be maintained as a short frontend-only
   hardcoded list. The `/` trigger should call `chat_list_slash_commands` with
   the current `cwd` and provider, then normalize the backend registry payload
@@ -579,6 +1085,28 @@ See `src/components/providers/ProviderCard.tsx` and
   should use solid backgrounds, high z-index, and viewport-aware placement:
   center previews in the transcript area, and expand right-sidebar previews left
   into the conversation area so code is readable and not clipped by side panels.
+  Diff preview header values that are exposed through `title` must also expose
+  the same value through `aria-label`: file path, line-change summary, and
+  status-surface hidden-line clues are key preview context, not decorative
+  tooltip-only text. The default hover footer hidden-line clue
+  (`edit-diff-hover-more`) follows the same rule when lines are truncated:
+  keep the visible `N more lines` text, and mirror it into `title` /
+  `aria-label`. The adjacent visual `+N` / `-N` stat pills must stay visible
+  for scan speed but should be `aria-hidden`, because the summary already
+  carries the accessible `N added, M removed` label and duplicate bare numbers
+  make screen-reader output noisy. Diff preview line rows should expose a
+  contextual accessible name that includes the change type, line number, and
+  code text, such as `Removed line 11: oldValue` or `Added line 11: newValue`,
+  while preserving the visible line number, marker, and code content. When line
+  rows are hoverable or truncated, mirror that same contextual row label into
+  `title` so mouse tooltips and assistive-technology names stay aligned. Do not
+  hide real diff content as decorative just to reduce noise; if a line needs a
+  cleaner accessible name, put that name on the line row and keep the code text
+  visible. Split diff cells should add old/new column context on top of the row
+  label, for example `Old side: Removed line 11: oldValue` and `New side: no
+  content for Removed line 11: oldValue`, so users inspecting a two-column diff
+  can tell whether a visible or empty cell belongs to the previous or resulting
+  version.
   When the same file is edited multiple times in one grouped edit sequence,
   the visible file list must merge those rows into one per-file item while
   summing additions/deletions and preserving combined diff preview lines. Keep
@@ -597,7 +1125,22 @@ See `src/components/providers/ProviderCard.tsx` and
   visible files. When the capped list hides additional files, show a compact
   "more files" row that can expand to the complete `allEdits` list and collapse
   back to recent edits, so the user can inspect every touched file without
-  making the default sidebar dense.
+  making the default sidebar dense. The desktop recent-edits card chrome and
+  diff toolbar must also keep readable i18n fallbacks: card title, edit summary,
+  expand/collapse tree button, diff view mode group, unified/split view buttons,
+  reopen diff review button, folder/file action labels, open-file button, and
+  hidden-file toggle should fall back to labels such as `Recent edits`,
+  `2 files · +3 / -1`, `Collapse edit tree`, `Diff view mode`, `Unified diff
+  view`, `Split diff view`, `Open diff review for <file>`, `Current full diff:
+  <file>`, `Open file: <file>`, and `1 more file not shown in this list`
+  instead of exposing `chat.layout.*` or `tools.openFileForPath` keys when i18n
+  is not initialized. Keep the hidden-file fallback contextual; a bare
+  `1 more file` loses the fact that the row is an overflow control for the
+  current recent-edits list.
+  The compact edit summary value should also carry the same readable summary in
+  both `title` and `aria-label`, for example `2 files · +3 / -1`, because the
+  row intentionally hides the underlying labels to keep the status sidebar
+  dense.
 - The chat input area must expose a compact status strip directly above the
   composer, but the strip is trigger-driven rather than always filled with zero
   placeholders. Show the current Git branch only when the current `cwd` resolves
@@ -625,23 +1168,156 @@ See `src/components/providers/ProviderCard.tsx` and
   presses `Escape`, matching the popover behavior users expect from cc-gui.
   The popover's scroll container must also be keyboard-focusable and exposed as
   a named `region`, so users can focus and scroll task, subagent, edit, or MCP
-  details without first tabbing through every row.
+  details without first tabbing through every row. That region label must also
+  use an i18n fallback such as `Status details`; do not expose
+  `inputStatusDetailsRegion` when translations are not initialized. Overflow
+  footers in tasks, subagents, and edits panels must also use readable fallback
+  text such as `+1 more tool task`, `+1 more subagent`, and `+1 more edit`;
+  do not expose `inputStatusMoreTools`, `inputStatusMoreSubagents`, or
+  `inputStatusMoreEdits` when translations are not initialized. Empty states
+  in those same quick-detail panels should use the same fallback boundary:
+  `No task or tool activity yet`, `No subagent calls yet`, and `No file edits
+  yet` instead of raw `inputStatusNoTasks`, `inputStatusNoSubagents`, or
+  `inputStatusNoEdits` keys.
   Task and subagent rows inside this small-screen fallback should reuse the
   page-level transcript jump handler instead of becoming static duplicates:
   render them with `data-target-tool-id`, accurate task/subagent `aria-label`
-  keys, and disabled read-only semantics only when no selection handler is
-  available. After a successful task/subagent jump, close the transient
+  keys, readable visible state pills (`Pending` / `Failed` / `Success` as
+  fallbacks when i18n returns keys), and disabled read-only semantics only when
+  no selection handler is available. The row button `title` must use the same
+  jump action label as `aria-label`, such as `Jump to tool task: npm test` or
+  `Jump to subagent activity: Review composer status strip`; summary/detail
+  remain visible row content, not the control tooltip. The row status pill itself should match
+  the desktop `StatusPanel` target-label behavior by exposing the tool type,
+  target summary, and status in `title` / `aria-label`, for example
+  `npm: npm test · Success` or `Agent: Review composer status strip · Pending`.
+  After a successful task/subagent jump, close the transient
   quick-detail popover so the bottom-anchored panel does not obscure the
   highlighted transcript target on narrow screens. Selecting an edited file
   from this strip should reuse the page-level diff selection handler instead of
   opening a separate diff implementation. Edit rows must stay disabled and
   read-only when that handler is unavailable, and a successful edit selection
   should close the transient quick-detail popover so the selected page-level
-  diff/context is not obscured. MCP details in the composer strip must list
+  diff/context is not obscured. Edit-row `+N` / `-N` stats in this small-screen
+  fallback should also carry the target file path in `title` / `aria-label`, for
+  example `Edit stats: src/App.tsx · +5 / -2`, so repeated compact numbers do
+  not lose their file context. The edit row action button should also connect
+  to that stats group with `aria-describedby` so focus on the full-diff action
+  exposes both the action and the change scale; do not emit dangling
+  descriptions when no stats group is rendered. MCP details in the composer
+  strip must list
   configuration availability only (server name,
   transport/config type, enabled/disabled) and must not run live connectivity
-  checks. Do not add destructive controls such as undo, discard all, or keep all
-  to this composer strip without a separate design review.
+  checks. MCP panel and server row labels must use readable fallbacks when i18n
+  returns keys: panel chrome should still show labels like `Configured servers`,
+  `Loading MCP configuration...`, `No MCP servers configured`, and `+N more MCP
+  servers`; server rows should still show labels like `Unknown`, `Enabled`, and
+  `Disabled`. Do not expose raw MCP i18n keys such as `mcpLiveUnknown`,
+  `mcpEnabled`, `mcpDisabled`, `mcpConfiguredServers`, `mcpLoading`,
+  `mcpNoServers`, or `inputStatusMoreMcpServers` in the quick-detail surface.
+  The visible server name in these small-screen MCP rows should carry the same
+  target label as the desktop panel, for example `MCP server: Filesystem`, in
+  both `title` and `aria-label`; do not put a bare server id such as
+  `filesystem` on the outer row as the only tooltip.
+  MCP configuration error rows in the same composer quick-detail surface should
+  keep the raw error visible, but expose the source and category in `title` /
+  `aria-label`, for example `MCP: Configuration error · Failed to load mcp.json`.
+  Do not leave the row as a tooltip-only bare error string.
+  MCP loading rows in that same composer quick-detail surface should keep the
+  visible loading text but expose the source in `title` / `aria-label`, for
+  example `MCP: Loading MCP configuration...`, so transient loading states are
+  not detached from the MCP panel context.
+  The composer MCP tab button should reuse those loading/error target labels
+  for its own `title` / `aria-label` while those states are active, instead of
+  exposing only a count such as `MCP 0 / 0`. In the ordinary configured-server
+  state, keep the visible count pill compact (`1 / 2`), but use the configured
+  summary in the tab `title` / `aria-label`, for example `MCP: 1 / 2 available`,
+  so the enabled/total ratio is not detached from its meaning in hover or
+  assistive-technology output.
+  The MCP server row status pill in this small-screen fallback should also name
+  the server in `title` / `aria-label`, for example `Filesystem: Enabled` or
+  `GitHub: Disabled`, so repeated short status pills stay meaningful outside
+  their visual row context. The transport/config token in that same small-screen
+  row should follow the desktop transport rule too: keep the visible value
+  compact as `stdio`, `http`, or `Unknown`, but expose server + transport
+  context such as `MCP server transport: Filesystem · stdio` in both `title`
+  and `aria-label`.
+  The desktop `StatusPanel` MCP summary/details follow the same fallback
+  contract for `mcpEnabledSummary`, loading/empty/configured labels, enabled /
+  disabled state pills, live status/latency labels, and manual live-check
+  controls; if i18n returns the key itself, users should still see readable
+  text such as `1 / 2 available`, `Configured servers`, `Enabled`, `Online`,
+  `24ms`, and `Checking...`. The desktop MCP summary container should keep the
+  visible summary compact, but expose the MCP source in `title` / `aria-label`,
+  for example `MCP: 1 / 2 available`; error summaries may continue to use the
+  diagnostic form `MCP: Configuration error · <detail>`.
+  The MCP summary toggle must also carry an action-specific `title` / `aria-label`, such as `Expand MCP details` or
+  `Collapse MCP details`, so focused controls and assistive technology expose
+  the actual expand/collapse action. The manual MCP live-check button should
+  also keep `title` / `aria-label` aligned with its current state: use the
+  check action while idle and the checking label while the request is in flight.
+  The manual MCP live-check hint row should keep visible text compact, but
+  expose the MCP source in `title` / `aria-label`, for example
+  `MCP: Run a live check for enabled MCP servers.` or
+  `MCP: No enabled MCP servers to check.`, so the helper sentence remains
+  meaningful outside the expanded details context.
+  Desktop MCP loading rows inside expanded details should mirror the small-screen
+  composer MCP loading row: keep the visible loading text compact, but expose
+  `MCP: Loading MCP configuration...` through both `title` and `aria-label` so
+  transient loading text is not detached from the MCP details source.
+  Desktop MCP empty rows should follow the same source-label rule: keep visible
+  text as `No MCP servers configured`, but expose `MCP: No MCP servers
+  configured` through both `title` and `aria-label` so empty configuration
+  states are not read as generic standalone empty text.
+  MCP server-row names are truncated in the compact desktop panel, so they
+  should expose a target label such as `MCP server: filesystem` through both
+  `title` and `aria-label` instead of leaving the tooltip as a bare server id.
+  MCP server-row transport values are also compact protocol tokens, so expose
+  server + transport context such as `MCP server transport: filesystem · stdio`
+  through `title` / `aria-label` while keeping the visible value as `stdio`.
+  MCP server-row status pills should include the server name in `aria-label` /
+  `title` when practical, for example `filesystem: Online · 24ms` and
+  `browser: Disabled`, so repeated short status pills stay meaningful outside
+  their visual row context. For live-check result pills, use the same
+  server + status + latency/message target label for both `title` and
+  `aria-label`; do not leave the hover tooltip as a bare latency such as
+  `24ms` when the accessible name already says `filesystem: Online · 24ms`.
+  If the same latency is also shown as compact inline helper text in the server
+  row, mark that inline copy `aria-hidden` so assistive technology reads the
+  complete live-result pill once instead of repeating an unqualified `24ms`.
+  MCP diagnostic error rows should keep the visible error text raw but expose
+  the source and error category in `title` / `aria-label`, for example
+  `MCP: Configuration error · Failed to load mcp.json` or
+  `MCP: Live check failed · Request timed out`, because these truncated lines
+  otherwise read as generic errors detached from the MCP details panel.
+  The daemon reconnect control follows the same stateful action-label rule:
+  when the button is disabled because a reconnect is already in flight, its
+  `title` / `aria-label` should expose the reconnecting state rather than the
+  idle reconnect action. Recent-edit overflow controls in the desktop
+  `StatusPanel` should also keep visible text, `title`, and `aria-label`
+  aligned with the current action: show the hidden-file count while collapsed
+  and the return-to-recent action while expanded. Numeric-only current-activity
+  count pills should expose the count's meaning through both `title` and
+  `aria-label`, such as `Pending tools: 3` or `Failed tools: 1`, while the
+  visible text may stay as a compact number.
+  The current-activity active tool summary and detail rows should expose the
+  tool type with the truncated value in `title` / `aria-label`, for example
+  `Bash: npm run build` and `Bash: Running build verification`; the visible text
+  may stay as the raw summary/detail to preserve scan density.
+  The desktop `StatusPanel` daemon status value follows the same target-label
+  rule: expose `Daemon: <status>` through `aria-label` while keeping the visible
+  value compact and the diagnostic tooltip unchanged.
+  Daemon diagnostic rows should keep the visible diagnostic/error text raw, but
+  expose the daemon source and current state in `title` / `aria-label`, for
+  example `Daemon: Daemon error · Error: node executable not found`; otherwise a
+  truncated diagnostic reads as a generic error detached from the daemon status
+  and recovery action.
+  The current-message anchor card should follow the same label + value pattern:
+  keep the visible anchor label raw, but expose `Current message: <anchor>` in
+  `title` / `aria-label` so a long or truncated anchor remains meaningful
+  outside the visual card header.
+  Do not add destructive controls such as undo, discard all, or keep all to this
+  composer strip without a separate design review.
   For large historical sessions, the strip should render from the visible-tail
   summary in normal browsing. If explicit full-history search restores
   task/subagent/edit triggers from earlier collapsed messages, that merge must
@@ -772,6 +1448,79 @@ Current state (document reality): a11y is partial.
 When adding components, at minimum: use semantic elements, give icon-only
 buttons an accessible label (`title` or `aria-label`), and keep visible focus
 states. Note that full WCAG compliance has not been verified for this project.
+
+For chat tool blocks, any control that calls `openFile()` must expose both the
+action and the target in `title` / `aria-label`, such as
+`Open file: src/App.tsx`. This applies to header file targets and expanded
+detail action buttons. Keep the visible button text short if needed, but do not
+leave the accessible name as a generic `Open file` when the target path is known.
+If the open-file control is nested inside an expandable tool-block header or
+tool-group row, stop both click and keydown propagation on the inner control so
+keyboard activation does not also toggle the parent container.
+This propagation boundary also applies to open-file controls rendered inside
+expanded group details, such as Search result file rows, because those controls
+can still sit inside a keyboard-expandable group item subtree.
+Use the same keydown boundary for compact composite tool rows, such as subagent
+process file chips and tool-row targets, so future row-level keyboard handlers
+cannot accidentally turn file opening into a second row action.
+Status-panel recent edit tree rows use the same composite pattern: when a
+keyboard-selectable file row contains an open-file button, the inner button must
+stop both click and keydown propagation so opening the file does not also select
+or reopen the central diff inspection row.
+The recent edit diff inspection row itself must reuse the shared keyboard
+activation helper rather than hand-writing `Enter` / Space checks, so its
+custom `role="button"` behavior stays aligned with tool-block headers.
+Expandable chat tool-block headers should also expose a stable action label in
+`title` / `aria-label` when the visible title is only the tool name plus status
+metadata. Prefer labels that combine the action and target summary, such as
+`Toggle task details: Investigate chat rendering`, so screen-reader and tooltip
+users know whether they are opening task, agent, or generic tool details without
+having to infer the action from `aria-expanded` alone.
+This applies to grouped tool headers as well: Bash, Read, Edit, and Search
+group headers should label the group-level toggle with both the action and a
+representative command, file path, edit target, or search query.
+When a grouped tool header can represent a mixed execution state, do not rely
+only on the colored status dot. Show a compact status-count summary in the
+collapsed header, and include the same summary in the header toggle's
+`title` / `aria-label` target when practical. For example, a Search group with
+one completed item, one failed item, and one pending item should expose a
+visible secondary summary like `Success · 1 Failed · 1 Pending` so users can
+decide whether to expand the group without scanning every child row.
+Grouped tool item rows should follow the same rule at row level. If a Bash,
+Read, Edit, or Search group row is keyboard-expandable, its `title` /
+`aria-label` should describe the row action and item target, such as
+`Toggle command details: npm test` or `Toggle read details: src/App.tsx`,
+rather than relying on `aria-expanded` and visible fragments alone.
+  Read group compact summaries should mirror header primary/secondary summary
+  text into `aria-label` when they already expose it through `title`. Row-level
+  line badges such as `L11-30` must expose the file target too, for example
+  `Read lines: src/App.tsx · L11-30`, and repeated status pills must use a target
+  label such as `Read: src/App.tsx · Success` instead of a bare `Success`.
+  Search group compact summaries follow the same rule. Header query and status
+  summaries should mirror `title` into `aria-label`; row pattern chips should
+  expose query context such as `Search query: useState`; row result-count
+  summaries should expose the query target, for example
+  `Search results for useState: 1 match · 1 file`; repeated row status pills
+  should use `Search: useState · Success`; expanded result line chips such
+  as `L12` should expose `Search result line: src/App.tsx · L12`; and expanded
+  result rows should show a truncated match snippet when available while the row
+  button exposes a combined action label such as
+  `Open search result: src/App.tsx · L12 · const value`. In search result
+  summaries, keep `fileCount` as the unique file count, but treat the expanded
+  `files` collection as visible result rows. If one file has multiple distinct
+  `path:line[:column]:snippet` matches, render those matches as separate
+  open-file rows so users can jump directly to the relevant line instead of
+  losing every match after the first file-level hit. When the expanded quick
+  result list is capped, show a compact non-interactive footer with `title` and
+  `aria-label`, such as `2 more results in raw output`, so users understand the
+  visible rows are a shortcut list and can inspect the raw tool output for the
+  remaining matches.
+  Status-panel MCP summary containers follow the same target-label rule for
+  non-action summary state. If the container exposes availability or configuration
+  error details through `title`, mirror the same value into `aria-label` on that
+container. Keep the inner MCP toggle button's `title` / `aria-label`
+action-specific, such as `Expand MCP details` or `Collapse MCP details`, so the
+state summary and the disclosure action remain distinct.
 
 ---
 

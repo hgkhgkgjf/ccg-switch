@@ -1,7 +1,31 @@
-import type { ContentBlock, ToolUseBlock } from '../types/chat';
-import { getToolType } from '../types/tools';
-import type { ToolType } from '../types/tools';
-import { collectEditToolItems } from './toolPresentation';
+import type {ContentBlock, ToolUseBlock} from '../types/chat';
+import type {ToolType} from '../types/tools';
+import {getToolType} from '../types/tools';
+import {collectEditToolItems} from './toolPresentation';
+
+export interface ToolExecutionStatusSource {
+  isCompleted: boolean;
+  isError: boolean;
+}
+
+export interface ToolExecutionStatusSummary {
+  completedCount: number;
+  errorCount: number;
+  pendingCount: number;
+}
+
+export interface ToolExecutionStatusLabels {
+  success: string;
+  failed: string;
+  pending: string;
+}
+
+export interface ToolGroupBulkActionState {
+  allItemsExpanded: boolean;
+  noItemsExpanded: boolean;
+}
+
+const TOOL_BLOCK_TOGGLE_ACTIVATION_KEYS = new Set(['Enter', ' ']);
 
 /** 分组后的块类型 */
 export type GroupedBlock =
@@ -108,3 +132,100 @@ export function getGroupStatus(
   if (hasPending) return 'pending';
   return 'completed';
 }
+
+export function summarizeToolExecutionStatuses(
+  items: readonly ToolExecutionStatusSource[],
+): ToolExecutionStatusSummary {
+  return items.reduce<ToolExecutionStatusSummary>((summary, item) => {
+    if (item.isError) {
+      summary.errorCount += 1;
+    } else if (item.isCompleted) {
+      summary.completedCount += 1;
+    } else {
+      summary.pendingCount += 1;
+    }
+
+    return summary;
+  }, {
+    completedCount: 0,
+    errorCount: 0,
+    pendingCount: 0,
+  });
+}
+
+export function summarizeToolResultStatuses<T extends { id: string }>(
+  blocks: readonly T[],
+  findToolResult: (toolId: string) => { is_error?: boolean } | null | undefined,
+): ToolExecutionStatusSummary {
+  return summarizeToolExecutionStatuses(blocks.map((block) => {
+    const result = findToolResult(block.id);
+
+    return {
+      isCompleted: result !== undefined && result !== null,
+      isError: result?.is_error === true,
+    };
+  }));
+}
+
+export function formatToolExecutionStatusSummary(
+  summary: ToolExecutionStatusSummary,
+  labels: ToolExecutionStatusLabels,
+): string {
+  const parts: string[] = [];
+  if (summary.completedCount > 1) {
+    parts.push(`${summary.completedCount} ${labels.success}`);
+  } else if (summary.completedCount > 0) {
+    parts.push(labels.success);
+  }
+  if (summary.errorCount > 0) parts.push(`${summary.errorCount} ${labels.failed}`);
+  if (summary.pendingCount > 0) parts.push(`${summary.pendingCount} ${labels.pending}`);
+  return parts.join(' · ');
+}
+
+export function getToolGroupBulkActionState(
+  itemCount: number,
+  expandedIndices: ReadonlySet<number>,
+): ToolGroupBulkActionState {
+  const validItemCount = Math.max(0, itemCount);
+  const expandedItemCount = Array.from(expandedIndices).filter(
+    (index) => index >= 0 && index < validItemCount,
+  ).length;
+
+  return {
+    allItemsExpanded: validItemCount > 0 && expandedItemCount === validItemCount,
+    noItemsExpanded: expandedItemCount === 0,
+  };
+}
+
+export function getToolGroupExpandedIndices(itemCount: number): Set<number> {
+  const validItemCount = Math.max(0, itemCount);
+
+  return new Set(Array.from({length: validItemCount}, (_, index) => index));
+}
+
+export function toggleToolGroupExpandedIndex(
+  itemCount: number,
+  expandedIndices: ReadonlySet<number>,
+  index: number,
+): Set<number> {
+  const validItemCount = Math.max(0, itemCount);
+  const nextExpandedIndices = new Set(expandedIndices);
+
+  if (!Number.isInteger(index) || index < 0 || index >= validItemCount) {
+    return nextExpandedIndices;
+  }
+
+  if (nextExpandedIndices.has(index)) {
+    nextExpandedIndices.delete(index);
+  } else {
+    nextExpandedIndices.add(index);
+  }
+
+  return nextExpandedIndices;
+}
+
+export function isToolBlockToggleActivationKey(key: string): boolean {
+  return TOOL_BLOCK_TOGGLE_ACTIVATION_KEYS.has(key);
+}
+
+export const isToolGroupToggleActivationKey = isToolBlockToggleActivationKey;

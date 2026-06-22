@@ -1,4 +1,4 @@
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import MessageList from './MessageList';
 import type {ChatMessage} from '../../types/chat';
@@ -14,6 +14,10 @@ vi.mock('dompurify', () => ({
     },
 }));
 
+const translationState = vi.hoisted(() => ({
+    keyOnly: false,
+}));
+
 vi.mock('react-i18next', () => ({
     initReactI18next: {
         type: '3rdParty',
@@ -21,6 +25,7 @@ vi.mock('react-i18next', () => ({
     },
     useTranslation: () => ({
         t: (key: string, values?: Record<string, number>) => {
+            if (translationState.keyOnly) return key;
             if (key === 'chat.layout.searchResults') return `Found ${values?.count ?? 0} matches`;
             if (key === 'chat.layout.searchNoResults') return 'No matches';
             if (key === 'chat.layout.searchFullHistoryLoading') return 'Searching complete history';
@@ -53,6 +58,10 @@ const messages: ChatMessage[] = [
 ];
 
 describe('MessageList', () => {
+    afterEach(() => {
+        translationState.keyOnly = false;
+    });
+
     it('surfaces full-history search loading above windowed search results', () => {
         const html = renderToStaticMarkup(
             <MessageList
@@ -94,5 +103,95 @@ describe('MessageList', () => {
         expect(html).toContain('Found 1 matches');
         expect(html).not.toContain('Searching complete history');
         expect(html).not.toContain('Could not search complete history');
+    });
+
+    it('resolves earlier internal tool results for visible tool blocks', () => {
+        const outOfOrderToolMessages: ChatMessage[] = [
+            {
+                id: 'prompt',
+                role: 'user',
+                content: 'read package metadata',
+                createdAt: 1,
+            },
+            {
+                id: 'tool-result',
+                role: 'user',
+                content: '[tool_result]',
+                raw: {
+                    type: 'user',
+                    message: {
+                        content: [
+                            {
+                                type: 'tool_result',
+                                tool_use_id: 'tool-early',
+                                content: 'package file contents',
+                                is_error: false,
+                            },
+                        ],
+                    },
+                },
+                createdAt: 2,
+            },
+            {
+                id: 'assistant-tool',
+                role: 'assistant',
+                content: '',
+                raw: {
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {
+                                type: 'tool_use',
+                                id: 'tool-early',
+                                name: 'Read',
+                                input: {file_path: 'package.json'},
+                            },
+                        ],
+                    },
+                },
+                createdAt: 3,
+            },
+        ];
+
+        const html = renderToStaticMarkup(
+            <MessageList
+                messages={outOfOrderToolMessages}
+                searchQuery="package.json"
+            />,
+        );
+
+        expect(html).toContain('tool-status-indicator completed');
+        expect(html).not.toContain('tool-status-indicator pending');
+        expect(html).not.toContain('[tool_result]');
+    });
+
+    it('keeps search and reveal chrome readable when i18n keys are unavailable', () => {
+        translationState.keyOnly = true;
+        const manyMessages: ChatMessage[] = Array.from({length: 17}, (_, index) => ({
+            id: `m-${index + 1}`,
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: index === 16 ? 'needle' : `message ${index + 1}`,
+            createdAt: index + 1,
+        }));
+        const searchHtml = renderToStaticMarkup(
+            <MessageList
+                messages={messages}
+                searchQuery="absent"
+                fullHistorySearchStatus="error"
+                onRetryFullHistorySearch={() => undefined}
+            />,
+        );
+        const collapsedHtml = renderToStaticMarkup(
+            <MessageList messages={manyMessages}/>,
+        );
+
+        expect(searchHtml).toContain('No matching messages found');
+        expect(searchHtml).toContain('Complete history search failed. Current results only cover the loaded window.');
+        expect(searchHtml).toContain('aria-label="Retry"');
+        expect(searchHtml).not.toContain('chat.layout.searchNoResults');
+        expect(searchHtml).not.toContain('chat.layout.searchFullHistoryError');
+        expect(searchHtml).not.toContain('chat.layout.searchFullHistoryRetry');
+        expect(collapsedHtml).toContain('2 earlier messages are collapsed. Scroll to the top to load 2 more');
+        expect(collapsedHtml).not.toContain('chat.message.showEarlier');
     });
 });

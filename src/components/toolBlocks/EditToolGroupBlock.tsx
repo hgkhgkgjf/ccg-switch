@@ -1,10 +1,18 @@
 // EditToolGroupBlock - Edit 工具分组块
 
-import {memo, useMemo, useState} from 'react';
+import {type KeyboardEvent, memo, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ChevronDown, ChevronRight, PencilLine} from 'lucide-react';
 import type {ToolResultBlock, ToolUseBlock} from '../../types/chat';
-import {getGroupStatus} from '../../utils/toolGrouping';
+import {
+    formatToolExecutionStatusSummary,
+    getGroupStatus,
+    getToolGroupBulkActionState,
+    getToolGroupExpandedIndices,
+    isToolBlockToggleActivationKey,
+    summarizeToolExecutionStatuses,
+    toggleToolGroupExpandedIndex,
+} from '../../utils/toolGrouping';
 import {collectEditToolItems, mergeEditToolItemsByFile} from '../../utils/toolPresentation';
 import {getFileIcon} from '../../utils/fileIcons';
 import {openFile} from '../../utils/bridge';
@@ -36,6 +44,37 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
   );
   const totalAdditions = editItems.reduce((sum, item) => sum + item.additions, 0);
   const totalDeletions = editItems.reduce((sum, item) => sum + item.deletions, 0);
+  const hasTotalEditStats = totalAdditions > 0 || totalDeletions > 0;
+  const statusSummary = summarizeToolExecutionStatuses(editItems);
+  const statusSummaryText = formatToolExecutionStatusSummary(statusSummary, {
+    success: t('tools.success'),
+    failed: t('tools.failed'),
+    pending: t('tools.pending'),
+  });
+  const groupToggleTarget = [
+    editItems[0]?.displayPath || t('tools.editBatchFiles'),
+    statusSummaryText,
+  ].filter(Boolean).join(' · ');
+  const groupToggleLabel = t('tools.editGroupDetailsToggle', { target: groupToggleTarget });
+  const expandAllLabel = t('tools.expandAllInGroup', { target: groupToggleTarget });
+  const collapseAllLabel = t('tools.collapseAllInGroup', { target: groupToggleTarget });
+  const {allItemsExpanded, noItemsExpanded} = getToolGroupBulkActionState(editItems.length, expandedIndices);
+  const getEditStatsLabel = (target: string, additions: number, deletions: number) => {
+    const fallbackLabel = `Edit stats: ${target} · +${additions} / -${deletions}`;
+    const translatedLabel = t('chat.layout.inputStatusEditFileStats', {
+      defaultValue: fallbackLabel,
+      file: target,
+      additions,
+      deletions,
+    });
+    return translatedLabel === 'chat.layout.inputStatusEditFileStats' || translatedLabel.includes('{{')
+      ? fallbackLabel
+      : translatedLabel;
+  };
+  const groupStatsTarget = `${editItems[0]?.displayPath || t('tools.editBatchFiles')} · ${editItems.length} files`;
+  const totalStatsLabel = hasTotalEditStats
+    ? getEditStatsLabel(groupStatsTarget, totalAdditions, totalDeletions)
+    : '';
 
   if (editItems.length === 0) {
     return null;
@@ -43,22 +82,19 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
-    if (expand) {
-      setExpandedIndices(new Set(editItems.map((_, i) => i)));
-    } else {
-      setExpandedIndices(new Set());
-    }
+    setExpandedIndices(expand ? getToolGroupExpandedIndices(editItems.length) : new Set());
   };
 
   // 切换单个
   const toggleItem = (index: number) => {
-    const newSet = new Set(expandedIndices);
-    if (expandedIndices.has(index)) {
-      newSet.delete(index);
-    } else {
-      newSet.add(index);
-    }
-    setExpandedIndices(newSet);
+    setExpandedIndices((current) => toggleToolGroupExpandedIndex(editItems.length, current, index));
+  };
+
+  const handleItemKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (!isToolBlockToggleActivationKey(event.key)) return;
+
+    event.preventDefault();
+    toggleItem(index);
   };
 
   return (
@@ -69,9 +105,11 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
         role="button"
         tabIndex={0}
         aria-expanded={groupExpanded}
+        aria-label={groupToggleLabel}
+        title={groupToggleLabel}
         onClick={() => setGroupExpanded((prev) => !prev)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
+          if (isToolBlockToggleActivationKey(event.key)) {
             event.preventDefault();
             setGroupExpanded((prev) => !prev);
           }
@@ -83,10 +121,15 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
           <span className="tool-title-summary">
             ({editItems.length})
           </span>
-          {(totalAdditions > 0 || totalDeletions > 0) && (
-            <span className="edit-total-stats">
-              <span className="edit-stat-added">+{totalAdditions}</span>
-              <span className="edit-stat-deleted">-{totalDeletions}</span>
+          {hasTotalEditStats && (
+            <span className="edit-total-stats" title={totalStatsLabel} aria-label={totalStatsLabel}>
+              <span className="edit-stat-added" aria-hidden="true">+{totalAdditions}</span>
+              <span className="edit-stat-deleted" aria-hidden="true">-{totalDeletions}</span>
+            </span>
+          )}
+          {statusSummaryText && (
+            <span className="tool-title-secondary-summary" title={statusSummaryText}>
+              {statusSummaryText}
             </span>
           )}
         </div>
@@ -110,13 +153,25 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
 
               // 单个工具状态
               const itemStatus = item.isError ? 'error' : item.isCompleted ? 'completed' : 'pending';
+              const openFileLabel = `${t('tools.openFile')}: ${item.displayPath}`;
+              const itemToggleLabel = t('tools.editGroupItemDetailsToggle', { target: item.displayPath });
+              const hasItemStats = item.additions > 0 || item.deletions > 0;
+              const itemStatsLabel = hasItemStats
+                ? getEditStatsLabel(item.displayPath, item.additions, item.deletions)
+                : '';
 
               return (
                 <div key={item.id} className="task-group-item">
                   {/* 单项标题 */}
                   <div
                     className="task-group-item-header"
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    aria-label={itemToggleLabel}
+                    title={itemToggleLabel}
                     onClick={() => toggleItem(index)}
+                    onKeyDown={(event) => handleItemKeyDown(event, index)}
                   >
                     <div className="task-group-item-title">
                       <span className="task-group-item-number">{index + 1}.</span>
@@ -126,12 +181,17 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
                           dangerouslySetInnerHTML={{ __html: fileIconSvg }}
                         />
                       )}
-                      <span
-                        className="task-group-item-file clickable-file edit-diff-hover-trigger"
-                        title={item.filePath}
+                      <button
+                        type="button"
+                        className="task-group-item-file file-path-button clickable-file edit-diff-hover-trigger"
+                        title={openFileLabel}
+                        aria-label={openFileLabel}
                         onClick={(event) => {
                           event.stopPropagation();
                           void openFile(item.openPath, item.lineStart, item.lineEnd, currentCwd);
+                        }}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
                         }}
                       >
                         <span className="edit-diff-hover-label">{item.displayPath}</span>
@@ -141,13 +201,13 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
                           deletions={item.deletions}
                           lines={item.diffPreviewLines}
                         />
-                      </span>
+                      </button>
                     </div>
                     <div className="task-group-item-status">
-                      {(item.additions > 0 || item.deletions > 0) && (
-                        <span className="task-group-item-badge edit-item-stats">
-                          <span className="edit-stat-added">+{item.additions}</span>
-                          <span className="edit-stat-deleted">-{item.deletions}</span>
+                      {hasItemStats && (
+                        <span className="task-group-item-badge edit-item-stats" title={itemStatsLabel} aria-label={itemStatsLabel}>
+                          <span className="edit-stat-added" aria-hidden="true">+{item.additions}</span>
+                          <span className="edit-stat-deleted" aria-hidden="true">-{item.deletions}</span>
                         </span>
                       )}
                       <span className={`tool-state-pill ${itemStatus}`}>
@@ -181,6 +241,9 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
             <button
               type="button"
               className="btn btn-sm btn-ghost"
+              title={expandAllLabel}
+              aria-label={expandAllLabel}
+              disabled={allItemsExpanded}
               onClick={() => toggleAll(true)}
             >
               {t('tools.expandAll')}
@@ -188,6 +251,9 @@ const EditToolGroupBlock = memo(function EditToolGroupBlock({
             <button
               type="button"
               className="btn btn-sm btn-ghost"
+              title={collapseAllLabel}
+              aria-label={collapseAllLabel}
+              disabled={noItemsExpanded}
               onClick={() => toggleAll(false)}
             >
               {t('tools.collapseAll')}

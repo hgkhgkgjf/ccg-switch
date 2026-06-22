@@ -1544,17 +1544,25 @@ pub struct UnifiedSessionMessageWindow {
   The Chat UI currently requests `120` for first paint.
 - `messages` contains the newest parsed unified messages only. It is ordered in
   original transcript order, not newest-first.
-- `startIndex` is the zero-based index of `messages[0]` within the full parsed
-  unified transcript. If the full transcript has `5000` parsed messages and the
-  returned window has `120`, `startIndex` must be `4880`.
-- `totalCount` is the number of parsed unified messages in the full transcript,
-  after provider-specific filtering and normalization.
+- `startIndex` is the stable zero-based source position used to map
+  `messages[0]` into React history ids. Exact loaders use the parsed unified
+  transcript index. The large-Claude fast path may use the JSONL source line
+  index so it can avoid parsing the complete file before first paint.
+- `totalCount` is exact for full/exact loaders. The large-Claude fast path may
+  report the JSONL line count as an upper bound until
+  `get_unified_session_messages` loads the exact full history.
 - `complete` is `true` only when the returned window covers the whole parsed
-  transcript (`startIndex === 0`). The frontend may cache this result as the
-  complete session history. A `complete === false` window is for display only
-  and must be followed by `get_unified_session_messages` before caching.
-- Claude and Codex providers should parse history line-by-line into a bounded
-  tail window without building or serializing the complete transcript first.
+  source needed by the provider (`startIndex === 0` for exact loaders; source
+  window starts at line 0 for the large-Claude fast path). The frontend may
+  cache this result as the complete session history. A `complete === false`
+  window is for display only and must be followed by
+  `get_unified_session_messages` before caching.
+- Claude and Codex providers should not build or serialize the complete
+  transcript before first paint. For large Claude JSONL files, read and parse a
+  bounded tail line window first, then progressively expand that tail if meta or
+  empty lines prevent filling `tailLimit`. Codex fallback tool ids depend on the
+  original parsed message index, so Codex must keep exact parsed indices until a
+  provider-specific safe fast path is designed.
   Gemini may temporarily full-load then crop as a compatibility fallback because
   Chat history selection is currently limited to Claude/Codex.
 - Provider-specific normalization must be identical between the window loader
@@ -1575,6 +1583,7 @@ pub struct UnifiedSessionMessageWindow {
 | Parsed transcript length is greater than the normalized limit | Return the newest `limit` messages with `complete = false`. |
 | Provider id is unknown | Return `Err("Unknown provider: <id>")`, same as full history loading. |
 | Source path is missing or unreadable | Return the provider loader error; do not synthesize an empty successful window. |
+| A large Claude JSONL tail contains only meta/empty lines | Expand the tail line window until enough renderable messages are found or the file start is reached. |
 | A Codex window contains fallback tool ids | Fallback ids use the original parsed message index, matching the full loader. |
 | Frontend receives a late full-history response after a prompt send/session switch | Ignore it via the session-load token; do not overwrite the active transcript. |
 
@@ -1601,6 +1610,8 @@ pub struct UnifiedSessionMessageWindow {
 - Frontend store test: a `complete = true` window is cached and does not call
   the full-history command.
 - Rust provider test: Claude window keeps the expected tail and `startIndex`.
+- Rust provider test: large Claude window expands beyond the initial tail line
+  budget when trailing meta lines would otherwise hide renderable messages.
 - Rust provider test: Codex window keeps the expected tail and stable fallback
   tool ids.
 - Build checks: `npm test`, `npm run build`,

@@ -4,7 +4,7 @@ import {Package, PanelRightOpen, RefreshCw, Trash2} from 'lucide-react';
 import {useChatStore} from '../stores/useChatStore';
 import {useMcpStoreV2} from '../stores/useMcpStoreV2';
 import {useSdkStore} from '../stores/useSdkStore';
-import SdkDependencyPanel from '../components/chat/SdkDependencyPanel';
+import SdkDependencyPanel, {getSdkDependencyPanelLabels} from '../components/chat/SdkDependencyPanel';
 import AskUserQuestionDialog from '../components/chat/AskUserQuestionDialog';
 import PlanApprovalDialog from '../components/chat/PlanApprovalDialog';
 import ToolPermissionDialog from '../components/chat/ToolPermissionDialog';
@@ -24,9 +24,15 @@ import {
     DIFF_PANE_MAX_WIDTH,
     DIFF_PANE_MIN_WIDTH,
     getActivePermissionDialog,
+    getChatTopChromeActionLabel,
     getCollapsedMessageWindow,
+    getDiffPaneReopenLabel,
+    getPaneResizeHandleLabel,
     getPaneWidthsAfterResize,
+    getSdkMissingBannerText,
     highlightTranscriptToolAnchor,
+    type PaneResizeHandleEdge,
+    queueDiffPaneFocusAfterOpen,
     shouldBuildCompleteChatStatusSummary,
     shouldIgnoreChatSessionSelection,
     shouldRequestFullHistoryForSearch,
@@ -53,9 +59,12 @@ import {
 } from '../utils/chatNavigation';
 import {
     canReconnectChatDaemon,
-    CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY,
+    getChatDaemonDiagnosticDisplayText,
     getChatDaemonDiagnosticText,
+    getChatDaemonReconnectLabel,
+    getChatDaemonReconnectShortLabel,
     getChatDaemonStatusKind,
+    getChatDaemonStatusText,
 } from '../utils/chatDaemonStatus';
 import {buildChatMcpAvailabilitySummary} from '../utils/chatMcpStatus';
 import {
@@ -101,6 +110,7 @@ interface FullHistorySearchState {
  */
 export default function ChatPage() {
     const {t} = useTranslation();
+    const sdkDependencyLabels = useMemo(() => getSdkDependencyPanelLabels(t), [t]);
     const {
         messages,
         provider,
@@ -151,6 +161,7 @@ export default function ChatPage() {
     const [mcpConnectivity, setMcpConnectivity] = useState<ChatMcpConnectivityState>(EMPTY_CHAT_MCP_CONNECTIVITY_STATE);
     const scrollRef = useRef<HTMLDivElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const diffReviewPaneRef = useRef<HTMLElement>(null);
     const fullHistorySearchStateRef = useRef<FullHistorySearchState | null>(null);
     const isNearBottomRef = useRef(true);
     const messageNodeMapRef = useRef<Map<string, HTMLElement>>(new Map());
@@ -372,6 +383,22 @@ export default function ChatPage() {
         diffPaneCollapsed,
         hasSelectedEdit: Boolean(selectedEdit),
     });
+    const diffPaneReopenLabel = getDiffPaneReopenLabel({
+        displayPath: selectedEdit?.displayPath,
+        translate: (key, options) => t(key, options),
+    });
+    const resizeConversationDiffLabel = getPaneResizeHandleLabel({
+        edge: 'conversation-diff',
+        translate: t,
+    });
+    const resizeDiffStatusLabel = getPaneResizeHandleLabel({
+        edge: 'diff-status',
+        translate: t,
+    });
+    const resizeConversationStatusLabel = getPaneResizeHandleLabel({
+        edge: 'conversation-status',
+        translate: t,
+    });
     const activeAnchorLabel = useMemo(
         () => {
             const activeAnchor = anchorItems.find((anchor) => anchor.id === activeAnchorId);
@@ -401,24 +428,46 @@ export default function ChatPage() {
         : daemonStatusKind === 'offline' || daemonStatusKind === 'error'
             ? 'bg-error'
             : 'bg-warning';
-    const daemonStatusText = daemonStatusKind === 'ready'
-        ? t('chat.ready')
-        : daemonStatusKind === 'offline'
-            ? t('chat.daemon.offline')
-            : daemonStatusKind === 'error'
-                ? t('chat.daemon.error')
-                : daemonStatusKind === 'unknown' && daemonStatus
-                ? daemonStatus
-                : t('chat.starting');
+    const daemonStatusText = getChatDaemonStatusText({
+        daemonReady,
+        daemonStatus,
+        daemonReconnecting,
+        translate: t,
+    });
     const daemonDiagnosticText = getChatDaemonDiagnosticText({
         daemonReady,
         daemonStatus,
         daemonReconnecting,
         error,
     });
-    const daemonDiagnosticDisplayText = daemonDiagnosticText === CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY
-        ? t(CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY)
-        : daemonDiagnosticText;
+    const daemonDiagnosticDisplayText = getChatDaemonDiagnosticDisplayText({
+        diagnosticText: daemonDiagnosticText,
+        translate: t,
+    });
+    const daemonReconnectLabel = getChatDaemonReconnectLabel({
+        daemonReconnecting,
+        translate: t,
+    });
+    const daemonReconnectShortLabel = getChatDaemonReconnectShortLabel({
+        daemonReconnecting,
+        translate: t,
+    });
+    const sdkManageLabel = getChatTopChromeActionLabel({
+        action: 'sdk-manage',
+        translate: t,
+    });
+    const clearChatLabel = getChatTopChromeActionLabel({
+        action: 'clear-chat',
+        translate: t,
+    });
+    const sdkInstallLabel = getChatTopChromeActionLabel({
+        action: 'sdk-install',
+        translate: t,
+    });
+    const sdkMissingBannerText = getSdkMissingBannerText({
+        sdkName: currentSdk?.displayName,
+        translate: (key, options) => t(key, options),
+    });
 
     useEffect(() => {
         fullHistorySearchStateRef.current = fullHistorySearchState;
@@ -664,10 +713,16 @@ export default function ChatPage() {
     const handleSelectedEditChange = useCallback((edit: ChatStatusEditSummary) => {
         setSelectedEditKey(getChatStatusEditKey(edit));
         setDiffPaneCollapsed(false);
+        queueDiffPaneFocusAfterOpen(() => diffReviewPaneRef.current);
+    }, []);
+
+    const handleOpenDiffPane = useCallback(() => {
+        setDiffPaneCollapsed(false);
+        queueDiffPaneFocusAfterOpen(() => diffReviewPaneRef.current);
     }, []);
 
     const startPaneResize = useCallback((
-        edge: 'conversation-diff' | 'diff-status' | 'conversation-status',
+        edge: PaneResizeHandleEdge,
         event: ReactPointerEvent<HTMLButtonElement>,
     ) => {
         if (event.button !== 0) return;
@@ -777,13 +832,13 @@ export default function ChatPage() {
                         <button
                             type="button"
                             className="btn btn-ghost btn-xs h-6 min-h-0 gap-1 px-2 text-base-content/55"
-                            title={t('chat.daemon.reconnect')}
-                            aria-label={t('chat.daemon.reconnect')}
+                            title={daemonReconnectLabel}
+                            aria-label={daemonReconnectLabel}
                             disabled={daemonReconnecting}
                             onClick={() => void reconnectDaemon()}
                         >
                             <RefreshCw size={12} className={daemonReconnecting ? 'animate-spin' : ''} />
-                            {daemonReconnecting ? t('chat.daemon.reconnecting') : t('chat.daemon.reconnectShort')}
+                            {daemonReconnectShortLabel}
                         </button>
                     )}
                 </div>
@@ -793,7 +848,7 @@ export default function ChatPage() {
                         onClick={() => setSdkModalOpen(true)}
                     >
                         <Package size={16}/>
-                        {t('chat.sdk.manage')}
+                        {sdkManageLabel}
                     </button>
                     <button
                         className="btn btn-ghost btn-sm"
@@ -801,7 +856,7 @@ export default function ChatPage() {
                         disabled={messages.length === 0}
                     >
                         <Trash2 size={16}/>
-                        {t('chat.clear')}
+                        {clearChatLabel}
                     </button>
                 </div>
             </div>
@@ -810,12 +865,12 @@ export default function ChatPage() {
             {sdkMissing && (
                 <div className="px-4 pt-3">
                     <div className="alert alert-warning py-2 text-sm flex items-center justify-between">
-                        <span>{t('chat.sdk.missingBanner', {name: currentSdk?.displayName})}</span>
+                        <span>{sdkMissingBannerText}</span>
                         <button
                             className="btn btn-sm btn-warning"
                             onClick={() => setSdkModalOpen(true)}
                         >
-                            {t('chat.sdk.install')}
+                            {sdkInstallLabel}
                         </button>
                     </div>
                 </div>
@@ -899,8 +954,8 @@ export default function ChatPage() {
                             <button
                                 type="button"
                                 className="chat-pane-resizer hidden xl:flex"
-                                title={t('chat.layout.resizeConversationDiff')}
-                                aria-label={t('chat.layout.resizeConversationDiff')}
+                                title={resizeConversationDiffLabel}
+                                aria-label={resizeConversationDiffLabel}
                                 onPointerDown={(event) => startPaneResize('conversation-diff', event)}
                             />
 
@@ -909,6 +964,7 @@ export default function ChatPage() {
                                 style={{flex: `1 1 ${diffPaneWidth}px`}}
                             >
                                 <ChatDiffReviewPane
+                                    ref={diffReviewPaneRef}
                                     edit={selectedEdit}
                                     mode={diffViewMode}
                                     wrapLines={diffWrapLines}
@@ -922,8 +978,8 @@ export default function ChatPage() {
                             <button
                                 type="button"
                                 className="chat-pane-resizer hidden xl:flex"
-                                title={t('chat.layout.resizeDiffStatus')}
-                                aria-label={t('chat.layout.resizeDiffStatus')}
+                                title={resizeDiffStatusLabel}
+                                aria-label={resizeDiffStatusLabel}
                                 onPointerDown={(event) => startPaneResize('diff-status', event)}
                             />
                         </>
@@ -933,8 +989,8 @@ export default function ChatPage() {
                         <button
                             type="button"
                             className="chat-pane-resizer hidden xl:flex"
-                            title={t('chat.layout.resizeConversationStatus')}
-                            aria-label={t('chat.layout.resizeConversationStatus')}
+                            title={resizeConversationStatusLabel}
+                            aria-label={resizeConversationStatusLabel}
                             onPointerDown={(event) => startPaneResize('conversation-status', event)}
                         />
                     )}
@@ -966,7 +1022,7 @@ export default function ChatPage() {
                             isDiffPaneCollapsed={diffPaneCollapsed}
                             diffViewMode={diffViewMode}
                             onSelectedEditChange={handleSelectedEditChange}
-                            onOpenDiffPanel={() => setDiffPaneCollapsed(false)}
+                            onOpenDiffPanel={handleOpenDiffPane}
                             onDiffViewModeChange={setDiffViewMode}
                             onSelectTool={handleSelectStatusTool}
                             onReconnectDaemon={() => void reconnectDaemon()}
@@ -978,9 +1034,9 @@ export default function ChatPage() {
                         <button
                             type="button"
                             className="chat-diff-pane-reopen-floating"
-                            title={t('chat.layout.expandDiffPanel')}
-                            aria-label={t('chat.layout.expandDiffPanel')}
-                            onClick={() => setDiffPaneCollapsed(false)}
+                            title={diffPaneReopenLabel}
+                            aria-label={diffPaneReopenLabel}
+                            onClick={handleOpenDiffPane}
                         >
                             <PanelRightOpen size={14} />
                         </button>
@@ -998,9 +1054,9 @@ export default function ChatPage() {
             {/* SDK 依赖管理弹窗 */}
             <ModalDialog
                 isOpen={sdkModalOpen}
-                title={t('chat.sdk.title')}
+                title={sdkDependencyLabels.title}
                 maxWidthClass="max-w-lg"
-                confirmText={t('common.close')}
+                confirmText={sdkDependencyLabels.close}
                 onConfirm={() => setSdkModalOpen(false)}
                 onClose={() => setSdkModalOpen(false)}
             >

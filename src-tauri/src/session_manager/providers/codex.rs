@@ -1,4 +1,6 @@
-use super::utils::{home_dir, sanitize_session_markdown_text, sanitize_session_text, truncate_text};
+use super::utils::{
+    home_dir, sanitize_session_markdown_text, sanitize_session_text, truncate_text,
+};
 use crate::session_manager::{
     MessageWindowBuilder, SessionMeta, UnifiedSessionMessage, UnifiedSessionMessageWindow,
 };
@@ -545,10 +547,7 @@ fn parse_codex_history_line(line: &str, message_index: usize) -> Option<UnifiedS
             })
         }
         Some("function_call_output") | Some("custom_tool_call_output") => {
-            let tool_id = codex_tool_id(
-                payload,
-                &format!("codex-tool-result-{}", message_index),
-            );
+            let tool_id = codex_tool_id(payload, &format!("codex-tool-result-{}", message_index));
             let output = extract_codex_output(payload);
             let is_error = payload
                 .get("is_error")

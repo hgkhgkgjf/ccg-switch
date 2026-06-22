@@ -1,6 +1,6 @@
 // GenericToolBlock - 通用工具块组件
 
-import {memo, useState} from 'react';
+import {memo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Wrench} from 'lucide-react';
 import type {ToolResultBlock} from '../../types/chat';
@@ -17,6 +17,7 @@ import {
 } from '../../utils/toolPresentation';
 import {copyToClipboard, openFile} from '../../utils/bridge';
 import {useChatStore} from '../../stores/useChatStore';
+import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 
 export interface GenericToolBlockProps {
   name?: string;
@@ -24,6 +25,13 @@ export interface GenericToolBlockProps {
   result?: ToolResultBlock | null;
   toolId?: string;
   compact?: boolean;
+}
+
+type GenericCopiedTarget = 'input' | 'output' | null;
+
+function isAskUserQuestionTool(name?: string): boolean {
+  const normalizedName = name?.toLowerCase();
+  return normalizedName === 'askuserquestion' || normalizedName === 'ask_user_question';
 }
 
 const GenericToolBlock = memo(function GenericToolBlock({
@@ -35,7 +43,8 @@ const GenericToolBlock = memo(function GenericToolBlock({
 }: GenericToolBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<GenericCopiedTarget>(null);
+  const copiedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDenied = useIsToolDenied(toolId);
   const currentCwd = useChatStore((state) => state.currentCwd);
 
@@ -52,7 +61,9 @@ const GenericToolBlock = memo(function GenericToolBlock({
     : typeof input.cmd === 'string'
       ? input.cmd
       : '';
-  const status = getToolDisplayStatus(result, isDenied);
+  const status = isAskUserQuestionTool(name) && result && !isDenied
+    ? 'completed'
+    : getToolDisplayStatus(result, isDenied);
   const isError = status === 'error';
 
   // 提取输入参数（排除内部字段）
@@ -83,22 +94,48 @@ const GenericToolBlock = memo(function GenericToolBlock({
       ? actionSummary.summary
       : actionSummary.summary;
   const showResultSummary = Boolean(resultSummary) && resultSummary !== primarySummary;
+  const openFileLabel = target?.isFile ? `${t('tools.openFile')}: ${target.displayPath}` : '';
+  const headerToggleTarget = primarySummary || toolName;
+  const headerToggleLabel = hasExpandableContent
+    ? t('tools.genericDetailsToggle', { target: headerToggleTarget })
+    : undefined;
+  const copyInputLabel = t('tools.copyInput');
+  const copyOutputLabel = t('tools.copyOutput');
+  const copyInputActionLabel = t('tools.copyInputForTool', { target: headerToggleTarget });
+  const copyOutputActionLabel = t('tools.copyOutputForTool', { target: headerToggleTarget });
+
+  const markCopied = (target: Exclude<GenericCopiedTarget, null>) => {
+    if (copiedResetTimerRef.current) {
+      clearTimeout(copiedResetTimerRef.current);
+    }
+    setCopiedTarget(target);
+    copiedResetTimerRef.current = setTimeout(() => {
+      setCopiedTarget(null);
+      copiedResetTimerRef.current = null;
+    }, 2000);
+  };
 
   // 复制功能
   const handleCopyInput = async (event?: React.MouseEvent) => {
     event?.stopPropagation();
     await copyToClipboard(JSON.stringify(input, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    markCopied('input');
   };
 
   const handleCopyOutput = async (event?: React.MouseEvent) => {
     event?.stopPropagation();
     if (displayResultText) {
       await copyToClipboard(displayResultText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied('output');
     }
+  };
+
+  const toggleExpanded = () => setExpanded((prev) => !prev);
+
+  const handleHeaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!hasExpandableContent || !isToolBlockToggleActivationKey(event.key)) return;
+    event.preventDefault();
+    toggleExpanded();
   };
 
   if (compact && !hasExpandableContent) {
@@ -137,18 +174,22 @@ const GenericToolBlock = memo(function GenericToolBlock({
       <div className="tool-actions">
         <button
           type="button"
-          className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          className={`btn btn-sm ${copiedTarget === 'input' ? 'btn-success' : 'btn-ghost'}`}
+          title={copyInputActionLabel}
+          aria-label={copyInputActionLabel}
           onClick={handleCopyInput}
         >
-          {copied ? t('tools.copied') : t('tools.copyInput')}
+          {copiedTarget === 'input' ? t('tools.copied') : copyInputLabel}
         </button>
         {displayResultText && (
           <button
             type="button"
-            className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+            className={`btn btn-sm ${copiedTarget === 'output' ? 'btn-success' : 'btn-ghost'}`}
+            title={copyOutputActionLabel}
+            aria-label={copyOutputActionLabel}
             onClick={handleCopyOutput}
           >
-            {copied ? t('tools.copied') : t('tools.copyOutput')}
+            {copiedTarget === 'output' ? t('tools.copied') : copyOutputLabel}
           </button>
         )}
       </div>
@@ -159,7 +200,13 @@ const GenericToolBlock = memo(function GenericToolBlock({
     <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
         className={compact ? 'task-header task-header-compact' : 'task-header'}
-        onClick={hasExpandableContent ? () => setExpanded((prev) => !prev) : undefined}
+        role={hasExpandableContent ? 'button' : undefined}
+        tabIndex={hasExpandableContent ? 0 : undefined}
+        aria-expanded={hasExpandableContent ? expanded : undefined}
+        aria-label={headerToggleLabel}
+        title={headerToggleLabel}
+        onClick={hasExpandableContent ? toggleExpanded : undefined}
+        onKeyDown={handleHeaderKeyDown}
         style={{ cursor: hasExpandableContent ? 'pointer' : 'default' }}
       >
         <div className="task-title-section">
@@ -168,30 +215,55 @@ const GenericToolBlock = memo(function GenericToolBlock({
           <span className={`tool-command-chip ${actionSummary.accentClass}`}>
             {actionSummary.label}
           </span>
-          {target ? (
-            <span
-              className={`tool-title-summary file-path-link ${target.isFile ? 'clickable-file' : ''}`}
-              title={target.rawPath}
-              onClick={target.isFile ? (event) => {
+          {target?.isFile ? (
+            <button
+              type="button"
+              className="tool-title-summary file-path-link file-path-button clickable-file"
+              title={openFileLabel}
+              aria-label={openFileLabel}
+              onClick={(event) => {
                 event.stopPropagation();
                 void openFile(target.openPath, target.lineStart, target.lineEnd, currentCwd);
-              } : undefined}
+              }}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              {target.displayPath}
+            </button>
+          ) : target ? (
+            <span
+              className="tool-title-summary file-path-link"
+              title={target.rawPath}
+              aria-label={target.rawPath}
             >
               {target.displayPath}
             </span>
           ) : command ? (
-            <span className="tool-title-summary bash-command" title={command}>
+            <span
+              className="tool-title-summary bash-command"
+              title={command}
+              aria-label={command}
+            >
               {actionSummary.summary}
             </span>
           ) : actionSummary.summary ? (
-            <span className="tool-title-summary task-group-item-pattern" title={actionSummary.summary}>
+            <span
+              className="tool-title-summary task-group-item-pattern"
+              title={actionSummary.summary}
+              aria-label={actionSummary.summary}
+            >
               {actionSummary.summary}
             </span>
           ) : null}
           {showResultSummary && (
             <span
-              className={`tool-title-secondary-summary ${isError ? 'tool-title-secondary-summary-error' : ''}`}
+              className={[
+                'tool-title-secondary-summary',
+                isError ? 'tool-title-secondary-summary-error' : '',
+              ].filter(Boolean).join(' ')}
               title={displayResultText ?? resultSummary}
+              aria-label={displayResultText ?? resultSummary}
             >
               {resultSummary}
             </span>

@@ -1,10 +1,18 @@
 // BashToolGroupBlock - Bash 工具分组块
 
-import {memo, useState} from 'react';
+import {type KeyboardEvent, memo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ChevronDown, ChevronRight, Terminal} from 'lucide-react';
 import type {ToolResultBlock, ToolUseBlock} from '../../types/chat';
-import {getGroupStatus} from '../../utils/toolGrouping';
+import {
+    formatToolExecutionStatusSummary,
+    getGroupStatus,
+    getToolGroupBulkActionState,
+    getToolGroupExpandedIndices,
+    isToolBlockToggleActivationKey,
+    summarizeToolResultStatuses,
+    toggleToolGroupExpandedIndex,
+} from '../../utils/toolGrouping';
 import {summarizeBashGroupHeader, summarizeCommand, summarizeGroupBashItemResult} from '../../utils/toolPresentation';
 import BashToolBlock from './BashToolBlock';
 
@@ -26,25 +34,38 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
   // 计算整体状态
   const status = getGroupStatus(blocks, findToolResult);
   const headerSummary = summarizeBashGroupHeader(blocks, findToolResult);
+  const statusSummary = formatToolExecutionStatusSummary(
+    summarizeToolResultStatuses(blocks, findToolResult),
+    {
+      success: t('tools.success'),
+      failed: t('tools.failed'),
+      pending: t('tools.pending'),
+    },
+  );
+  const baseGroupToggleTarget = headerSummary.primarySummary || t('tools.commandCount', { count: headerSummary.totalCount });
+  const groupToggleTarget = statusSummary
+    ? `${baseGroupToggleTarget} · ${statusSummary}`
+    : baseGroupToggleTarget;
+  const groupToggleLabel = t('tools.bashGroupDetailsToggle', { target: groupToggleTarget });
+  const expandAllLabel = t('tools.expandAllInGroup', { target: groupToggleTarget });
+  const collapseAllLabel = t('tools.collapseAllInGroup', { target: groupToggleTarget });
+  const commandCountLabel = t('tools.commandCount', { count: blocks.length });
+  const {allItemsExpanded, noItemsExpanded} = getToolGroupBulkActionState(blocks.length, expandedIndices);
 
   // 全部展开/折叠
   const toggleAll = (expand: boolean) => {
-    if (expand) {
-      setExpandedIndices(new Set(blocks.map((_, i) => i)));
-    } else {
-      setExpandedIndices(new Set());
-    }
+    setExpandedIndices(expand ? getToolGroupExpandedIndices(blocks.length) : new Set());
   };
 
   // 切换单个
   const toggleItem = (index: number) => {
-    const newSet = new Set(expandedIndices);
-    if (expandedIndices.has(index)) {
-      newSet.delete(index);
-    } else {
-      newSet.add(index);
-    }
-    setExpandedIndices(newSet);
+    setExpandedIndices((current) => toggleToolGroupExpandedIndex(blocks.length, current, index));
+  };
+
+  const handleItemKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (!isToolBlockToggleActivationKey(event.key)) return;
+    event.preventDefault();
+    toggleItem(index);
   };
 
   return (
@@ -55,9 +76,11 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
         role="button"
         tabIndex={0}
         aria-expanded={groupExpanded}
+        aria-label={groupToggleLabel}
+        title={groupToggleLabel}
         onClick={() => setGroupExpanded((prev) => !prev)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
+          if (isToolBlockToggleActivationKey(event.key)) {
             event.preventDefault();
             setGroupExpanded((prev) => !prev);
           }
@@ -66,16 +89,14 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
         <div className="task-title-section">
           <Terminal className="tool-title-lucide" aria-hidden="true" />
           <span className="tool-title-text">{t('tools.runCommand')}</span>
-          <span className="tool-command-chip tool-command-run">{blocks.length}</span>
+          <span className="tool-command-chip tool-command-run" title={commandCountLabel} aria-label={commandCountLabel}>{blocks.length}</span>
           {headerSummary.primarySummary && (
-            <span className="tool-title-summary" title={headerSummary.primarySummary}>
+            <span className="tool-title-summary" title={headerSummary.primarySummary} aria-label={headerSummary.primarySummary}>
               {headerSummary.primarySummary}
             </span>
           )}
-          <span className="tool-title-secondary-summary" title={t('tools.commandCount', { count: headerSummary.totalCount })}>
-            {headerSummary.completedCount > 0 ? t('tools.success') : t('tools.pending')}
-            {headerSummary.errorCount > 0 ? ` · ${headerSummary.errorCount} ${t('tools.failed')}` : ''}
-            {headerSummary.pendingCount > 0 ? ` · ${headerSummary.pendingCount} ${t('tools.pending')}` : ''}
+          <span className="tool-title-secondary-summary" title={statusSummary} aria-label={statusSummary}>
+            {statusSummary}
           </span>
         </div>
         <div className="task-group-header-status">
@@ -96,36 +117,47 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
               const commandSummary = summarizeCommand(command);
               const resultSummary = summarizeGroupBashItemResult(result);
               const isExpanded = expandedIndices.has(index);
+              const itemToggleTarget = commandSummary.summary || commandSummary.label || t('tools.runCommand');
+              const itemToggleLabel = t('tools.bashGroupItemDetailsToggle', { target: itemToggleTarget });
+              const commandLabel = command || itemToggleTarget;
 
               // 单个工具状态
               const isCompleted = result !== undefined && result !== null;
               const isError = isCompleted && result?.is_error === true;
               const itemStatus = isError ? 'error' : isCompleted ? 'completed' : 'pending';
+              const itemStatusText = itemStatus === 'error' ? t('tools.failed') : itemStatus === 'completed' ? t('tools.success') : t('tools.pending');
+              const itemStatusLabel = `Bash: ${itemToggleTarget} · ${itemStatusText}`;
 
               return (
                 <div key={block.id} className="task-group-item">
                   {/* 单项标题 */}
                   <div
                     className="task-group-item-header"
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    aria-label={itemToggleLabel}
+                    title={itemToggleLabel}
                     onClick={() => toggleItem(index)}
+                    onKeyDown={(event) => handleItemKeyDown(event, index)}
                   >
                     <div className="task-group-item-title">
                       <span className="task-group-item-number">{index + 1}.</span>
                       <span className={`tool-command-chip ${commandSummary.accentClass}`}>
                         {commandSummary.label}
                       </span>
-                      <span className="task-group-item-command" title={command}>
+                      <span className="task-group-item-command" title={commandLabel} aria-label={commandLabel}>
                         {commandSummary.summary}
                       </span>
                       {resultSummary && (
-                        <span className={`task-group-item-secondary ${isError ? 'error' : ''}`} title={resultSummary}>
+                        <span className={`task-group-item-secondary ${isError ? 'error' : ''}`} title={resultSummary} aria-label={resultSummary}>
                           {resultSummary}
                         </span>
                       )}
                     </div>
                     <div className="task-group-item-status">
-                      <span className={`tool-state-pill ${itemStatus}`}>
-                        {itemStatus === 'error' ? t('tools.failed') : itemStatus === 'completed' ? t('tools.success') : t('tools.pending')}
+                      <span className={`tool-state-pill ${itemStatus}`} title={itemStatusLabel} aria-label={itemStatusLabel}>
+                        {itemStatusText}
                       </span>
                       {isExpanded
                         ? <ChevronDown className="task-group-item-chevron-icon" aria-hidden="true" />
@@ -155,6 +187,9 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
             <button
               type="button"
               className="btn btn-sm btn-ghost"
+              title={expandAllLabel}
+              aria-label={expandAllLabel}
+              disabled={allItemsExpanded}
               onClick={() => toggleAll(true)}
             >
               {t('tools.expandAll')}
@@ -162,6 +197,9 @@ const BashToolGroupBlock = memo(function BashToolGroupBlock({
             <button
               type="button"
               className="btn btn-sm btn-ghost"
+              title={collapseAllLabel}
+              aria-label={collapseAllLabel}
+              disabled={noItemsExpanded}
               onClick={() => toggleAll(false)}
             >
               {t('tools.collapseAll')}

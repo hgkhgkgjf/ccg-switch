@@ -172,6 +172,26 @@ export function hasToolResult(raw?: MessageRaw | null): boolean {
     return getContentBlocksFromRaw(raw).some(isToolResultBlock);
 }
 
+function findToolResultInRange(
+    messages: ChatMessage[],
+    toolId: string,
+    startIndex: number,
+    endIndex: number,
+): ToolResultBlock | null {
+    for (let i = startIndex; i < endIndex; i += 1) {
+        const blocks = getContentBlocksFromRaw(messages[i].raw);
+        const result = blocks.find(
+            (block): block is ToolResultBlock => (
+                block.type === 'tool_result'
+                && block.tool_use_id === toolId
+            ),
+        );
+        if (result) return result;
+    }
+
+    return null;
+}
+
 function hasVisibleText(text: string | undefined): boolean {
     return Boolean(text?.trim());
 }
@@ -228,19 +248,10 @@ export function findToolResult(
 ): ToolResultBlock | null {
     if (!toolId) return null;
     const safeStart = Math.max(0, startIndex);
+    const forwardResult = findToolResultInRange(messages, toolId, safeStart, messages.length);
+    if (forwardResult) return forwardResult;
 
-    for (let i = safeStart; i < messages.length; i += 1) {
-        const blocks = getContentBlocksFromRaw(messages[i].raw);
-        const result = blocks.find(
-            (block): block is ToolResultBlock => (
-                block.type === 'tool_result'
-                && block.tool_use_id === toolId
-            ),
-        );
-        if (result) return result;
-    }
-
-    return null;
+    return findToolResultInRange(messages, toolId, 0, Math.min(safeStart, messages.length));
 }
 
 function findExistingToolResultMessage(messages: ChatMessage[], toolResultIds: string[]): number {
@@ -275,6 +286,73 @@ function findAssistantMessage(messages: ChatMessage[]): number {
         if (messages[i].role === 'assistant') return i;
     }
     return -1;
+}
+
+function getContentBlockMergeKey(block: ContentBlock): string {
+    switch (block.type) {
+        case 'text':
+            return `text:${block.text}`;
+        case 'thinking':
+            return `thinking:${block.thinking}`;
+        case 'tool_use':
+            return `tool_use:${block.id}`;
+        case 'tool_result':
+            return `tool_result:${block.tool_use_id}`;
+        case 'image':
+        case 'input_image':
+        default:
+            return `${block.type}:${JSON.stringify(block)}`;
+    }
+}
+
+function getAssistantRawMergeSeedBlocks(
+    existingRaw: MessageRaw | undefined,
+    existingContent: string,
+): ContentBlock[] {
+    const existingBlocks = getContentBlocksFromRaw(existingRaw);
+    const hasExistingText = existingBlocks.some((block) => (
+        block.type === 'text' && block.text.trim().length > 0
+    ));
+    const fallbackText = existingContent.trim();
+
+    if (!hasExistingText && fallbackText) {
+        return [{type: 'text', text: existingContent}, ...existingBlocks];
+    }
+
+    return existingBlocks;
+}
+
+function isTextAlreadyRepresentedInContent(block: ContentBlock, content: string): boolean {
+    if (block.type !== 'text') return false;
+    const text = block.text.trim();
+    if (!text) return true;
+    return content.includes(text);
+}
+
+function mergeAssistantRaw(
+    existingRaw: MessageRaw | undefined,
+    nextRaw: MessageRaw,
+    existingContent: string,
+): MessageRaw {
+    const existingBlocks = getAssistantRawMergeSeedBlocks(existingRaw, existingContent);
+    const existingKeys = new Set(existingBlocks.map(getContentBlockMergeKey));
+    const nextBlocks = getContentBlocksFromRaw(nextRaw).filter((block) => {
+        if (isTextAlreadyRepresentedInContent(block, existingContent)) return false;
+        const key = getContentBlockMergeKey(block);
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+    });
+
+    return {
+        ...existingRaw,
+        ...nextRaw,
+        message: {
+            ...existingRaw?.message,
+            ...nextRaw.message,
+            content: [...existingBlocks, ...nextBlocks],
+        },
+    };
 }
 
 function rawTimestamp(raw: MessageRaw, fallback: () => number): number {
@@ -321,7 +399,7 @@ export function mergeRawChatMessage(
             index === existingIndex
                 ? {
                     ...message,
-                    raw,
+                    raw: mergeAssistantRaw(message.raw, raw, message.content),
                     content: message.content,
                 }
                 : message

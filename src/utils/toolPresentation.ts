@@ -76,12 +76,14 @@ export interface ToolActionSummary {
 export interface SearchResultFile {
   path: string;
   lineStart?: number;
+  snippet?: string;
 }
 
 export interface SearchResultSummary {
   matchCount: number;
   fileCount: number;
   files: SearchResultFile[];
+  omittedResultCount?: number;
 }
 
 export interface ReadGroupHeaderSummary {
@@ -918,11 +920,13 @@ function parseSearchResultLine(line: string): SearchResultFile | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
-  const match = trimmed.match(/^(.+\.(?:ts|tsx|js|jsx|rs|py|java|json|md|css|scss|sass|less|toml|yaml|yml|html|xml|vue|svelte|go|kt|kts|swift|c|cc|cpp|h|hpp|cs|php|rb|sh|ps1|sql)):(\d+)(?::\d+)?:/i);
+  const match = trimmed.match(/^(.+\.(?:ts|tsx|js|jsx|rs|py|java|json|md|css|scss|sass|less|toml|yaml|yml|html|xml|vue|svelte|go|kt|kts|swift|c|cc|cpp|h|hpp|cs|php|rb|sh|ps1|sql)):(\d+)(?::\d+)?:\s*(.*)$/i);
   if (match?.[1]) {
+    const snippet = match[3]?.trim();
     return {
       path: match[1],
       lineStart: Number(match[2]),
+      ...(snippet ? {snippet: truncateInline(snippet, 120)} : {}),
     };
   }
 
@@ -936,7 +940,8 @@ function parseSearchResultLine(line: string): SearchResultFile | null {
 
 export function summarizeSearchResultText(text: string): SearchResultSummary {
   const files: SearchResultFile[] = [];
-  const seen = new Set<string>();
+  const visibleResultKeys = new Set<string>();
+  const filePaths = new Set<string>();
   let parsedMatchLines = 0;
 
   text.split(/\r?\n/).forEach((line) => {
@@ -944,9 +949,15 @@ export function summarizeSearchResultText(text: string): SearchResultSummary {
     if (!file) return;
 
     parsedMatchLines += 1;
-    const key = file.path.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
+    filePaths.add(file.path.toLowerCase());
+
+    const key = [
+      file.path.toLowerCase(),
+      file.lineStart ?? '',
+      file.snippet ?? '',
+    ].join(':');
+    if (!visibleResultKeys.has(key)) {
+      visibleResultKeys.add(key);
       files.push(file);
     }
   });
@@ -954,10 +965,15 @@ export function summarizeSearchResultText(text: string): SearchResultSummary {
   const explicitMatches = text.match(/(\d+)\s+matches?/i);
   const explicitFiles = text.match(/(\d+)\s+files?/i);
 
+  const visibleFiles = files.slice(0, 8);
+  const totalResultRows = explicitMatches ? Number(explicitMatches[1]) : files.length;
+  const omittedResultCount = Math.max(0, totalResultRows - visibleFiles.length);
+
   return {
     matchCount: explicitMatches ? Number(explicitMatches[1]) : parsedMatchLines,
-    fileCount: explicitFiles ? Number(explicitFiles[1]) : files.length,
-    files: files.slice(0, 8),
+    fileCount: explicitFiles ? Number(explicitFiles[1]) : filePaths.size,
+    files: visibleFiles,
+    ...(omittedResultCount ? {omittedResultCount} : {}),
   };
 }
 

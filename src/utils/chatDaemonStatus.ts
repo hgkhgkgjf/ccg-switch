@@ -8,8 +8,22 @@ interface ChatDaemonStatusInput {
     daemonReconnecting?: boolean;
 }
 
+interface ChatDaemonStatusTextInput extends ChatDaemonStatusInput {
+    translate: (key: string) => string;
+}
+
 interface ChatDaemonDiagnosticInput extends ChatDaemonStatusInput {
     error?: string | null;
+}
+
+interface ChatDaemonDiagnosticDisplayInput {
+    diagnosticText?: string | null;
+    translate: (key: string) => string;
+}
+
+interface ChatDaemonReconnectLabelInput {
+    daemonReconnecting?: boolean;
+    translate: (key: string) => string;
 }
 
 const DAEMON_DIAGNOSTIC_MAX_LENGTH = 140;
@@ -59,6 +73,24 @@ export function canReconnectChatDaemon(input: ChatDaemonStatusInput): boolean {
     return kind === 'offline' || kind === 'error';
 }
 
+export function getChatDaemonStatusText(input: ChatDaemonStatusTextInput): string {
+    const kind = getChatDaemonStatusKind(input);
+    if (kind === 'unknown' && input.daemonStatus?.trim()) {
+        return input.daemonStatus.trim();
+    }
+
+    const statusConfig: Record<Exclude<ChatDaemonStatusKind, 'unknown'>, {key: string; fallback: string}> = {
+        ready: {key: 'chat.ready', fallback: 'Ready'},
+        starting: {key: 'chat.starting', fallback: 'Starting'},
+        offline: {key: 'chat.daemon.offline', fallback: 'Offline'},
+        error: {key: 'chat.daemon.error', fallback: 'Daemon error'},
+    };
+    const config = statusConfig[kind === 'unknown' ? 'starting' : kind];
+    const translated = input.translate(config.key);
+
+    return translated && translated !== config.key ? translated : config.fallback;
+}
+
 export function getChatDaemonDiagnosticText(input: ChatDaemonDiagnosticInput): string | null {
     const kind = getChatDaemonStatusKind(input);
     if (kind === 'ready' || kind === 'starting') return null;
@@ -69,4 +101,39 @@ export function getChatDaemonDiagnosticText(input: ChatDaemonDiagnosticInput): s
     const statusText = normalizeDiagnosticText(input.daemonStatus);
     if (!statusText || isGenericDaemonStatus(statusText)) return null;
     return statusText;
+}
+
+export function getChatDaemonDiagnosticDisplayText({
+    diagnosticText,
+    translate,
+}: ChatDaemonDiagnosticDisplayInput): string | null {
+    if (!diagnosticText) return null;
+    if (diagnosticText !== CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY) return diagnosticText;
+
+    const fallback = 'Daemon did not become ready in time';
+    const translated = translate(CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY);
+
+    return translated && translated !== CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY ? translated : fallback;
+}
+
+export function getChatDaemonReconnectLabel({
+    daemonReconnecting = false,
+    translate,
+}: ChatDaemonReconnectLabelInput): string {
+    const key = daemonReconnecting ? 'chat.daemon.reconnecting' : 'chat.daemon.reconnect';
+    const fallback = daemonReconnecting ? 'Reconnecting daemon' : 'Reconnect daemon';
+    const translated = translate(key);
+
+    return translated && translated !== key ? translated : fallback;
+}
+
+export function getChatDaemonReconnectShortLabel({
+    daemonReconnecting = false,
+    translate,
+}: ChatDaemonReconnectLabelInput): string {
+    const key = daemonReconnecting ? 'chat.daemon.reconnecting' : 'chat.daemon.reconnectShort';
+    const fallback = daemonReconnecting ? 'Reconnecting' : 'Reconnect';
+    const translated = translate(key);
+
+    return translated && translated !== key ? translated : fallback;
 }

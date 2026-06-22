@@ -10,6 +10,7 @@ import {useChatStore} from '../../stores/useChatStore';
 import {collectEditToolItems, resolveToolTarget} from '../../utils/toolPresentation';
 import {getFileIcon} from '../../utils/fileIcons';
 import {copyToClipboard, openFile} from '../../utils/bridge';
+import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 import EditDiffPreview from './EditDiffPreview';
 
 export interface EditToolBlockProps {
@@ -54,12 +55,31 @@ const EditToolBlock = memo(function EditToolBlock({
   const hasChanges = oldString || newString;
   const additions = primaryItem?.additions ?? 0;
   const deletions = primaryItem?.deletions ?? 0;
+  const hasEditStats = additions > 0 || deletions > 0;
   const diffPreviewLines = primaryItem?.diffPreviewLines ?? [];
 
   // 状态计算
   const isCompleted = (result !== undefined && result !== null) || isDenied;
   const isError = isDenied || (isCompleted && result?.is_error === true);
   const status = isError ? 'error' : isCompleted ? 'completed' : 'pending';
+  const copyPathButtonLabel = t('tools.copyPath');
+  const copyPathActionLabel = t('tools.copyPathForPath', { file: displayPath || filePath });
+  const openFileLabel = openPath ? `${t('tools.openFile')}: ${displayPath || filePath}` : '';
+  const headerToggleTarget = displayPath || filePath || t('tools.editFile');
+  const headerToggleLabel = t('tools.editDetailsToggle', { target: headerToggleTarget });
+  const editStatsFallbackLabel = `Edit stats: ${displayPath || filePath} · +${additions} / -${deletions}`;
+  const translatedEditStatsLabel = hasEditStats
+    ? t('chat.layout.inputStatusEditFileStats', {
+        defaultValue: editStatsFallbackLabel,
+        file: displayPath || filePath,
+        additions,
+        deletions,
+      })
+    : '';
+  const editStatsLabel = translatedEditStatsLabel === 'chat.layout.inputStatusEditFileStats'
+    || translatedEditStatsLabel.includes('{{')
+    ? editStatsFallbackLabel
+    : translatedEditStatsLabel;
 
   // 文件图标
   const fileIconSvg = cleanFileName
@@ -80,6 +100,14 @@ const EditToolBlock = memo(function EditToolBlock({
     await copyToClipboard(filePath);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const toggleExpanded = () => setExpanded((prev) => !prev);
+
+  const handleHeaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isToolBlockToggleActivationKey(event.key)) return;
+    event.preventDefault();
+    toggleExpanded();
   };
 
   const detailContent = (
@@ -133,8 +161,8 @@ const EditToolBlock = memo(function EditToolBlock({
           <button
             type="button"
             className="btn btn-sm btn-ghost"
-            title={t('tools.openFile')}
-            aria-label={t('tools.openFile')}
+            title={openFileLabel}
+            aria-label={openFileLabel}
             onClick={(event) => {
               event.stopPropagation();
               void openFile(openPath, primaryItem?.lineStart, primaryItem?.lineEnd, currentCwd);
@@ -146,9 +174,11 @@ const EditToolBlock = memo(function EditToolBlock({
         <button
           type="button"
           className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          title={copyPathActionLabel}
+          aria-label={copyPathActionLabel}
           onClick={handleCopyPath}
         >
-          {copied ? t('tools.copied') : t('tools.copyPath')}
+          {copied ? t('tools.copied') : copyPathButtonLabel}
         </button>
       </div>
     </div>
@@ -158,37 +188,76 @@ const EditToolBlock = memo(function EditToolBlock({
     <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
         className={compact ? 'task-header task-header-compact' : 'task-header'}
-        onClick={() => setExpanded((prev) => !prev)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={headerToggleLabel}
+        title={headerToggleLabel}
+        onClick={toggleExpanded}
+        onKeyDown={handleHeaderKeyDown}
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
           <PencilLine className="tool-title-lucide" aria-hidden="true" />
           <span className="tool-title-text">{t('tools.editFile')}</span>
-          <span
-            className="tool-title-summary file-path-link clickable-file edit-diff-hover-trigger"
-            onClick={handleFileClick}
-            title={filePath}
-          >
-            {fileIconSvg && (
-              <span
-                className="file-icon"
-                dangerouslySetInnerHTML={{ __html: fileIconSvg }}
+          {openPath ? (
+            <button
+              type="button"
+              className="tool-title-summary file-path-link file-path-button clickable-file edit-diff-hover-trigger"
+              onClick={handleFileClick}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+              }}
+              title={openFileLabel}
+              aria-label={openFileLabel}
+            >
+              {fileIconSvg && (
+                <span
+                  className="file-icon"
+                  dangerouslySetInnerHTML={{ __html: fileIconSvg }}
+                />
+              )}
+              <span className="edit-diff-hover-label">{displayPath}</span>
+              {hasEditStats && (
+                <span className="edit-item-stats" title={editStatsLabel} aria-label={editStatsLabel}>
+                  <span className="edit-stat-added" aria-hidden="true">+{additions}</span>
+                  <span className="edit-stat-deleted" aria-hidden="true">-{deletions}</span>
+                </span>
+              )}
+              <EditDiffPreview
+                filePath={displayPath}
+                additions={additions}
+                deletions={deletions}
+                lines={diffPreviewLines}
               />
-            )}
-            <span className="edit-diff-hover-label">{displayPath}</span>
-            {(additions > 0 || deletions > 0) && (
-              <span className="edit-item-stats">
-                <span className="edit-stat-added">+{additions}</span>
-                <span className="edit-stat-deleted">-{deletions}</span>
-              </span>
-            )}
-            <EditDiffPreview
-              filePath={displayPath}
-              additions={additions}
-              deletions={deletions}
-              lines={diffPreviewLines}
-            />
-          </span>
+            </button>
+          ) : (
+            <span
+              className="tool-title-summary file-path-link edit-diff-hover-trigger"
+              title={filePath}
+              aria-label={filePath}
+            >
+              {fileIconSvg && (
+                <span
+                  className="file-icon"
+                  dangerouslySetInnerHTML={{ __html: fileIconSvg }}
+                />
+              )}
+              <span className="edit-diff-hover-label">{displayPath}</span>
+              {hasEditStats && (
+                <span className="edit-item-stats" title={editStatsLabel} aria-label={editStatsLabel}>
+                  <span className="edit-stat-added" aria-hidden="true">+{additions}</span>
+                  <span className="edit-stat-deleted" aria-hidden="true">-{deletions}</span>
+                </span>
+              )}
+              <EditDiffPreview
+                filePath={displayPath}
+                additions={additions}
+                deletions={deletions}
+                lines={diffPreviewLines}
+              />
+            </span>
+          )}
           {isDenied && <span className="tool-title-summary text-error">• {t('tools.denied')}</span>}
         </div>
         <div className={`tool-status-indicator ${status}`} />

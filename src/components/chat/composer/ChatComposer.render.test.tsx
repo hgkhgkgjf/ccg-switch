@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {ChatComposer} from './ChatComposer';
+import {CompletionMenu} from './CompletionMenu';
 
 const loadAllProviders = vi.fn();
 
@@ -91,6 +92,75 @@ describe('ChatComposer render integration', () => {
             />,
         );
 
-        expect(html).toContain('title="chat.modelsRefresh"');
+        expect(html).toContain('title="Refresh models"');
+        expect(html).not.toContain('chat.modelsRefresh');
+    });
+
+    it('keeps composer input surface labels readable when translations return keys', () => {
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:\\repo"
+            />,
+        );
+
+        expect(html).toContain('title="Add attachment"');
+        expect(html).toContain('title="Collapse status panel"');
+        expect(html).toContain('title="Drag to resize the input"');
+        expect(html).toContain('aria-label="Drag to resize the input"');
+        expect(html).toContain('placeholder="Type a message... @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline"');
+        expect(html).not.toContain('chat.attach');
+        expect(html).not.toContain('chat.collapsePanel');
+        expect(html).not.toContain('chat.resizeComposer');
+        expect(html).not.toContain('chat.richPlaceholder');
+    });
+
+    it('renders completion menu loading and items with readable accessibility chrome', () => {
+        const loadingHtml = renderToStaticMarkup(
+            <CompletionMenu
+                items={[]}
+                activeIndex={0}
+                loading
+                emptyText="No matches"
+                loadingText="Loading suggestions..."
+                menuLabel="Completion suggestions"
+                onSelect={() => undefined}
+                onHover={() => undefined}
+            />,
+        );
+
+        expect(loadingHtml).toContain('role="listbox"');
+        expect(loadingHtml).toContain('aria-label="Completion suggestions"');
+        expect(loadingHtml).toContain('role="status"');
+        expect(loadingHtml).toContain('Loading suggestions...');
+        expect(loadingHtml).not.toContain('…');
+
+        const itemsHtml = renderToStaticMarkup(
+            <CompletionMenu
+                items={[
+                    {
+                        id: 'review',
+                        label: '/review',
+                        description: 'Review working tree changes',
+                    },
+                    {
+                        id: 'help',
+                        label: '/help',
+                    },
+                ]}
+                activeIndex={0}
+                emptyText="No matches"
+                loadingText="Loading suggestions..."
+                menuLabel="Completion suggestions"
+                onSelect={() => undefined}
+                onHover={() => undefined}
+            />,
+        );
+
+        expect(itemsHtml).toContain('role="option"');
+        expect(itemsHtml).toContain('aria-selected="true"');
+        expect(itemsHtml).toContain('aria-selected="false"');
+        expect(itemsHtml).toContain('aria-label="/review. Review working tree changes"');
     });
 });

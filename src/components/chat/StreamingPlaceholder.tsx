@@ -6,9 +6,20 @@ interface StreamingPlaceholderProps {
     delayMs?: number;
 }
 
+function translateWithFallback(t: (key: string) => string, key: string, fallback: string): string {
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+}
+
 export default function StreamingPlaceholder({ delayMs = 350 }: StreamingPlaceholderProps) {
     const { t } = useTranslation();
     const [showConnectedHint, setShowConnectedHint] = useState(false);
+    const waitingLabel = translateWithFallback(t, 'chat.message.waiting', 'Waiting for response...');
+    const connectedLabel = translateWithFallback(
+        t,
+        'chat.message.streamingConnected',
+        'Connected, generating response...',
+    );
 
     useEffect(() => {
         const timer = window.setTimeout(() => setShowConnectedHint(true), delayMs);
@@ -20,8 +31,8 @@ export default function StreamingPlaceholder({ delayMs = 350 }: StreamingPlaceho
             <Loader2 size={16} className="animate-spin" />
             <span>
                 {showConnectedHint
-                    ? t('chat.message.streamingConnected')
-                    : t('chat.message.waiting')}
+                    ? connectedLabel
+                    : waitingLabel}
             </span>
         </div>
     );

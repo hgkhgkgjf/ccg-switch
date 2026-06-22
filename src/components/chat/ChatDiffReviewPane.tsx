@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {forwardRef, useEffect, useRef, useState} from 'react';
 import {
     Check,
     Columns2,
@@ -26,7 +26,7 @@ interface ChatDiffReviewPaneProps {
     onCollapse?: () => void;
 }
 
-export default function ChatDiffReviewPane({
+const ChatDiffReviewPane = forwardRef<HTMLElement, ChatDiffReviewPaneProps>(function ChatDiffReviewPane({
     edit,
     mode,
     wrapLines,
@@ -34,7 +34,7 @@ export default function ChatDiffReviewPane({
     onModeChange,
     onWrapLinesChange,
     onCollapse,
-}: ChatDiffReviewPaneProps) {
+}, ref) {
     const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
     const copyTimerRef = useRef<number | null>(null);
@@ -67,32 +67,90 @@ export default function ChatDiffReviewPane({
         'status-diff-mode-button',
         mode === viewMode && 'active',
     );
+    const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
+        const translated = options ? t(key, options) : t(key);
+        return translated === key ? fallback : translated;
+    };
+    const diffPanelBaseLabel = translateWithFallback('chat.layout.diffPanel', 'File diff');
+    const diffPanelLabel = edit
+        ? translateWithFallback(
+            'chat.layout.diffPanelForFile',
+            `File diff: ${edit.displayPath}`,
+            {file: edit.displayPath},
+        )
+        : diffPanelBaseLabel;
+    const diffPanelEmptyLabel = translateWithFallback(
+        'chat.layout.diffPanelEmpty',
+        'Select a file on the right to inspect the full diff',
+    );
+    const diffViewModeLabel = translateWithFallback('chat.layout.diffViewMode', 'Diff view mode');
+    const diffUnifiedViewLabel = translateWithFallback('chat.layout.diffUnifiedView', 'Unified diff view');
+    const diffSplitViewLabel = translateWithFallback('chat.layout.diffSplitView', 'Split diff view');
+    const diffLineWrapLabel = translateWithFallback('chat.layout.diffLineWrap', 'Wrap diff lines');
+    const diffLineNoWrapLabel = translateWithFallback(
+        'chat.layout.diffLineNoWrap',
+        'Do not wrap diff lines; use horizontal scrolling',
+    );
+    const diffLineSummaryLabel = edit
+        ? translateWithFallback('chat.layout.diffLineSummary', `${edit.diffPreviewLines.length} diff lines`, {
+            count: edit.diffPreviewLines.length,
+        })
+        : '';
+    const openFileLabel = edit
+        ? translateWithFallback(
+            'tools.openFileForPath',
+            `Open file: ${edit.displayPath}`,
+            {file: edit.displayPath},
+        )
+        : translateWithFallback('tools.openFile', 'Open file');
+    const copyPathLabel = edit
+        ? translateWithFallback(
+            'tools.copyPathForPath',
+            `Copy path: ${edit.displayPath}`,
+            {file: edit.displayPath},
+        )
+        : translateWithFallback('tools.copyPath', 'Copy path');
+    const copiedPathLabel = edit
+        ? translateWithFallback(
+            'tools.copiedPathForPath',
+            `Copied path: ${edit.displayPath}`,
+            {file: edit.displayPath},
+        )
+        : translateWithFallback('tools.copied', 'Copied');
+    const activeCopyLabel = copied ? copiedPathLabel : copyPathLabel;
+    const collapseDiffPanelLabel = translateWithFallback('chat.layout.collapseDiffPanel', 'Collapse file diff panel');
 
     return (
-        <section className="chat-diff-review-pane" aria-label={t('chat.layout.diffPanel')}>
+        <section
+            ref={ref}
+            className="chat-diff-review-pane chat-diff-review-pane-focus-target"
+            aria-label={diffPanelLabel}
+            data-chat-diff-review-pane="true"
+            tabIndex={-1}
+        >
             <div className="chat-diff-review-header">
                 <div className="chat-diff-review-title">
                     <FileDiff size={14} />
                     <div className="min-w-0">
-                        <div className="chat-diff-review-heading">{t('chat.layout.diffPanel')}</div>
+                        <div className="chat-diff-review-heading">{diffPanelBaseLabel}</div>
                         <div className="chat-diff-review-path" title={edit?.displayPath}>
-                            {edit?.displayPath ?? t('chat.layout.diffPanelEmpty')}
+                            {edit?.displayPath ?? diffPanelEmptyLabel}
                         </div>
                     </div>
                 </div>
                 <div className="chat-diff-review-actions">
                     {edit && (
-                        <div className="chat-diff-review-stats" title={t('chat.layout.diffLineSummary', {count: edit.diffPreviewLines.length})}>
+                        <div className="chat-diff-review-stats" title={diffLineSummaryLabel}>
                             <span className="edit-stat-added">+{edit.additions}</span>
                             <span className="edit-stat-deleted">-{edit.deletions}</span>
                         </div>
                     )}
-                    <div className="status-diff-mode-toggle" role="group" aria-label={t('chat.layout.diffViewMode')}>
+                    <div className="status-diff-mode-toggle" role="group" aria-label={diffViewModeLabel}>
                         <button
                             type="button"
                             className={diffModeButtonClass('unified')}
-                            title={t('chat.layout.diffUnifiedView')}
-                            aria-label={t('chat.layout.diffUnifiedView')}
+                            title={diffUnifiedViewLabel}
+                            aria-label={diffUnifiedViewLabel}
                             aria-pressed={mode === 'unified'}
                             onClick={() => onModeChange('unified')}
                         >
@@ -101,8 +159,8 @@ export default function ChatDiffReviewPane({
                         <button
                             type="button"
                             className={diffModeButtonClass('split')}
-                            title={t('chat.layout.diffSplitView')}
-                            aria-label={t('chat.layout.diffSplitView')}
+                            title={diffSplitViewLabel}
+                            aria-label={diffSplitViewLabel}
                             aria-pressed={mode === 'split'}
                             onClick={() => onModeChange('split')}
                         >
@@ -116,8 +174,8 @@ export default function ChatDiffReviewPane({
                     <button
                         type="button"
                         className={cn('status-diff-mode-button chat-diff-review-wrap-toggle', wrapLines && 'active')}
-                        title={wrapLines ? t('chat.layout.diffLineNoWrap') : t('chat.layout.diffLineWrap')}
-                        aria-label={wrapLines ? t('chat.layout.diffLineNoWrap') : t('chat.layout.diffLineWrap')}
+                        title={wrapLines ? diffLineNoWrapLabel : diffLineWrapLabel}
+                        aria-label={wrapLines ? diffLineNoWrapLabel : diffLineWrapLabel}
                         aria-pressed={wrapLines}
                         onClick={() => onWrapLinesChange(!wrapLines)}
                     >
@@ -126,8 +184,8 @@ export default function ChatDiffReviewPane({
                     <button
                         type="button"
                         className="chat-diff-review-open"
-                        title={t('tools.openFile')}
-                        aria-label={t('tools.openFile')}
+                        title={openFileLabel}
+                        aria-label={openFileLabel}
                         disabled={!edit}
                         onClick={handleOpenFile}
                     >
@@ -136,8 +194,8 @@ export default function ChatDiffReviewPane({
                     <button
                         type="button"
                         className={cn('chat-diff-review-copy', copied && 'copied')}
-                        title={copied ? t('tools.copied') : t('tools.copyPath')}
-                        aria-label={copied ? t('tools.copied') : t('tools.copyPath')}
+                        title={activeCopyLabel}
+                        aria-label={activeCopyLabel}
                         disabled={!edit}
                         onClick={() => void handleCopyPath()}
                     >
@@ -147,8 +205,8 @@ export default function ChatDiffReviewPane({
                         <button
                             type="button"
                             className="chat-diff-review-collapse"
-                            title={t('chat.layout.collapseDiffPanel')}
-                            aria-label={t('chat.layout.collapseDiffPanel')}
+                            title={collapseDiffPanelLabel}
+                            aria-label={collapseDiffPanelLabel}
                             onClick={onCollapse}
                         >
                             <PanelRightClose size={13} />
@@ -172,10 +230,12 @@ export default function ChatDiffReviewPane({
                 ) : (
                     <div className="chat-diff-review-empty">
                         <FileDiff size={18} />
-                        <span>{t('chat.layout.diffPanelEmpty')}</span>
+                        <span>{diffPanelEmptyLabel}</span>
                     </div>
                 )}
             </div>
         </section>
     );
-}
+});
+
+export default ChatDiffReviewPane;

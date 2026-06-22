@@ -30,6 +30,11 @@ import {
     reasoningVisibleFor,
 } from './constants';
 import {ModelIcon, ProviderBrandIcon} from './ModelIcon';
+import {
+    getChatComposerModeText,
+    getChatComposerReasoningText,
+    getChatComposerToolbarLabel,
+} from '../../../utils/chatUiBehavior';
 
 const MODE_ICONS: Record<string, LucideIcon> = {
     'message-square': MessageSquare,
@@ -102,6 +107,16 @@ export function ButtonArea({
     onStop,
 }: ButtonAreaProps) {
     const { t } = useTranslation();
+    const providerLabel = getChatComposerToolbarLabel({control: 'provider', translate: t});
+    const modeLabel = getChatComposerToolbarLabel({control: 'mode', translate: t});
+    const modelLabel = getChatComposerToolbarLabel({control: 'model', translate: t});
+    const reasoningLabel = getChatComposerToolbarLabel({control: 'reasoning', translate: t});
+    const modelsRefreshLabel = getChatComposerToolbarLabel({control: 'models-refresh', translate: t});
+    const modelsRefreshingLabel = getChatComposerToolbarLabel({control: 'models-refreshing', translate: t});
+    const modelsLoadingLabel = getChatComposerToolbarLabel({control: 'models-loading', translate: t});
+    const enhancePromptLabel = getChatComposerToolbarLabel({control: 'enhance', translate: t});
+    const sendLabel = getChatComposerToolbarLabel({control: 'send', translate: t});
+    const stopLabel = getChatComposerToolbarLabel({control: 'stop', translate: t});
 
     const providerOptions: SelectorOption<ChatProviderId>[] = AVAILABLE_PROVIDERS.map((p) => ({
         id: p.id,
@@ -116,8 +131,16 @@ export function ButtonArea({
         const Icon = MODE_ICONS[m.icon];
         return {
             id: m.id,
-            label: t(`chat.modes.${m.i18nKey}.label`),
-            description: t(`chat.modes.${m.i18nKey}.description`),
+            label: getChatComposerModeText({
+                mode: m.id,
+                field: 'label',
+                translate: t,
+            }),
+            description: getChatComposerModeText({
+                mode: m.id,
+                field: 'description',
+                translate: t,
+            }),
             icon: <Icon size={14} />,
         };
     });
@@ -140,8 +163,16 @@ export function ButtonArea({
         const Icon = REASONING_ICONS[r.icon];
         return {
             id: r.id,
-            label: t(`chat.reasoning.${r.i18nKey}.label`),
-            description: t(`chat.reasoning.${r.i18nKey}.description`),
+            label: getChatComposerReasoningText({
+                effort: r.id,
+                field: 'label',
+                translate: t,
+            }),
+            description: getChatComposerReasoningText({
+                effort: r.id,
+                field: 'description',
+                translate: t,
+            }),
             icon: <Icon size={14} />,
         };
     });
@@ -158,12 +189,13 @@ export function ButtonArea({
             }`}
             title={modelStatusError ?? undefined}
         >
-            {modelStatusError ?? (modelsRefreshing ? t('chat.modelsRefreshing') : t('chat.modelsLoading'))}
+            {modelStatusError ?? (modelsRefreshing ? modelsRefreshingLabel : modelsLoadingLabel)}
         </div>
     ) : undefined;
     const showModelRefresh = modelsCanRefresh && Boolean(onRefreshModels);
     const modelRefreshTitle = modelsRefreshError
-        ?? (modelsRefreshing ? t('chat.modelsRefreshing') : t('chat.modelsRefresh'));
+        ?? (modelsRefreshing ? modelsRefreshingLabel : modelsRefreshLabel);
+    const modelRefreshAriaLabel = modelsRefreshing ? modelsRefreshingLabel : modelsRefreshLabel;
 
     return (
         <div className="chat-composer-toolbar flex flex-wrap items-center gap-1 px-1 pt-1">
@@ -175,7 +207,7 @@ export function ButtonArea({
                     onChange={onProviderChange}
                     buttonIcon={<ProviderBrandIcon provider={provider} size={16} colored />}
                     compact
-                    title={t('chat.providerLabel')}
+                    title={providerLabel}
                     disabled={controlsDisabled}
                 />
 
@@ -184,9 +216,13 @@ export function ButtonArea({
                     options={modeOptions}
                     onChange={onModeChange}
                     buttonIcon={<CurrentModeIcon size={14} />}
-                    buttonLabel={currentMode ? t(`chat.modes.${currentMode.i18nKey}.label`) : undefined}
+                    buttonLabel={currentMode ? getChatComposerModeText({
+                        mode: currentMode.id,
+                        field: 'label',
+                        translate: t,
+                    }) : undefined}
                     highlight={permissionMode === 'bypassPermissions'}
-                    title={t('chat.modeLabel')}
+                    title={modeLabel}
                     disabled={controlsDisabled}
                 />
 
@@ -196,7 +232,7 @@ export function ButtonArea({
                     onChange={onModelChange}
                     buttonIcon={<ModelIcon provider={provider} modelId={currentModel?.id ?? model} size={14} />}
                     buttonLabel={currentModel?.label ?? model}
-                    title={t('chat.modelLabel')}
+                    title={modelLabel}
                     footer={modelStatusFooter}
                     disabled={controlsDisabled}
                 />
@@ -205,7 +241,7 @@ export function ButtonArea({
                         type="button"
                         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-base-200 text-base-content/60 transition-colors hover:bg-base-300 hover:text-primary disabled:cursor-not-allowed disabled:opacity-45"
                         title={modelRefreshTitle}
-                        aria-label={t('chat.modelsRefresh')}
+                        aria-label={modelRefreshAriaLabel}
                         disabled={controlsDisabled || modelsRefreshing}
                         onClick={onRefreshModels}
                     >
@@ -219,9 +255,13 @@ export function ButtonArea({
                         options={reasoningOptions}
                         onChange={onReasoningChange}
                         buttonIcon={<Lightbulb size={14} />}
-                        buttonLabel={t(`chat.reasoning.${reasoningEffort}.label`)}
+                        buttonLabel={getChatComposerReasoningText({
+                            effort: reasoningEffort,
+                            field: 'label',
+                            translate: t,
+                        })}
                         align="right"
-                        title={t('chat.reasoningLabel')}
+                        title={reasoningLabel}
                         disabled={controlsDisabled}
                     />
                 )}
@@ -234,8 +274,8 @@ export function ButtonArea({
                     className="chat-composer-action-button flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-200 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent"
                     onClick={onEnhance}
                     disabled={!hasPromptText || controlsDisabled || isEnhancing}
-                    title={t('chat.enhancePrompt')}
-                    aria-label={t('chat.enhancePrompt')}
+                    title={enhancePromptLabel}
+                    aria-label={enhancePromptLabel}
                 >
                     {isEnhancing ? (
                         <Loader2 size={16} className="animate-spin" />
@@ -249,8 +289,8 @@ export function ButtonArea({
                         type="button"
                         className="chat-composer-primary-action flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-error text-error-content transition-colors hover:bg-error/90"
                         onClick={onStop}
-                        title={t('chat.stop')}
-                        aria-label={t('chat.stop')}
+                        title={stopLabel}
+                        aria-label={stopLabel}
                     >
                         <Square size={15} />
                     </button>
@@ -260,8 +300,8 @@ export function ButtonArea({
                         className="chat-composer-primary-action flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-content transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/40 disabled:hover:bg-base-200"
                         onClick={onSubmit}
                         disabled={!canSubmit || isSubmitting}
-                        title={t('chat.send')}
-                        aria-label={t('chat.send')}
+                        title={sendLabel}
+                        aria-label={sendLabel}
                     >
                         {isSubmitting ? (
                             <Loader2 size={15} className="animate-spin" />

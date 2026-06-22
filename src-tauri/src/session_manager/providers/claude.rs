@@ -3,14 +3,25 @@ use super::utils::{
     sanitize_session_markdown_text, sanitize_session_text, truncate_text,
 };
 use crate::session_manager::{
-    MessageWindowBuilder, SessionMeta, UnifiedSessionMessage, UnifiedSessionMessageWindow,
+    normalize_message_window_limit, MessageWindowBuilder, SessionMeta, UnifiedSessionMessage,
+    UnifiedSessionMessageWindow,
 };
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const TOOL_RESULT_CONTENT: &str = "[tool_result]";
+const CLAUDE_TAIL_WINDOW_FAST_PATH_MIN_BYTES: u64 = 1_048_576;
+const CLAUDE_TAIL_WINDOW_CHUNK_BYTES: u64 = 64 * 1024;
+const CLAUDE_TAIL_WINDOW_LINE_MULTIPLIER: usize = 4;
+
+struct ClaudeTailWindowLines {
+    lines: Vec<String>,
+    start_line_index: usize,
+    total_line_count: usize,
+}
 
 /// 按项目路径扫描 Claude 会话（只扫描匹配的项目目录）
 pub fn scan_claude_sessions_for_project(project_path: &str) -> Vec<SessionMeta> {
@@ -161,6 +172,62 @@ pub fn load_claude_message_window(
         return Err("Session file not found".to_string());
     }
 
+    let file_len = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if file_len < CLAUDE_TAIL_WINDOW_FAST_PATH_MIN_BYTES {
+        return load_claude_message_window_exact(path, tail_limit);
+    }
+
+    let limit = normalize_message_window_limit(tail_limit);
+    let total_line_count = count_jsonl_lines(path)?;
+    let mut tail_line_limit = limit
+        .saturating_mul(CLAUDE_TAIL_WINDOW_LINE_MULTIPLIER)
+        .max(limit + 16)
+        .min(total_line_count.max(1));
+    let mut messages: VecDeque<(usize, UnifiedSessionMessage)> = VecDeque::new();
+    let mut window_start_index;
+
+    loop {
+        let tail = read_claude_tail_window_lines(path, tail_line_limit, total_line_count)?;
+        debug_assert_eq!(tail.total_line_count, total_line_count);
+        messages.clear();
+
+        for (offset, line) in tail.lines.iter().enumerate() {
+            if let Some(message) = parse_claude_history_line(line) {
+                messages.push_back((tail.start_line_index + offset, message));
+                while messages.len() > limit {
+                    messages.pop_front();
+                }
+            }
+        }
+
+        window_start_index = tail.start_line_index;
+        if messages.len() >= limit || tail.start_line_index == 0 {
+            break;
+        }
+
+        let next_tail_line_limit = tail_line_limit.saturating_mul(2).min(total_line_count);
+        if next_tail_line_limit <= tail_line_limit {
+            break;
+        }
+        tail_line_limit = next_tail_line_limit;
+    }
+
+    let start_index = messages
+        .front()
+        .map(|(line_index, _)| *line_index)
+        .unwrap_or(window_start_index);
+    Ok(UnifiedSessionMessageWindow {
+        complete: window_start_index == 0,
+        messages: messages.into_iter().map(|(_, message)| message).collect(),
+        start_index,
+        total_count: total_line_count,
+    })
+}
+
+fn load_claude_message_window_exact(
+    path: &Path,
+    tail_limit: usize,
+) -> Result<UnifiedSessionMessageWindow, String> {
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let reader = BufReader::new(file);
     let mut window = MessageWindowBuilder::new(tail_limit);
@@ -176,6 +243,103 @@ pub fn load_claude_message_window(
     }
 
     Ok(window.finish())
+}
+
+fn count_jsonl_lines(path: &Path) -> Result<usize, String> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut newline_count = 0_usize;
+    let mut saw_any_byte = false;
+    let mut last_byte = b'\n';
+
+    loop {
+        let bytes_read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if bytes_read == 0 {
+            break;
+        }
+        saw_any_byte = true;
+        newline_count += buffer[..bytes_read]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count();
+        last_byte = buffer[bytes_read - 1];
+    }
+
+    if !saw_any_byte {
+        return Ok(0);
+    }
+    Ok(newline_count + usize::from(last_byte != b'\n'))
+}
+
+fn read_claude_tail_window_lines(
+    path: &Path,
+    tail_line_limit: usize,
+    total_line_count: usize,
+) -> Result<ClaudeTailWindowLines, String> {
+    let limit = tail_line_limit.max(1);
+    if total_line_count == 0 {
+        return Ok(ClaudeTailWindowLines {
+            lines: Vec::new(),
+            start_line_index: 0,
+            total_line_count: 0,
+        });
+    }
+
+    if total_line_count <= limit {
+        let file = fs::File::open(path).map_err(|e| e.to_string())?;
+        let reader = BufReader::new(file);
+        let lines = reader
+            .lines()
+            .filter_map(Result::ok)
+            .collect::<Vec<String>>();
+        return Ok(ClaudeTailWindowLines {
+            lines,
+            start_line_index: 0,
+            total_line_count,
+        });
+    }
+
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut position = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut suffix = Vec::new();
+
+    while position > 0 {
+        let read_size = CLAUDE_TAIL_WINDOW_CHUNK_BYTES.min(position) as usize;
+        position -= read_size as u64;
+        file.seek(SeekFrom::Start(position))
+            .map_err(|e| e.to_string())?;
+        let mut chunk = vec![0_u8; read_size];
+        file.read_exact(&mut chunk).map_err(|e| e.to_string())?;
+        chunk.extend_from_slice(&suffix);
+        suffix = chunk;
+
+        let text = String::from_utf8_lossy(&suffix);
+        let line_count = text.lines().count();
+        let usable_line_count = if position > 0 {
+            line_count.saturating_sub(1)
+        } else {
+            line_count
+        };
+        if usable_line_count >= limit {
+            break;
+        }
+    }
+
+    let text = String::from_utf8_lossy(&suffix);
+    let mut lines = text.lines().map(str::to_string).collect::<Vec<String>>();
+    if position > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    if lines.len() > limit {
+        lines = lines.split_off(lines.len() - limit);
+    }
+    let start_line_index = total_line_count.saturating_sub(lines.len());
+
+    Ok(ClaudeTailWindowLines {
+        lines,
+        start_line_index,
+        total_line_count,
+    })
 }
 
 pub fn load_claude_subagent_messages(
@@ -590,8 +754,7 @@ mod tests {
                 + r#"{"type":"user","timestamp":"2026-06-17T08:00:02.000Z","message":{"content":[{"type":"text","text":"third"}]}}"#,
         );
 
-        let window =
-            load_claude_message_window(&path.to_string_lossy(), 2).expect("load window");
+        let window = load_claude_message_window(&path.to_string_lossy(), 2).expect("load window");
         fs::remove_file(path).ok();
 
         assert_eq!(window.total_count, 3);
@@ -600,6 +763,52 @@ mod tests {
         assert_eq!(window.messages.len(), 2);
         assert_eq!(window.messages[0].content, "second");
         assert_eq!(window.messages[1].content, "third");
+    }
+
+    #[test]
+    fn read_claude_tail_window_lines_avoids_front_matter_for_large_history() {
+        let path = write_temp_session(
+            r#"{"type":"user","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"text","text":"first"}]}}"#
+                .to_owned()
+                + "\n"
+                + r#"{"type":"assistant","timestamp":"2026-06-17T08:00:01.000Z","message":{"content":[{"type":"text","text":"second"}]}}"#
+                + "\n"
+                + r#"{"type":"user","timestamp":"2026-06-17T08:00:02.000Z","message":{"content":[{"type":"text","text":"third"}]}}"#,
+        );
+
+        let tail = read_claude_tail_window_lines(&path, 2, 3).expect("read tail lines");
+        fs::remove_file(path).ok();
+
+        assert_eq!(tail.total_line_count, 3);
+        assert_eq!(tail.start_line_index, 1);
+        assert_eq!(tail.lines.len(), 2);
+        assert!(tail.lines[0].contains("\"second\""));
+        assert!(tail.lines[1].contains("\"third\""));
+    }
+
+    #[test]
+    fn load_claude_message_window_expands_tail_when_meta_lines_fill_suffix() {
+        let meta_padding = "x".repeat(40 * 1024);
+        let mut content = r#"{"type":"user","timestamp":"2026-06-17T08:00:00.000Z","message":{"content":[{"type":"text","text":"first"}]}}"#
+            .to_owned()
+            + "\n"
+            + r#"{"type":"assistant","timestamp":"2026-06-17T08:00:01.000Z","message":{"content":[{"type":"text","text":"second"}]}}"#;
+        for index in 0..32 {
+            content.push('\n');
+            content.push_str(&format!(
+                r#"{{"isMeta":true,"index":{},"padding":"{}"}}"#,
+                index, meta_padding
+            ));
+        }
+        let path = write_temp_session(content);
+
+        let window = load_claude_message_window(&path.to_string_lossy(), 2).expect("load window");
+        fs::remove_file(path).ok();
+
+        assert_eq!(window.messages.len(), 2);
+        assert_eq!(window.messages[0].content, "first");
+        assert_eq!(window.messages[1].content, "second");
+        assert!(window.total_count > window.messages.len());
     }
 
     #[test]

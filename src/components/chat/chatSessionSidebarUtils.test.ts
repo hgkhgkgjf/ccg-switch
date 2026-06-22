@@ -1,5 +1,10 @@
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {createInstance} from 'i18next';
+import {I18nextProvider} from 'react-i18next';
 import {describe, expect, it} from 'vitest';
 import type {SessionMeta} from '../../types/session';
+import ChatSessionSidebar from './ChatSessionSidebar';
 import {
     filterProjectChatSessions,
     filterSupportedChatSessions,
@@ -23,6 +28,18 @@ const t = (key: string): string => {
     };
     return map[key] ?? key;
 };
+
+function createKeyOnlyI18n() {
+    const instance = createInstance();
+    instance.init({
+        lng: 'en',
+        fallbackLng: false,
+        resources: {},
+        initImmediate: false,
+        interpolation: {escapeValue: false},
+    });
+    return instance;
+}
 
 function createSession(overrides: Partial<SessionMeta>): SessionMeta {
     return {
@@ -48,6 +65,40 @@ describe('chatSessionSidebarUtils', () => {
     it('falls back to a readable provider label when translation is missing', () => {
         expect(getSessionProviderLabel(t, 'internal_agent')).toBe('Internal Agent');
         expect(getSessionProviderLabel(t, 'custom')).toBe('Custom');
+    });
+
+    it('keeps session sidebar chrome readable when i18n keys are unavailable', () => {
+        const html = renderToStaticMarkup(createElement(
+            I18nextProvider,
+            {i18n: createKeyOnlyI18n()},
+            createElement(ChatSessionSidebar, {
+                activeSession: null,
+                currentCwd: 'C:/guodevelop/ccg-switch',
+                pendingSessionKey: null,
+                onSessionSelect: () => undefined,
+                onNewSession: () => undefined,
+            }),
+        ));
+
+        expect(html).toContain('Session Management');
+        expect(html).toContain('New chat');
+        expect(html).toContain('Search projects...');
+        expect(html).toContain('Projects');
+        expect(html).toContain('No projects');
+        expect(html).toContain('Sessions');
+        expect(html).toContain('No sessions');
+        expect(html).toContain('Refresh');
+        expect(html).toContain('aria-label="Refresh"');
+        expect(html).toContain('aria-label="New chat"');
+        expect(html).toContain('aria-label="Search projects..."');
+        expect(html).not.toContain('chat.sessionPanel.title');
+        expect(html).not.toContain('chat.sessionPanel.newChat');
+        expect(html).not.toContain('chat.sessionPanel.searchProjects');
+        expect(html).not.toContain('chat.sessionPanel.projects');
+        expect(html).not.toContain('chat.sessionPanel.noProjects');
+        expect(html).not.toContain('chat.sessionPanel.sessions');
+        expect(html).not.toContain('chat.sessionPanel.noSessions');
+        expect(html).not.toContain('common.refresh');
     });
 
     it('prefers title then summary then shortened session id', () => {

@@ -33,6 +33,21 @@ interface MessageListProps {
     onRetryFullHistorySearch?: () => void;
 }
 
+function collectToolResultsInRange(
+    messages: ChatMessage[],
+    startIndex: number,
+    endIndex: number,
+    results: Map<string, ToolResultBlock>,
+) {
+    for (let index = startIndex; index < endIndex; index += 1) {
+        getContentBlocksFromRaw(messages[index].raw).forEach((block) => {
+            if (block.type === 'tool_result' && !results.has(block.tool_use_id)) {
+                results.set(block.tool_use_id, block);
+            }
+        });
+    }
+}
+
 export default function MessageList({
     messages,
     searchQuery = '',
@@ -43,6 +58,10 @@ export default function MessageList({
     onRetryFullHistorySearch,
 }: MessageListProps) {
     const { t } = useTranslation();
+    const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
+        const translated = options ? t(key, options) : t(key);
+        return translated === key ? fallback : translated;
+    };
     const [revealState, setRevealState] = useState<TranscriptRevealState>({
         transcriptKey: '',
         revealedCount: 0,
@@ -56,6 +75,24 @@ export default function MessageList({
     const isSearching = normalizedSearchQuery.length > 0;
     const showFullHistorySearchLoading = isSearching && fullHistorySearchStatus === 'loading';
     const showFullHistorySearchError = isSearching && fullHistorySearchStatus === 'error';
+    const formatSearchResultsLabel = (count: number) => translateWithFallback(
+        'chat.layout.searchResults',
+        `Found ${count} matching message${count === 1 ? '' : 's'}`,
+        {count},
+    );
+    const searchNoResultsLabel = translateWithFallback(
+        'chat.layout.searchNoResults',
+        'No matching messages found',
+    );
+    const searchFullHistoryRetryLabel = translateWithFallback('chat.layout.searchFullHistoryRetry', 'Retry');
+    const searchFullHistoryLoadingLabel = translateWithFallback(
+        'chat.layout.searchFullHistoryLoading',
+        'Searching complete history for older matches...',
+    );
+    const searchFullHistoryErrorLabel = translateWithFallback(
+        'chat.layout.searchFullHistoryError',
+        'Complete history search failed. Current results only cover the loaded window.',
+    );
 
     const transcriptKey = messages[0]?.id ?? '';
     const revealedCount = getEffectiveRevealedCount(revealState, transcriptKey);
@@ -104,6 +141,11 @@ export default function MessageList({
     const visibleMessages = isSearching
         ? filteredMessages.slice(visibleStartIndex)
         : filteredMessages;
+    const showEarlierLabel = translateWithFallback(
+        'chat.message.showEarlier',
+        `${collapsedCount} earlier message${collapsedCount === 1 ? '' : 's'} ${collapsedCount === 1 ? 'is' : 'are'} collapsed. Scroll to the top to load ${nextRevealCount} more`,
+        {count: nextRevealCount, total: collapsedCount},
+    );
     const lastRenderableIndex = renderableMessages.length > 0
         ? renderableMessages[renderableMessages.length - 1].originalIndex
         : undefined;
@@ -111,13 +153,8 @@ export default function MessageList({
     const toolResultById = useMemo(() => {
         const results = new Map<string, ToolResultBlock>();
 
-        for (let index = toolResultSearchStartIndex; index < messages.length; index += 1) {
-            getContentBlocksFromRaw(messages[index].raw).forEach((block) => {
-                if (block.type === 'tool_result' && !results.has(block.tool_use_id)) {
-                    results.set(block.tool_use_id, block);
-                }
-            });
-        }
+        collectToolResultsInRange(messages, toolResultSearchStartIndex, messages.length, results);
+        collectToolResultsInRange(messages, 0, toolResultSearchStartIndex, results);
 
         return results;
     }, [messages, toolResultSearchStartIndex]);
@@ -214,27 +251,27 @@ export default function MessageList({
                             )}
                             <span className="min-w-0 truncate">
                                 {filteredMessages.length > 0
-                                    ? t('chat.layout.searchResults', { count: filteredMessages.length })
-                                    : t('chat.layout.searchNoResults')}
+                                    ? formatSearchResultsLabel(filteredMessages.length)
+                                    : searchNoResultsLabel}
                             </span>
                         </div>
                         {showFullHistorySearchError && onRetryFullHistorySearch && (
                             <button
                                 type="button"
                                 className="btn btn-ghost btn-xs h-6 min-h-0 gap-1 px-2 text-warning"
-                                aria-label={t('chat.layout.searchFullHistoryRetry')}
+                                aria-label={searchFullHistoryRetryLabel}
                                 onClick={onRetryFullHistorySearch}
                             >
                                 <RefreshCw size={12} />
-                                <span>{t('chat.layout.searchFullHistoryRetry')}</span>
+                                <span>{searchFullHistoryRetryLabel}</span>
                             </button>
                         )}
                     </div>
                     {(showFullHistorySearchLoading || showFullHistorySearchError) && (
                         <div className="mt-1 text-[11px] leading-snug text-base-content/45">
                             {showFullHistorySearchLoading
-                                ? t('chat.layout.searchFullHistoryLoading')
-                                : t('chat.layout.searchFullHistoryError')}
+                                ? searchFullHistoryLoadingLabel
+                                : searchFullHistoryErrorLabel}
                         </div>
                     )}
                 </div>
@@ -244,9 +281,9 @@ export default function MessageList({
                 <div className="mx-auto flex w-full max-w-4xl justify-center py-1">
                     <div
                         className="rounded-full border border-base-300 bg-base-100/80 px-3 py-1 text-[11px] text-base-content/50 shadow-sm backdrop-blur"
-                        title={t('chat.message.showEarlier', { count: nextRevealCount, total: collapsedCount })}
+                        title={showEarlierLabel}
                     >
-                        {t('chat.message.showEarlier', { count: nextRevealCount, total: collapsedCount })}
+                        {showEarlierLabel}
                     </div>
                 </div>
             )}

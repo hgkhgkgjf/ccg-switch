@@ -143,6 +143,130 @@ describe('chat message flow', () => {
         });
     });
 
+    it('finds an earlier tool_result when raw events arrive out of order', () => {
+        const messages: ChatMessage[] = [
+            {
+                id: 'u1',
+                role: 'user',
+                content: 'read package.json',
+                createdAt: 100,
+            },
+            {
+                id: 'u2',
+                role: 'user',
+                content: '[tool_result]',
+                raw: userRaw([
+                    {
+                        type: 'tool_result',
+                        tool_use_id: 'tool-early',
+                        content: 'early file contents',
+                        is_error: false,
+                    },
+                ], 'early-tool-result-msg'),
+                createdAt: 101,
+            },
+            {
+                id: 'a1',
+                role: 'assistant',
+                content: '',
+                raw: assistantRaw([
+                    {
+                        type: 'tool_use',
+                        id: 'tool-early',
+                        name: 'Read',
+                        input: {file_path: 'package.json'},
+                    },
+                ]),
+                createdAt: 102,
+            },
+        ];
+
+        expect(findToolResult(messages, 'tool-early', 2)).toMatchObject({
+            type: 'tool_result',
+            tool_use_id: 'tool-early',
+            content: 'early file contents',
+        });
+    });
+
+    it('merges assistant raw blocks instead of replacing earlier streamed content', () => {
+        const messages: ChatMessage[] = [
+            {
+                id: 'u1',
+                role: 'user',
+                content: 'inspect the project',
+                createdAt: 100,
+            },
+            {
+                id: 'a1',
+                role: 'assistant',
+                content: 'I will inspect the project.',
+                raw: assistantRaw([
+                    {type: 'text', text: 'I will inspect the project.'},
+                ]),
+                streaming: true,
+                createdAt: 101,
+            },
+        ];
+
+        const next = mergeRawChatMessage(messages, assistantRaw([
+            {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'Read',
+                input: {file_path: 'package.json'},
+            },
+        ]));
+
+        expect(next).toHaveLength(2);
+        expect(next[1]).toMatchObject({
+            id: 'a1',
+            role: 'assistant',
+            content: 'I will inspect the project.',
+            streaming: true,
+            createdAt: 101,
+        });
+        expect(getRenderableContentBlocks(next[1].raw).map((block) => block.type)).toEqual([
+            'text',
+            'tool_use',
+        ]);
+    });
+
+    it('keeps streamed assistant text visible when the first raw event is a tool block', () => {
+        const messages: ChatMessage[] = [
+            {
+                id: 'u1',
+                role: 'user',
+                content: 'inspect the project',
+                createdAt: 100,
+            },
+            {
+                id: 'a1',
+                role: 'assistant',
+                content: 'I will inspect the project.',
+                streaming: true,
+                createdAt: 101,
+            },
+        ];
+
+        const next = mergeRawChatMessage(messages, assistantRaw([
+            {
+                type: 'tool_use',
+                id: 'tool-1',
+                name: 'Read',
+                input: {file_path: 'package.json'},
+            },
+        ]));
+
+        expect(getRenderableContentBlocks(next[1].raw).map((block) => block.type)).toEqual([
+            'text',
+            'tool_use',
+        ]);
+        expect(getRenderableContentBlocks(next[1].raw)[0]).toMatchObject({
+            type: 'text',
+            text: 'I will inspect the project.',
+        });
+    });
+
     it('does not render assistant messages that have no visible content', () => {
         const message: ChatMessage = {
             id: 'a-empty',

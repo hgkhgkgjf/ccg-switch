@@ -32,6 +32,7 @@ import {
     clampComposerHeight,
     COMPOSER_MAX_HEIGHT,
     COMPOSER_MIN_HEIGHT,
+    getChatComposerInputLabel,
     getComposerHeightFromDrag,
 } from '../../../utils/chatUiBehavior';
 
@@ -572,6 +573,35 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
         setEnhancerOpen(false);
     };
 
+    const resizeComposerLabel = getChatComposerInputLabel({
+        control: 'resize-composer',
+        translate: t,
+    });
+    const richPlaceholder = getChatComposerInputLabel({
+        control: 'placeholder',
+        translate: t,
+    });
+    const completionEmptyText = getChatComposerInputLabel({
+        control: 'completion-empty',
+        translate: t,
+    });
+    const completionMenuLabel = getChatComposerInputLabel({
+        control: 'completion-menu',
+        translate: t,
+    });
+    const completionLoadingText = getChatComposerInputLabel({
+        control: 'completion-loading',
+        translate: t,
+    });
+    const dropFileHint = getChatComposerInputLabel({
+        control: 'drop-file',
+        translate: t,
+    });
+    const historyHint = getChatComposerInputLabel({
+        control: 'history-hint',
+        translate: t,
+    });
+
     return (
         <div className="bg-base-200/20 px-3 pb-4 pt-2 sm:px-5">
             <div className="mx-auto w-full max-w-2xl rounded-xl border border-base-300 bg-base-100/95 p-2 shadow-lg shadow-base-300/30 backdrop-blur">
@@ -604,7 +634,9 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
                             items={completions.items}
                             activeIndex={completions.activeIndex}
                             loading={completions.loading}
-                            emptyText={t('chat.completion.empty')}
+                            emptyText={completionEmptyText}
+                            loadingText={completionLoadingText}
+                            menuLabel={completionMenuLabel}
                             onSelect={(i) => {
                                 const el = textareaRef.current;
                                 if (!el) return;
@@ -626,8 +658,8 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
                         className={`absolute left-1/2 top-0 z-10 flex h-5 w-20 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-full text-base-content/35 transition-colors hover:bg-base-200 hover:text-base-content/60 focus:outline-none focus:ring-2 focus:ring-primary/30 ${
                             isResizingComposer ? 'bg-base-200 text-primary' : ''
                         }`}
-                        title={t('chat.resizeComposer')}
-                        aria-label={t('chat.resizeComposer')}
+                        title={resizeComposerLabel}
+                        aria-label={resizeComposerLabel}
                         onPointerDown={handleResizePointerDown}
                     >
                         <span className="h-1 w-10 rounded-full bg-current" />
@@ -636,7 +668,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
                         ref={textareaRef}
                         className="textarea textarea-bordered min-h-[36px] w-full resize-none overflow-y-auto py-1.5 text-sm leading-5"
                         rows={1}
-                        placeholder={t('chat.richPlaceholder')}
+                        placeholder={richPlaceholder}
                         value={draft}
                         style={{
                             height: `${textareaHeight}px`,
@@ -654,12 +686,12 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
                     />
                     {isDraggingFile && (
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-dashed border-primary bg-primary/10 text-xs font-medium text-primary backdrop-blur-[1px]">
-                            {t('chat.dropFileHint')}
+                            {dropFileHint}
                         </div>
                     )}
                     {!draft.trim() && draftHistoryRef.current.length > 0 && !isDraggingFile && (
                         <div className="mt-1 px-1 text-[11px] text-base-content/35">
-                            {t('chat.historyHint')}
+                            {historyHint}
                         </div>
                     )}
                 </div>

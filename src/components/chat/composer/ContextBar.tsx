@@ -2,6 +2,7 @@ import {useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ChevronDown, Image as ImageIcon, Layers, Paperclip, X} from 'lucide-react';
 import type {ChatAttachment} from '../../../types/chat';
+import {getChatComposerInputLabel} from '../../../utils/chatUiBehavior';
 import {TokenIndicator} from './TokenIndicator';
 
 interface ContextBarProps {
@@ -34,6 +35,18 @@ export function ContextBar({
 }: ContextBarProps) {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const attachLabel = getChatComposerInputLabel({
+        control: 'attach',
+        translate: t,
+    });
+    const removeAttachmentLabel = getChatComposerInputLabel({
+        control: 'remove-attachment',
+        translate: t,
+    });
+    const statusPanelToggleLabel = getChatComposerInputLabel({
+        control: statusPanelExpanded ? 'collapse-panel' : 'expand-panel',
+        translate: t,
+    });
 
     return (
         <div className="flex items-center gap-1.5 px-1 pb-1">
@@ -41,7 +54,8 @@ export function ContextBar({
             <button
                 type="button"
                 className="flex items-center justify-center w-7 h-7 rounded-md text-base-content/60 hover:bg-base-200 hover:text-base-content transition-colors"
-                title={t('chat.attach')}
+                title={attachLabel}
+                aria-label={attachLabel}
                 onClick={() => fileInputRef.current?.click()}
             >
                 <Paperclip size={15} />
@@ -85,8 +99,8 @@ export function ContextBar({
                                 type="button"
                                 className="shrink-0 rounded-sm hover:text-error focus:outline-none focus:ring-1 focus:ring-error/50"
                                 onClick={() => onRemoveAttachment(index)}
-                                title={t('chat.removeAttachment')}
-                                aria-label={t('chat.removeAttachment')}
+                                title={removeAttachmentLabel}
+                                aria-label={removeAttachmentLabel}
                             >
                                 <X size={12} />
                             </button>
@@ -102,11 +116,8 @@ export function ContextBar({
                         type="button"
                         className="flex items-center justify-center w-7 h-7 rounded-md text-base-content/60 hover:bg-base-200 hover:text-base-content transition-colors"
                         onClick={onToggleStatusPanel}
-                        title={
-                            statusPanelExpanded
-                                ? t('chat.collapsePanel')
-                                : t('chat.expandPanel')
-                        }
+                        title={statusPanelToggleLabel}
+                        aria-label={statusPanelToggleLabel}
                     >
                         {statusPanelExpanded ? <ChevronDown size={15} /> : <Layers size={15} />}
                     </button>

@@ -1,6 +1,6 @@
 // BashToolBlock - Bash 命令执行工具块
 
-import {memo, useState} from 'react';
+import {memo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Terminal} from 'lucide-react';
 import type {ToolResultBlock} from '../../types/chat';
@@ -13,6 +13,7 @@ import {
     truncateContent,
 } from '../../utils/toolPresentation';
 import {copyToClipboard} from '../../utils/bridge';
+import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 
 export interface BashToolBlockProps {
   name?: string;
@@ -27,6 +28,8 @@ interface BashResult {
   stdout: string;
   stderr: string;
 }
+
+type BashCopiedTarget = 'command' | 'output' | null;
 
 /**
  * 解析 Bash 工具结果
@@ -61,7 +64,8 @@ const BashToolBlock = memo(function BashToolBlock({
 }: BashToolBlockProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<BashCopiedTarget>(null);
+  const copiedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDenied = useIsToolDenied(toolId);
 
   if (!input) {
@@ -81,13 +85,29 @@ const BashToolBlock = memo(function BashToolBlock({
   // 解析结果
   const bashResult = result ? parseBashResult(result) : null;
   const resultSummary = bashResult ? summarizeBashHeaderResult(bashResult) : '';
+  const headerToggleTarget = commandSummary.summary || commandSummary.label || t('tools.runCommand');
+  const headerToggleLabel = t('tools.bashDetailsToggle', { target: headerToggleTarget });
+  const copyCommandButtonLabel = t('tools.copyCommand');
+  const copyOutputButtonLabel = t('tools.copyOutput');
+  const copyCommandActionLabel = t('tools.copyCommandForCommand', { target: headerToggleTarget });
+  const copyOutputActionLabel = t('tools.copyOutputForCommand', { target: headerToggleTarget });
+
+  const markCopied = (target: Exclude<BashCopiedTarget, null>) => {
+    if (copiedResetTimerRef.current) {
+      clearTimeout(copiedResetTimerRef.current);
+    }
+    setCopiedTarget(target);
+    copiedResetTimerRef.current = setTimeout(() => {
+      setCopiedTarget(null);
+      copiedResetTimerRef.current = null;
+    }, 2000);
+  };
 
   // 复制功能
   const handleCopyCommand = async (event?: React.MouseEvent) => {
     event?.stopPropagation();
     await copyToClipboard(command);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    markCopied('command');
   };
 
   const handleCopyOutput = async (event?: React.MouseEvent) => {
@@ -95,9 +115,16 @@ const BashToolBlock = memo(function BashToolBlock({
     if (bashResult) {
       const output = bashResult.stdout + (bashResult.stderr ? `\n\nStderr:\n${bashResult.stderr}` : '');
       await copyToClipboard(output);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied('output');
     }
+  };
+
+  const toggleExpanded = () => setExpanded((prev) => !prev);
+
+  const handleHeaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isToolBlockToggleActivationKey(event.key)) return;
+    event.preventDefault();
+    toggleExpanded();
   };
 
   const detailContent = (
@@ -150,18 +177,22 @@ const BashToolBlock = memo(function BashToolBlock({
       <div className="tool-actions">
         <button
           type="button"
-          className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+          className={`btn btn-sm ${copiedTarget === 'command' ? 'btn-success' : 'btn-ghost'}`}
+          title={copyCommandActionLabel}
+          aria-label={copyCommandActionLabel}
           onClick={handleCopyCommand}
         >
-          {copied ? t('tools.copied') : t('tools.copyCommand')}
+          {copiedTarget === 'command' ? t('tools.copied') : copyCommandButtonLabel}
         </button>
         {bashResult && (
           <button
             type="button"
-            className={`btn btn-sm ${copied ? 'btn-success' : 'btn-ghost'}`}
+            className={`btn btn-sm ${copiedTarget === 'output' ? 'btn-success' : 'btn-ghost'}`}
+            title={copyOutputActionLabel}
+            aria-label={copyOutputActionLabel}
             onClick={handleCopyOutput}
           >
-            {copied ? t('tools.copied') : t('tools.copyOutput')}
+            {copiedTarget === 'output' ? t('tools.copied') : copyOutputButtonLabel}
           </button>
         )}
       </div>
@@ -172,7 +203,13 @@ const BashToolBlock = memo(function BashToolBlock({
     <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
         className={compact ? 'task-header task-header-compact' : 'task-header'}
-        onClick={() => setExpanded((prev) => !prev)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={headerToggleLabel}
+        title={headerToggleLabel}
+        onClick={toggleExpanded}
+        onKeyDown={handleHeaderKeyDown}
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
@@ -181,13 +218,17 @@ const BashToolBlock = memo(function BashToolBlock({
           <span className={`tool-command-chip ${commandSummary.accentClass}`}>
             {commandSummary.label}
           </span>
-          <span className="tool-title-summary bash-command" title={command}>
+          <span className="tool-title-summary bash-command" title={command} aria-label={command}>
             {commandSummary.summary}
           </span>
           {resultSummary && (
             <span
-              className={`tool-title-secondary-summary ${isError ? 'tool-title-secondary-summary-error' : ''}`}
+              className={[
+                'tool-title-secondary-summary',
+                isError ? 'tool-title-secondary-summary-error' : '',
+              ].filter(Boolean).join(' ')}
               title={resultSummary}
+              aria-label={resultSummary}
             >
               {resultSummary}
             </span>

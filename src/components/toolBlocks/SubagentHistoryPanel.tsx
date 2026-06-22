@@ -158,6 +158,9 @@ export function SubagentProcessSummary({
                                         event.stopPropagation();
                                         void openFile(file.openPath, file.lineStart, file.lineEnd, currentCwd);
                                     }}
+                                    onKeyDown={(event) => {
+                                        event.stopPropagation();
+                                    }}
                                 >
                                     <FileCode2 className="subagent-chip-icon" aria-hidden="true" />
                                         <span className="subagent-chip-body">
@@ -233,6 +236,9 @@ export function SubagentProcessSummary({
                                                             interactiveTarget.lineEnd,
                                                             currentCwd,
                                                         );
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                        event.stopPropagation();
                                                     }}
                                                 >
                                                     <span className="subagent-tool-row-summary" title={interactiveTarget?.displayPath ?? presentation.summary}>

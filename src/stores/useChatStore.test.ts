@@ -1677,12 +1677,156 @@ describe('useChatStore session transitions', () => {
         });
 
         expect(useChatStore.getState().activeRequestId).toBeNull();
-        expect(useChatStore.getState().messages[1]).toMatchObject({
+        const currentAssistantMessage = useChatStore.getState().messages[1];
+        expect(currentAssistantMessage).toMatchObject({
             content: 'current text',
             streaming: false,
-            raw: staleRaw,
         });
+        expect(getRenderableContentBlocks(currentAssistantMessage.raw).map((block) => block.type)).toEqual([
+            'text',
+            'tool_use',
+        ]);
         expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps later streamed assistant text visible after raw tool blocks arrive', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'chat_start_daemon') return Promise.resolve(undefined);
+            if (command === 'chat_send') return Promise.resolve('request-live');
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().init();
+        const sent = await useChatStore.getState().send('Inspect the render path');
+
+        expect(sent).toBe(true);
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-live',
+                kind: 'line',
+                text: '[CONTENT_DELTA] "I will inspect the file.\\n"',
+            },
+        });
+        listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-live',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {type: 'tool_use', id: 'tool-read-live', name: 'Read', input: {file_path: 'src/components/chat/MessageItem.tsx'}},
+                        ],
+                    },
+                } satisfies MessageRaw),
+            },
+        });
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-live',
+                kind: 'line',
+                text: '[CONTENT_DELTA] "It contains the raw block render path."',
+            },
+        });
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-live',
+                success: true,
+                error: null,
+            },
+        });
+
+        const assistantMessage = useChatStore.getState().messages[1];
+        expect(assistantMessage).toMatchObject({
+            content: 'I will inspect the file.\nIt contains the raw block render path.',
+            streaming: false,
+        });
+        const blocks = getRenderableContentBlocks(assistantMessage.raw);
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use']);
+        expect(blocks[0]).toMatchObject({
+            type: 'text',
+            text: 'I will inspect the file.\nIt contains the raw block render path.',
+        });
+        expect(blocks[1]).toMatchObject({
+            type: 'tool_use',
+            id: 'tool-read-live',
+        });
+    });
+
+    it('deduplicates assistant text raw deltas after streamed content was synced into raw', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'chat_start_daemon') return Promise.resolve(undefined);
+            if (command === 'chat_send') return Promise.resolve('request-snapshot');
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().init();
+        await useChatStore.getState().send('Inspect the render path');
+
+        const fullText = 'I will inspect the file.\nIt contains the raw block render path.';
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-snapshot',
+                kind: 'line',
+                text: '[CONTENT_DELTA] "I will inspect the file.\\n"',
+            },
+        });
+        listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-snapshot',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {type: 'tool_use', id: 'tool-read-snapshot', name: 'Read', input: {file_path: 'src/components/chat/MessageItem.tsx'}},
+                        ],
+                    },
+                } satisfies MessageRaw),
+            },
+        });
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-snapshot',
+                kind: 'line',
+                text: '[CONTENT_DELTA] "It contains the raw block render path."',
+            },
+        });
+        listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-snapshot',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {type: 'text', text: 'It contains the raw block render path.'},
+                        ],
+                    },
+                } satisfies MessageRaw),
+            },
+        });
+        listeners['chat://done']?.({
+            payload: {
+                requestId: 'request-snapshot',
+                success: true,
+                error: null,
+            },
+        });
+
+        const assistantMessage = useChatStore.getState().messages[1];
+        const blocks = getRenderableContentBlocks(assistantMessage.raw);
+        expect(blocks).toHaveLength(2);
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use']);
+        expect(blocks[0]).toMatchObject({type: 'text', text: fullText});
+        expect(blocks[1]).toMatchObject({type: 'tool_use', id: 'tool-read-snapshot'});
     });
 
     it('does not bind a retired request to the next pending turn', async () => {

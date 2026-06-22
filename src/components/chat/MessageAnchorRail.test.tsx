@@ -43,6 +43,34 @@ describe('MessageAnchorRail', () => {
         expect(html).toContain('disabled');
     });
 
+    it('keeps navigation labels readable when translations return keys', () => {
+        const html = renderToStaticMarkup(
+            <MessageAnchorRail
+                hasMessages
+                anchors={[
+                    { id: 'anchor-1', label: 'First user request', kind: 'text', sequence: 1, total: 1 },
+                ]}
+                activeAnchorId="anchor-1"
+                activeAnchorLabel="First user request"
+                containerRef={{ current: null }}
+                messageNodeMap={{ current: new Map() }}
+                onScrollToTop={() => {}}
+                onScrollToBottom={() => {}}
+            />,
+        );
+
+        expect(html).toContain('aria-label="Message timeline"');
+        expect(html).toContain('Current message');
+        expect(html).toContain('aria-label="Jump to message 1"');
+        expect(html).toContain('title="Scroll to top"');
+        expect(html).toContain('aria-label="Scroll to bottom"');
+        expect(html).not.toContain('chat.layout.anchorRail');
+        expect(html).not.toContain('chat.layout.currentAnchor');
+        expect(html).not.toContain('chat.layout.jumpToMessage');
+        expect(html).not.toContain('chat.layout.scrollToTop');
+        expect(html).not.toContain('chat.layout.scrollToBottom');
+    });
+
     it('samples dense anchor lists while keeping the first, last and active anchor', () => {
         const anchors = Array.from({length: 80}, (_, index) => ({
             id: `anchor-${index + 1}`,

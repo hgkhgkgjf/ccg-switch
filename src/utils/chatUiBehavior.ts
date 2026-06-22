@@ -133,11 +133,482 @@ interface DiffPaneReopenControlInput {
     hasSelectedEdit: boolean;
 }
 
+interface DiffPaneReopenLabelInput {
+    displayPath?: string | null;
+    translate: (key: string, options?: Record<string, unknown>) => string;
+}
+
+export type PaneResizeHandleEdge = 'conversation-diff' | 'diff-status' | 'conversation-status';
+export type ChatTopChromeAction = 'sdk-manage' | 'clear-chat' | 'sdk-install';
+export type ChatNavigationControl =
+    | 'search-placeholder'
+    | 'clear-search'
+    | 'anchor-rail'
+    | 'current-anchor'
+    | 'scroll-to-top'
+    | 'scroll-to-bottom'
+    | 'jump-to-message';
+export type ChatComposerToolbarControl =
+    | 'provider'
+    | 'mode'
+    | 'model'
+    | 'reasoning'
+    | 'models-refresh'
+    | 'models-refreshing'
+    | 'models-loading'
+    | 'enhance'
+    | 'send'
+    | 'stop';
+export type ChatComposerInputControl =
+    | 'attach'
+    | 'remove-attachment'
+    | 'collapse-panel'
+    | 'expand-panel'
+    | 'resize-composer'
+    | 'placeholder'
+    | 'completion-empty'
+    | 'completion-menu'
+    | 'completion-loading'
+    | 'drop-file'
+    | 'history-hint';
+export type ChatComposerPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+export type ChatComposerReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type ChatComposerOptionTextField = 'label' | 'description';
+
+interface PaneResizeHandleLabelInput {
+    edge: PaneResizeHandleEdge;
+    translate: (key: string) => string;
+}
+
+interface ChatTopChromeActionLabelInput {
+    action: ChatTopChromeAction;
+    translate: (key: string) => string;
+}
+
+interface ChatNavigationControlLabelInput {
+    control: ChatNavigationControl;
+    index?: number;
+    translate: (key: string, options?: Record<string, unknown>) => string;
+}
+
+interface ChatComposerToolbarLabelInput {
+    control: ChatComposerToolbarControl;
+    translate: (key: string) => string;
+}
+
+interface ChatComposerInputLabelInput {
+    control: ChatComposerInputControl;
+    translate: (key: string) => string;
+}
+
+interface ChatComposerModeTextInput {
+    mode: ChatComposerPermissionMode;
+    field: ChatComposerOptionTextField;
+    translate: (key: string) => string;
+}
+
+interface ChatComposerReasoningTextInput {
+    effort: ChatComposerReasoningEffort;
+    field: ChatComposerOptionTextField;
+    translate: (key: string) => string;
+}
+
+interface SdkMissingBannerTextInput {
+    sdkName?: string | null;
+    translate: (key: string, options?: Record<string, unknown>) => string;
+}
+
+const PANE_RESIZE_HANDLE_LABELS: Record<PaneResizeHandleEdge, { key: string; fallback: string }> = {
+    'conversation-diff': {
+        key: 'chat.layout.resizeConversationDiff',
+        fallback: 'Resize conversation and diff panes',
+    },
+    'diff-status': {
+        key: 'chat.layout.resizeDiffStatus',
+        fallback: 'Resize diff and right panes',
+    },
+    'conversation-status': {
+        key: 'chat.layout.resizeConversationStatus',
+        fallback: 'Resize conversation and right panes',
+    },
+};
+
+const CHAT_TOP_CHROME_ACTION_LABELS: Record<ChatTopChromeAction, { key: string; fallback: string }> = {
+    'sdk-manage': {
+        key: 'chat.sdk.manage',
+        fallback: 'Manage SDKs',
+    },
+    'clear-chat': {
+        key: 'chat.clear',
+        fallback: 'Clear chat',
+    },
+    'sdk-install': {
+        key: 'chat.sdk.install',
+        fallback: 'Install SDK',
+    },
+};
+
+const CHAT_NAVIGATION_CONTROL_LABELS: Record<Exclude<ChatNavigationControl, 'jump-to-message'>, {
+    key: string;
+    fallback: string;
+}> = {
+    'search-placeholder': {
+        key: 'chat.layout.searchPlaceholder',
+        fallback: 'Search this conversation',
+    },
+    'clear-search': {
+        key: 'chat.layout.clearSearch',
+        fallback: 'Clear search',
+    },
+    'anchor-rail': {
+        key: 'chat.layout.anchorRail',
+        fallback: 'Message timeline',
+    },
+    'current-anchor': {
+        key: 'chat.layout.currentAnchor',
+        fallback: 'Current message',
+    },
+    'scroll-to-top': {
+        key: 'chat.layout.scrollToTop',
+        fallback: 'Scroll to top',
+    },
+    'scroll-to-bottom': {
+        key: 'chat.layout.scrollToBottom',
+        fallback: 'Scroll to bottom',
+    },
+};
+
+const CHAT_COMPOSER_TOOLBAR_LABELS: Record<ChatComposerToolbarControl, { key: string; fallback: string }> = {
+    provider: {
+        key: 'chat.providerLabel',
+        fallback: 'AI provider',
+    },
+    mode: {
+        key: 'chat.modeLabel',
+        fallback: 'Permission mode',
+    },
+    model: {
+        key: 'chat.modelLabel',
+        fallback: 'Model',
+    },
+    reasoning: {
+        key: 'chat.reasoningLabel',
+        fallback: 'Reasoning effort',
+    },
+    'models-refresh': {
+        key: 'chat.modelsRefresh',
+        fallback: 'Refresh models',
+    },
+    'models-refreshing': {
+        key: 'chat.modelsRefreshing',
+        fallback: 'Refreshing models...',
+    },
+    'models-loading': {
+        key: 'chat.modelsLoading',
+        fallback: 'Loading models...',
+    },
+    enhance: {
+        key: 'chat.enhancePrompt',
+        fallback: 'Enhance prompt',
+    },
+    send: {
+        key: 'chat.send',
+        fallback: 'Send',
+    },
+    stop: {
+        key: 'chat.stop',
+        fallback: 'Stop',
+    },
+};
+
+const CHAT_COMPOSER_INPUT_LABELS: Record<ChatComposerInputControl, { key: string; fallback: string }> = {
+    attach: {
+        key: 'chat.attach',
+        fallback: 'Add attachment',
+    },
+    'remove-attachment': {
+        key: 'chat.removeAttachment',
+        fallback: 'Remove attachment',
+    },
+    'collapse-panel': {
+        key: 'chat.collapsePanel',
+        fallback: 'Collapse status panel',
+    },
+    'expand-panel': {
+        key: 'chat.expandPanel',
+        fallback: 'Expand status panel',
+    },
+    'resize-composer': {
+        key: 'chat.resizeComposer',
+        fallback: 'Drag to resize the input',
+    },
+    placeholder: {
+        key: 'chat.richPlaceholder',
+        fallback: 'Type a message... @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline',
+    },
+    'completion-empty': {
+        key: 'chat.completion.empty',
+        fallback: 'No matches',
+    },
+    'completion-menu': {
+        key: 'chat.completion.label',
+        fallback: 'Completion suggestions',
+    },
+    'completion-loading': {
+        key: 'chat.completion.loading',
+        fallback: 'Loading suggestions...',
+    },
+    'drop-file': {
+        key: 'chat.dropFileHint',
+        fallback: 'Drop to attach image',
+    },
+    'history-hint': {
+        key: 'chat.historyHint',
+        fallback: 'Press Up to restore the previous input, Down to return to an empty draft',
+    },
+};
+
+const CHAT_COMPOSER_MODE_TEXT: Record<ChatComposerPermissionMode, Record<ChatComposerOptionTextField, {
+    key: string;
+    fallback: string;
+}>> = {
+    default: {
+        label: {
+            key: 'chat.modes.default.label',
+            fallback: 'Default Mode',
+        },
+        description: {
+            key: 'chat.modes.default.description',
+            fallback: 'Requires manual confirmation for each operation',
+        },
+    },
+    acceptEdits: {
+        label: {
+            key: 'chat.modes.acceptEdits.label',
+            fallback: 'Agent Mode',
+        },
+        description: {
+            key: 'chat.modes.acceptEdits.description',
+            fallback: 'Auto-accept file creation/editing, fewer confirmations',
+        },
+    },
+    plan: {
+        label: {
+            key: 'chat.modes.plan.label',
+            fallback: 'Plan Mode',
+        },
+        description: {
+            key: 'chat.modes.plan.description',
+            fallback: 'Read-only tools only, generates plan for user approval',
+        },
+    },
+    bypassPermissions: {
+        label: {
+            key: 'chat.modes.bypassPermissions.label',
+            fallback: 'Auto Mode',
+        },
+        description: {
+            key: 'chat.modes.bypassPermissions.description',
+            fallback: 'Fully automated, bypasses all permission checks',
+        },
+    },
+};
+
+const CHAT_COMPOSER_REASONING_TEXT: Record<ChatComposerReasoningEffort, Record<ChatComposerOptionTextField, {
+    key: string;
+    fallback: string;
+}>> = {
+    low: {
+        label: {
+            key: 'chat.reasoning.low.label',
+            fallback: 'Low',
+        },
+        description: {
+            key: 'chat.reasoning.low.description',
+            fallback: 'Quick responses with basic reasoning',
+        },
+    },
+    medium: {
+        label: {
+            key: 'chat.reasoning.medium.label',
+            fallback: 'Medium',
+        },
+        description: {
+            key: 'chat.reasoning.medium.description',
+            fallback: 'Balanced thinking with moderate token savings',
+        },
+    },
+    high: {
+        label: {
+            key: 'chat.reasoning.high.label',
+            fallback: 'High',
+        },
+        description: {
+            key: 'chat.reasoning.high.description',
+            fallback: 'Deep reasoning for complex tasks',
+        },
+    },
+    xhigh: {
+        label: {
+            key: 'chat.reasoning.xhigh.label',
+            fallback: 'XHigh',
+        },
+        description: {
+            key: 'chat.reasoning.xhigh.description',
+            fallback: 'Extra deep reasoning for demanding tasks',
+        },
+    },
+    max: {
+        label: {
+            key: 'chat.reasoning.max.label',
+            fallback: 'Max',
+        },
+        description: {
+            key: 'chat.reasoning.max.description',
+            fallback: 'Maximum reasoning depth',
+        },
+    },
+};
+
 export function shouldShowDiffPaneReopenControl({
     diffPaneCollapsed,
     hasSelectedEdit,
 }: DiffPaneReopenControlInput): boolean {
     return diffPaneCollapsed && hasSelectedEdit;
+}
+
+export function getDiffPaneReopenLabel({
+    displayPath,
+    translate,
+}: DiffPaneReopenLabelInput): string {
+    const trimmedPath = displayPath?.trim();
+    const key = trimmedPath ? 'chat.layout.expandDiffPanelForFile' : 'chat.layout.expandDiffPanel';
+    const fallback = trimmedPath ? `Open file diff: ${trimmedPath}` : 'Open file diff panel';
+    const translated = translate(key, trimmedPath ? {file: trimmedPath} : undefined);
+
+    return translated && translated !== key ? translated : fallback;
+}
+
+export function getPaneResizeHandleLabel({edge, translate}: PaneResizeHandleLabelInput): string {
+    const label = PANE_RESIZE_HANDLE_LABELS[edge];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatTopChromeActionLabel({
+    action,
+    translate,
+}: ChatTopChromeActionLabelInput): string {
+    const label = CHAT_TOP_CHROME_ACTION_LABELS[action];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatNavigationControlLabel({
+    control,
+    index,
+    translate,
+}: ChatNavigationControlLabelInput): string {
+    if (control === 'jump-to-message') {
+        const key = 'chat.layout.jumpToMessage';
+        const safeIndex = typeof index === 'number' && Number.isFinite(index) ? index : 0;
+        const translated = translate(key, {index: safeIndex});
+
+        return translated && translated !== key ? translated : `Jump to message ${safeIndex}`;
+    }
+
+    const label = CHAT_NAVIGATION_CONTROL_LABELS[control];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatComposerToolbarLabel({
+    control,
+    translate,
+}: ChatComposerToolbarLabelInput): string {
+    const label = CHAT_COMPOSER_TOOLBAR_LABELS[control];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatComposerInputLabel({
+    control,
+    translate,
+}: ChatComposerInputLabelInput): string {
+    const label = CHAT_COMPOSER_INPUT_LABELS[control];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatComposerModeText({
+    mode,
+    field,
+    translate,
+}: ChatComposerModeTextInput): string {
+    const label = CHAT_COMPOSER_MODE_TEXT[mode][field];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getChatComposerReasoningText({
+    effort,
+    field,
+    translate,
+}: ChatComposerReasoningTextInput): string {
+    const label = CHAT_COMPOSER_REASONING_TEXT[effort][field];
+    const translated = translate(label.key);
+
+    return translated && translated !== label.key ? translated : label.fallback;
+}
+
+export function getSdkMissingBannerText({
+    sdkName,
+    translate,
+}: SdkMissingBannerTextInput): string {
+    const key = 'chat.sdk.missingBanner';
+    const displayName = sdkName?.trim() || 'SDK';
+    const translated = translate(key, {name: displayName});
+
+    return translated && translated !== key
+        ? translated
+        : `${displayName} is not installed yet. Install it to start chatting.`;
+}
+
+interface DiffPaneFocusTarget {
+    focus: (options?: FocusOptions) => void;
+}
+
+interface QueueDiffPaneFocusOptions {
+    matchMedia?: (query: string) => Pick<MediaQueryList, 'matches'>;
+    requestAnimationFrame?: (callback: () => void) => unknown;
+}
+
+const DESKTOP_DIFF_PANE_MEDIA_QUERY = '(min-width: 1280px)';
+
+export function queueDiffPaneFocusAfterOpen(
+    getTarget: () => DiffPaneFocusTarget | null | undefined,
+    {
+        matchMedia = typeof window !== 'undefined' ? window.matchMedia?.bind(window) : undefined,
+        requestAnimationFrame = typeof window !== 'undefined'
+            ? window.requestAnimationFrame?.bind(window)
+            : undefined,
+    }: QueueDiffPaneFocusOptions = {},
+): boolean {
+    if (typeof matchMedia !== 'function' || !matchMedia(DESKTOP_DIFF_PANE_MEDIA_QUERY).matches) {
+        return false;
+    }
+    if (typeof requestAnimationFrame !== 'function') return false;
+
+    requestAnimationFrame(() => {
+        getTarget()?.focus({preventScroll: true});
+    });
+    return true;
 }
 
 export type ActivePermissionDialog =

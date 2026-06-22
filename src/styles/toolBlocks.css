@@ -472,6 +472,14 @@
   max-width: 500px;
 }
 
+.file-path-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+
 .file-icon {
   display: inline-flex;
   align-items: center;
@@ -901,6 +909,17 @@
   width: min(300px, calc(100vw - 48px));
   max-width: min(300px, calc(100vw - 48px));
   z-index: 1700;
+  border-color: #475569;
+  background: #020617;
+  color: #f8fafc;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.88), 0 0 0 1px #0f172a;
+  opacity: 1;
+  backdrop-filter: none;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-readable {
+  width: min(420px, calc(100vw - 48px));
+  max-width: min(420px, calc(100vw - 48px));
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-header {
@@ -923,11 +942,46 @@
   white-space: nowrap;
 }
 
+.status-edit-diff-trigger .edit-diff-hover-preview-readable .edit-diff-hover-summary {
+  max-width: 130px;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-hidden-summary {
+  display: inline-flex;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  padding: 1px 5px;
+  background: #1e293b;
+  color: #fbbf24;
+  line-height: 1.25;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-wrap .edit-diff-hover-content,
+.status-edit-diff-trigger .edit-diff-hover-preview-wrap .edit-diff-hover-split-row .edit-diff-hover-content {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-wrap .edit-diff-hover-line,
+.status-edit-diff-trigger .edit-diff-hover-preview-wrap .edit-diff-hover-split-cell {
+  align-items: start;
+}
+
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-body {
   max-height: 260px;
   overflow: hidden;
   font-size: 10.5px;
   line-height: 1.45;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-tall .edit-diff-hover-body {
+  max-height: min(420px, calc(100vh - 96px));
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-line {
@@ -1191,6 +1245,69 @@
   background: transparent;
 }
 
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-header {
+  background: #111827;
+  border-bottom-color: #334155;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-body {
+  background: #020617;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.context {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.removed {
+  background: #451a1a;
+  color: #fecaca;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.added {
+  background: #052e16;
+  color: #bbf7d0;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-number {
+  color: #cbd5e1;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.removed .edit-diff-hover-marker,
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.removed .edit-diff-hover-marker {
+  color: #fca5a5;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.added .edit-diff-hover-marker,
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.added .edit-diff-hover-marker {
+  color: #86efac;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-cell {
+  background: #020617;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-cell.old {
+  border-right-color: #334155;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.removed .edit-diff-hover-split-cell.old {
+  background: #451a1a;
+  color: #fecaca;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.added .edit-diff-hover-split-cell.new {
+  background: #052e16;
+  color: #bbf7d0;
+}
+
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell,
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.old,
+.status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.new {
+  background: #020617;
+  color: #e2e8f0;
+}
+
 .edit-diff-hover-split-row .edit-diff-hover-marker {
   text-align: center;
   font-weight: 700;
@@ -1321,6 +1438,13 @@
   min-height: 0;
   flex-direction: column;
   background: oklch(var(--b1));
+}
+
+.chat-diff-review-pane:focus-visible,
+.chat-diff-review-pane-focus-target:focus-visible {
+  outline: 2px solid oklch(var(--p) / 0.62);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px oklch(var(--p) / 0.18), 0 0 0 2px oklch(var(--p) / 0.12);
 }
 
 .chat-diff-review-header {
@@ -1867,7 +1991,7 @@
 
 .search-result-file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -1893,11 +2017,32 @@
   font-size: 12px;
 }
 
+.search-result-file-snippet {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: oklch(var(--bc) / 0.68);
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+}
+
 .search-result-file-line {
+  grid-column: 3;
   color: #60a5fa;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 11px;
   font-weight: 700;
+}
+
+.search-result-files-footer {
+  margin-top: 2px;
+  border-top: 1px dashed oklch(var(--b3));
+  padding: 6px 7px 2px;
+  color: oklch(var(--bc) / 0.55);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 /* Agent 工具块样式 */

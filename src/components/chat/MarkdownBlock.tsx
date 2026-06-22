@@ -151,6 +151,18 @@ function escapeHtml(text: string): string {
         .replace(/'/g, '&#39;');
 }
 
+function translateWithFallback(t: (key: string) => string, key: string, fallback: string): string {
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+}
+
+export function getMarkdownCodeCopyLabels(t: (key: string) => string) {
+    return {
+        copyCodeLabel: translateWithFallback(t, 'chat.markdown.copyCode', 'Copy code'),
+        copiedCodeLabel: translateWithFallback(t, 'chat.markdown.copiedCode', 'Copied code'),
+    };
+}
+
 /**
  * Markdown 渲染组件
  * 支持代码高亮、GFM、代码复制按钮
@@ -158,6 +170,7 @@ function escapeHtml(text: string): string {
 function MarkdownBlock({ content, isStreaming = false }: MarkdownBlockProps) {
     const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement>(null);
+    const {copyCodeLabel, copiedCodeLabel} = useMemo(() => getMarkdownCodeCopyLabels(t), [t]);
 
     // 渲染 Markdown
     const html = useMemo(() => {
@@ -194,8 +207,8 @@ function MarkdownBlock({ content, isStreaming = false }: MarkdownBlockProps) {
             const button = document.createElement('button');
             button.className = 'copy-button';
             button.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-            button.title = t('chat.markdown.copyCode');
-            button.setAttribute('aria-label', t('chat.markdown.copyCode'));
+            button.title = copyCodeLabel;
+            button.setAttribute('aria-label', copyCodeLabel);
 
             let resetTimer: number | null = null;
             const handleCopy = async () => {
@@ -204,13 +217,13 @@ function MarkdownBlock({ content, isStreaming = false }: MarkdownBlockProps) {
                     await navigator.clipboard.writeText(code);
                     button.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
                     button.classList.add('copied');
-                    button.title = t('chat.markdown.copiedCode');
-                    button.setAttribute('aria-label', t('chat.markdown.copiedCode'));
+                    button.title = copiedCodeLabel;
+                    button.setAttribute('aria-label', copiedCodeLabel);
                     resetTimer = window.setTimeout(() => {
                         button.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
                         button.classList.remove('copied');
-                        button.title = t('chat.markdown.copyCode');
-                        button.setAttribute('aria-label', t('chat.markdown.copyCode'));
+                        button.title = copyCodeLabel;
+                        button.setAttribute('aria-label', copyCodeLabel);
                     }, 2000);
                 } catch (e) {
                     console.error('[MarkdownBlock] Copy failed:', e);
@@ -230,7 +243,7 @@ function MarkdownBlock({ content, isStreaming = false }: MarkdownBlockProps) {
         });
 
         return () => cleanupCallbacks.forEach((cleanup) => cleanup());
-    }, [html, t]);
+    }, [copyCodeLabel, copiedCodeLabel, html]);
 
     return (
         <div

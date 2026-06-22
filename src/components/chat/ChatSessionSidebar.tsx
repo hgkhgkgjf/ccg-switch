@@ -191,6 +191,31 @@ export default function ChatSessionSidebar({
 
     const activeSessionKey = activeSession ? getSessionSelectionKey(activeSession) : null;
     const showSessionRefreshStatus = shouldShowSessionRefreshStatus(loadingSessions, visibleSessions.length);
+    const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
+        const translated = options ? t(key, options) : t(key);
+        return translated === key ? fallback : translated;
+    };
+    const panelTitleLabel = translateWithFallback('chat.sessionPanel.title', 'Session Management');
+    const newChatLabel = translateWithFallback('chat.sessionPanel.newChat', 'New chat');
+    const refreshLabel = translateWithFallback('common.refresh', 'Refresh');
+    const loadingLabel = translateWithFallback('common.loading', 'Loading...');
+    const searchProjectsLabel = translateWithFallback('chat.sessionPanel.searchProjects', 'Search projects...');
+    const projectsLabel = translateWithFallback('chat.sessionPanel.projects', 'Projects');
+    const noProjectsLabel = translateWithFallback('chat.sessionPanel.noProjects', 'No projects');
+    const sessionsLabel = translateWithFallback('chat.sessionPanel.sessions', 'Sessions');
+    const selectProjectLabel = translateWithFallback(
+        'chat.sessionPanel.selectProject',
+        'Select a project to view sessions',
+    );
+    const noSessionsLabel = translateWithFallback('chat.sessionPanel.noSessions', 'No sessions');
+    const refreshingSessionsLabel = translateWithFallback('chat.sessionPanel.refreshingSessions', 'Refreshing sessions...');
+    const searchSessionsLabel = translateWithFallback('chat.sessionPanel.searchSessions', 'Search sessions...');
+    const noMatchingSessionsLabel = translateWithFallback('chat.sessionPanel.noMatchingSessions', 'No matching sessions');
+    const getProjectSessionCountLabel = (count: number) => translateWithFallback(
+        'chat.sessionPanel.projectSessionCount',
+        `${count} session${count === 1 ? '' : 's'}`,
+        {count},
+    );
 
     const handleProjectSelect = (project: ProjectInfo) => {
         const nextProjectKey = normalizeProjectPathForCache(project.path);
@@ -227,14 +252,15 @@ export default function ChatSessionSidebar({
             <div className="flex items-center justify-between border-b border-base-300 px-3 py-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-base-content">
                     <MessageSquare size={15}/>
-                    {t('chat.sessionPanel.title')}
+                    {panelTitleLabel}
                 </div>
                 <div className="flex items-center gap-1">
                     <button
                         type="button"
                         className="btn btn-ghost btn-xs btn-square"
                         onClick={() => void loadProjects()}
-                        title={t('common.refresh')}
+                        title={refreshLabel}
+                        aria-label={refreshLabel}
                         disabled={loadingProjects}
                     >
                         <RefreshCw size={14} className={loadingProjects ? 'animate-spin' : ''}/>
@@ -243,7 +269,8 @@ export default function ChatSessionSidebar({
                         type="button"
                         className="btn btn-primary btn-xs btn-square"
                         onClick={handleNewSession}
-                        title={t('chat.sessionPanel.newChat')}
+                        title={newChatLabel}
+                        aria-label={newChatLabel}
                     >
                         <Plus size={14}/>
                     </button>
@@ -257,7 +284,8 @@ export default function ChatSessionSidebar({
                         type="text"
                         value={projectQuery}
                         onChange={(event) => setProjectQuery(event.target.value)}
-                        placeholder={t('chat.sessionPanel.searchProjects')}
+                        placeholder={searchProjectsLabel}
+                        aria-label={searchProjectsLabel}
                         className="input input-bordered input-xs w-full pl-7 text-xs"
                     />
                 </label>
@@ -267,7 +295,7 @@ export default function ChatSessionSidebar({
                 <div className="flex h-full min-h-0 flex-col">
                     <section className="min-h-0 basis-2/5 overflow-y-auto border-b border-base-300 pb-2">
                         <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
-                            {t('chat.sessionPanel.projects')}
+                            {projectsLabel}
                         </div>
 
                         {loadingProjects ? (
@@ -276,7 +304,7 @@ export default function ChatSessionSidebar({
                             </div>
                         ) : filteredProjects.length === 0 ? (
                             <div className="px-3 py-5 text-center text-xs text-base-content/40">
-                                {t('chat.sessionPanel.noProjects')}
+                                {noProjectsLabel}
                             </div>
                         ) : (
                             <div className="space-y-0.5 px-2">
@@ -304,7 +332,7 @@ export default function ChatSessionSidebar({
                                             </div>
                                             <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
                                                 <Clock size={11}/>
-                                                <span>{t('chat.sessionPanel.projectSessionCount', {count: project.session_count})}</span>
+                                                <span>{getProjectSessionCountLabel(project.session_count)}</span>
                                             </div>
                                         </button>
                                     );
@@ -316,13 +344,14 @@ export default function ChatSessionSidebar({
                     <section className="min-h-0 flex-1 overflow-y-auto">
                         <div className="flex items-center justify-between px-2 pb-1 pt-3">
                             <div className="text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
-                                {t('chat.sessionPanel.sessions')}
+                                {sessionsLabel}
                             </div>
                             <button
                                 type="button"
                                 className="btn btn-ghost btn-xs btn-square"
                                 onClick={handleRefreshSessions}
-                                title={t('common.refresh')}
+                                title={refreshLabel}
+                                aria-label={refreshLabel}
                                 disabled={!selectedProjectPath || loadingSessions}
                             >
                                 <RefreshCw size={13} className={loadingSessions ? 'animate-spin' : ''}/>
@@ -331,7 +360,7 @@ export default function ChatSessionSidebar({
 
                         {!selectedProjectPath ? (
                             <div className="px-3 py-5 text-center text-xs text-base-content/40">
-                                {t('chat.sessionPanel.selectProject')}
+                                {selectProjectLabel}
                             </div>
                         ) : loadingSessions && visibleSessions.length === 0 ? (
                             <div className="flex items-center justify-center py-6 text-base-content/40">
@@ -339,7 +368,7 @@ export default function ChatSessionSidebar({
                             </div>
                         ) : visibleSessions.length === 0 ? (
                             <div className="px-3 py-5 text-center text-xs text-base-content/40">
-                                {t('chat.sessionPanel.noSessions')}
+                                {noSessionsLabel}
                             </div>
                         ) : (
                             <div className="pb-3">
@@ -350,7 +379,7 @@ export default function ChatSessionSidebar({
                                     >
                                         <RefreshCw size={12} className="animate-spin text-primary/70"/>
                                         <span className="min-w-0 flex-1 truncate">
-                                            {t('chat.sessionPanel.refreshingSessions')}
+                                            {refreshingSessionsLabel}
                                         </span>
                                     </div>
                                 )}
@@ -361,7 +390,8 @@ export default function ChatSessionSidebar({
                                             type="text"
                                             value={sessionQuery}
                                             onChange={(event) => setSessionQuery(event.target.value)}
-                                            placeholder={t('chat.sessionPanel.searchSessions')}
+                                            placeholder={searchSessionsLabel}
+                                            aria-label={searchSessionsLabel}
                                             className="input input-bordered input-xs w-full pl-7 text-xs"
                                         />
                                     </label>
@@ -369,7 +399,7 @@ export default function ChatSessionSidebar({
 
                                 {filteredSessions.length === 0 ? (
                                     <div className="px-3 py-5 text-center text-xs text-base-content/40">
-                                        {t('chat.sessionPanel.noMatchingSessions')}
+                                        {noMatchingSessionsLabel}
                                     </div>
                                 ) : (
                                     <div className="space-y-0.5 px-2">
@@ -389,7 +419,7 @@ export default function ChatSessionSidebar({
                                                             ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
                                                             : 'border-transparent hover:bg-base-200/80'
                                                     }`}
-                                                    title={isPending ? t('common.loading') : session.sessionId}
+                                                    title={isPending ? loadingLabel : session.sessionId}
                                                 >
                                                     <div className="flex items-center gap-2">
                                                         {isPending ? (
@@ -411,7 +441,7 @@ export default function ChatSessionSidebar({
                                                     <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
                                                         {isPending && (
                                                             <>
-                                                                <span className="shrink-0 text-primary/80">{t('common.loading')}</span>
+                                                                <span className="shrink-0 text-primary/80">{loadingLabel}</span>
                                                                 <span className="shrink-0">·</span>
                                                             </>
                                                         )}

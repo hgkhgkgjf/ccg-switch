@@ -68,6 +68,50 @@ function getToolJumpLabelKey(tool: ChatStatusToolSummary) {
         : 'chat.layout.scrollToToolTask';
 }
 
+function getToolJumpFallbackLabel(tool: ChatStatusToolSummary) {
+    const target = tool.summary || tool.label;
+    return `${tool.type === 'agent' ? 'Jump to subagent activity' : 'Jump to tool task'}: ${target}`;
+}
+
+function formatMoreStatusItemsLabel(count: number, singularLabel: string) {
+    return `+${count} more ${singularLabel}${count === 1 ? '' : 's'}`;
+}
+
+function getEditStatsDescriptionId(edit: ChatStatusEditSummary) {
+    const editKey = getChatStatusEditKey(edit);
+    const safeKey = editKey
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return `chat-input-status-edit-stats-${safeKey || 'unknown'}`;
+}
+
+type ChatInputStatusEmptyPanel = 'tasks' | 'subagents' | 'edits';
+
+const INPUT_STATUS_EMPTY_PANEL_LABELS: Record<ChatInputStatusEmptyPanel, {key: string; fallback: string}> = {
+    tasks: {
+        key: 'chat.layout.inputStatusNoTasks',
+        fallback: 'No task or tool activity yet',
+    },
+    subagents: {
+        key: 'chat.layout.inputStatusNoSubagents',
+        fallback: 'No subagent calls yet',
+    },
+    edits: {
+        key: 'chat.layout.inputStatusNoEdits',
+        fallback: 'No file edits yet',
+    },
+};
+
+export function getInputStatusEmptyPanelLabel(
+    panel: ChatInputStatusEmptyPanel,
+    t: (key: string) => string,
+): string {
+    const label = INPUT_STATUS_EMPTY_PANEL_LABELS[panel];
+    const translated = t(label.key);
+    return translated === label.key ? label.fallback : translated;
+}
+
 export default function ChatInputStatusTabs({
     statusSummary,
     isStreaming = false,
@@ -103,20 +147,91 @@ export default function ChatInputStatusTabs({
     const recentTools = latestFirst(taskTools).slice(0, MAX_PANEL_ITEMS);
     const recentAgents = latestFirst(agentTools).slice(0, MAX_PANEL_ITEMS);
     const visibleEdits = edits.slice(0, MAX_PANEL_ITEMS);
+    const hiddenTaskCount = taskTools.length - MAX_PANEL_ITEMS;
+    const hiddenSubagentCount = agentTools.length - MAX_PANEL_ITEMS;
+    const hiddenEditCount = edits.length - MAX_PANEL_ITEMS;
     const completedTools = taskTools.filter((tool) => tool.status === 'completed').length;
     const pendingTasks = taskTools.some((tool) => tool.status === 'pending');
     const completedAgents = agentTools.filter((tool) => tool.status === 'completed').length;
     const pendingAgents = agentTools.some((tool) => tool.status === 'pending');
     const activeTabClass = 'border-primary/40 bg-primary/10 text-primary shadow-sm';
     const inactiveTabClass = 'border-transparent bg-base-100/55 text-base-content/60 hover:bg-base-100 hover:text-base-content/80';
-    const translatedMcpLabel = t('chat.layout.mcpStatus');
-    const mcpTabLabel = translatedMcpLabel === 'chat.layout.mcpStatus' ? 'MCP' : translatedMcpLabel;
+    const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
+        const translated = options ? t(key, options) : t(key);
+        return translated === key ? fallback : translated;
+    };
+    const taskTabLabel = translateWithFallback('chat.layout.inputStatusTasks', 'Tasks');
+    const taskTabStat = translateWithFallback(
+        'chat.layout.inputStatusProgress',
+        `${completedTools}/${taskTools.length}`,
+        {completed: completedTools, total: taskTools.length},
+    );
+    const subagentTabLabel = translateWithFallback('chat.layout.inputStatusSubagents', 'Subagents');
+    const subagentTabStat = translateWithFallback(
+        'chat.layout.inputStatusProgress',
+        `${completedAgents}/${agentTools.length}`,
+        {completed: completedAgents, total: agentTools.length},
+    );
+    const editTabLabel = translateWithFallback('chat.layout.inputStatusEdits', 'Edits');
+    const editTabStat = translateWithFallback(
+        'chat.layout.inputStatusEditStats',
+        `+${statusSummary.totalAdditions} / -${statusSummary.totalDeletions}`,
+        {additions: statusSummary.totalAdditions, deletions: statusSummary.totalDeletions},
+    );
+    const mcpTabLabel = translateWithFallback('chat.layout.mcpStatus', 'MCP');
+    const mcpUnknownTransportLabel = translateWithFallback('chat.layout.mcpLiveUnknown', 'Unknown');
+    const mcpEnabledLabel = translateWithFallback('chat.layout.mcpEnabled', 'Enabled');
+    const mcpDisabledLabel = translateWithFallback('chat.layout.mcpDisabled', 'Disabled');
+    const mcpConfigurationErrorLabel = translateWithFallback('chat.layout.mcpConfigurationError', 'Configuration error');
+    const mcpLoadingLabel = translateWithFallback('chat.layout.mcpLoading', 'Loading MCP configuration...');
+    const mcpConfiguredServersLabel = translateWithFallback('chat.layout.mcpConfiguredServers', 'Configured servers');
+    const mcpNoServersLabel = translateWithFallback('chat.layout.mcpNoServers', 'No MCP servers configured');
+    const gitBranchLabel = translateWithFallback('chat.layout.inputStatusGitBranch', 'Git');
+    const statusDetailsRegionLabel = translateWithFallback('chat.layout.inputStatusDetailsRegion', 'Status details');
+    const getMcpServerStatusLabel = (server: ChatMcpAvailabilityServerSummary) => (
+        server.enabled ? mcpEnabledLabel : mcpDisabledLabel
+    );
+    const getMcpServerStatusTargetLabel = (server: ChatMcpAvailabilityServerSummary) => (
+        `${server.name}: ${getMcpServerStatusLabel(server)}`
+    );
+    const getMcpServerNameTargetLabel = (server: ChatMcpAvailabilityServerSummary) => translateWithFallback(
+        'chat.layout.mcpServerName',
+        `MCP server: ${server.name}`,
+        {server: server.name},
+    );
+    const getMcpServerTransportTargetLabel = (server: ChatMcpAvailabilityServerSummary) => {
+        const transport = server.transport ?? mcpUnknownTransportLabel;
+        return translateWithFallback(
+            'chat.layout.mcpServerTransport',
+            `MCP server transport: ${server.name} · ${transport}`,
+            {server: server.name, transport},
+        );
+    };
+    const getMcpConfigurationErrorTargetLabel = (error: string) => (
+        `${mcpTabLabel}: ${mcpConfigurationErrorLabel} · ${error}`
+    );
+    const mcpLoadingTargetLabel = `${mcpTabLabel}: ${mcpLoadingLabel}`;
+    const mcpConfiguredSummaryLabel = mcpStatus
+        ? translateWithFallback('chat.layout.mcpEnabledSummary', `${mcpStatus.enabledServers} / ${mcpStatus.totalServers} available`, {
+            enabled: mcpStatus.enabledServers,
+            total: mcpStatus.totalServers,
+        })
+        : '';
+    const mcpTabStat = mcpStatus ? `${mcpStatus.enabledServers} / ${mcpStatus.totalServers}` : '';
+    const mcpTabAccessibleLabel = mcpStatus?.error
+        ? getMcpConfigurationErrorTargetLabel(mcpStatus.error)
+        : mcpStatus?.loading
+            ? mcpLoadingTargetLabel
+            : `${mcpTabLabel}: ${mcpConfiguredSummaryLabel}`;
     const gitBranchTitle = hasGitBranch
         ? [
-            `${t('chat.layout.inputStatusGitBranch')}: ${gitBranch}`,
+            `${gitBranchLabel}: ${gitBranch}`,
             workspaceStatus?.gitRoot,
         ].filter(Boolean).join(' · ')
         : undefined;
+    const emptyTasksLabel = getInputStatusEmptyPanelLabel('tasks', t);
+    const emptySubagentsLabel = getInputStatusEmptyPanelLabel('subagents', t);
+    const emptyEditsLabel = getInputStatusEmptyPanelLabel('edits', t);
 
     const toggleTab = (tab: ChatInputStatusTab) => {
         setOpenTab((current) => (current === tab ? null : tab));
@@ -149,9 +264,41 @@ export default function ChatInputStatusTabs({
         return null;
     }
 
-    const statusLabel = (status: ChatStatusToolSummary['status']) => (
-        status === 'pending' ? t('tools.pending') : status === 'error' ? t('tools.failed') : t('common.success')
+    const statusLabel = (status: ChatStatusToolSummary['status']) => {
+        if (status === 'pending') return translateWithFallback('tools.pending', 'Pending');
+        if (status === 'error') return translateWithFallback('tools.failed', 'Failed');
+        return translateWithFallback('common.success', 'Success');
+    };
+    const getToolStatusTargetLabel = (tool: ChatStatusToolSummary) => {
+        const target = tool.summary || tool.detail || tool.label;
+        return `${tool.label}: ${target} · ${statusLabel(tool.status)}`;
+    };
+    const getEditStatsTargetLabel = (edit: ChatStatusEditSummary) => translateWithFallback(
+        'chat.layout.inputStatusEditFileStats',
+        `Edit stats: ${edit.displayPath} · +${edit.additions} / -${edit.deletions}`,
+        {file: edit.displayPath, additions: edit.additions, deletions: edit.deletions},
     );
+    const moreTaskToolsLabel = hiddenTaskCount > 0
+        ? translateWithFallback(
+            'chat.layout.inputStatusMoreTools',
+            formatMoreStatusItemsLabel(hiddenTaskCount, 'tool task'),
+            {count: hiddenTaskCount},
+        )
+        : '';
+    const moreSubagentsLabel = hiddenSubagentCount > 0
+        ? translateWithFallback(
+            'chat.layout.inputStatusMoreSubagents',
+            formatMoreStatusItemsLabel(hiddenSubagentCount, 'subagent'),
+            {count: hiddenSubagentCount},
+        )
+        : '';
+    const moreEditsLabel = hiddenEditCount > 0
+        ? translateWithFallback(
+            'chat.layout.inputStatusMoreEdits',
+            formatMoreStatusItemsLabel(hiddenEditCount, 'edit'),
+            {count: hiddenEditCount},
+        )
+        : '';
 
     const handleSelectToolRow = (tool: ChatStatusToolSummary) => {
         setOpenTab(getInputStatusTabAfterToolSelection(activeOpenTab, Boolean(onSelectTool)));
@@ -163,53 +310,68 @@ export default function ChatInputStatusTabs({
         onSelectedEditChange?.(edit);
     };
 
-    const renderToolRow = (tool: ChatStatusToolSummary) => (
-        <button
-            key={tool.toolId}
-            type="button"
-            className={cn(
-                'flex w-full min-w-0 items-start gap-2 rounded-md bg-base-200/45 px-2 py-1.5 text-left transition-colors',
-                'hover:bg-base-200/80 focus:outline-none focus:ring-2 focus:ring-primary/30',
-                'disabled:cursor-default disabled:opacity-100 disabled:hover:bg-base-200/45',
-            )}
-            title={[tool.summary, tool.detail].filter(Boolean).join('\n')}
-            aria-label={t(getToolJumpLabelKey(tool), {tool: tool.summary || tool.label})}
-            data-target-tool-id={tool.toolId}
-            disabled={!onSelectTool}
-            onClick={() => handleSelectToolRow(tool)}
-        >
-            {getStatusIcon(tool.status)}
-            <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-1.5">
-                    <span className={`tool-command-chip ${tool.accentClass}`}>{tool.label}</span>
-                    <span className={`tool-state-pill ${tool.status}`}>{statusLabel(tool.status)}</span>
-                </div>
-                <div className="mt-1 truncate text-[11px] font-medium text-base-content/75">
-                    {tool.summary}
-                </div>
-                {tool.detail && (
-                    <div className="mt-0.5 truncate text-[10px] text-base-content/45">
-                        {tool.detail}
-                    </div>
+    const renderToolRow = (tool: ChatStatusToolSummary) => {
+        const toolJumpLabelKey = getToolJumpLabelKey(tool);
+        const translatedToolJumpLabel = t(toolJumpLabelKey, {tool: tool.summary || tool.label});
+        const toolJumpLabel = translatedToolJumpLabel === toolJumpLabelKey
+            ? getToolJumpFallbackLabel(tool)
+            : translatedToolJumpLabel;
+        const toolStatusTargetLabel = getToolStatusTargetLabel(tool);
+
+        return (
+            <button
+                key={tool.toolId}
+                type="button"
+                className={cn(
+                    'flex w-full min-w-0 items-start gap-2 rounded-md bg-base-200/45 px-2 py-1.5 text-left transition-colors',
+                    'hover:bg-base-200/80 focus:outline-none focus:ring-2 focus:ring-primary/30',
+                    'disabled:cursor-default disabled:opacity-100 disabled:hover:bg-base-200/45',
                 )}
-            </div>
-        </button>
-    );
+                title={toolJumpLabel}
+                aria-label={toolJumpLabel}
+                data-target-tool-id={tool.toolId}
+                disabled={!onSelectTool}
+                onClick={() => handleSelectToolRow(tool)}
+            >
+                {getStatusIcon(tool.status)}
+                <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                        <span className={`tool-command-chip ${tool.accentClass}`}>{tool.label}</span>
+                        <span
+                            className={`tool-state-pill ${tool.status}`}
+                            title={toolStatusTargetLabel}
+                            aria-label={toolStatusTargetLabel}
+                        >
+                            {statusLabel(tool.status)}
+                        </span>
+                    </div>
+                    <div className="mt-1 truncate text-[11px] font-medium text-base-content/75">
+                        {tool.summary}
+                    </div>
+                    {tool.detail && (
+                        <div className="mt-0.5 truncate text-[10px] text-base-content/45">
+                            {tool.detail}
+                        </div>
+                    )}
+                </div>
+            </button>
+        );
+    };
 
     const renderTasksPanel = () => (
         <div className="space-y-1.5">
             {recentTools.length > 0 ? (
                 <>
                     {recentTools.map(renderToolRow)}
-                    {taskTools.length > MAX_PANEL_ITEMS && (
+                    {hiddenTaskCount > 0 && (
                         <div className="px-1 text-[10px] text-base-content/40">
-                            {t('chat.layout.inputStatusMoreTools', {count: taskTools.length - MAX_PANEL_ITEMS})}
+                            {moreTaskToolsLabel}
                         </div>
                     )}
                 </>
             ) : (
                 <div className="rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45">
-                    {t('chat.layout.inputStatusNoTasks')}
+                    {emptyTasksLabel}
                 </div>
             )}
         </div>
@@ -220,15 +382,15 @@ export default function ChatInputStatusTabs({
             {recentAgents.length > 0 ? (
                 <>
                     {recentAgents.map(renderToolRow)}
-                    {agentTools.length > MAX_PANEL_ITEMS && (
+                    {hiddenSubagentCount > 0 && (
                         <div className="px-1 text-[10px] text-base-content/40">
-                            {t('chat.layout.inputStatusMoreSubagents', {count: agentTools.length - MAX_PANEL_ITEMS})}
+                            {moreSubagentsLabel}
                         </div>
                     )}
                 </>
             ) : (
                 <div className="rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45">
-                    {t('chat.layout.inputStatusNoSubagents')}
+                    {emptySubagentsLabel}
                 </div>
             )}
         </div>
@@ -241,6 +403,15 @@ export default function ChatInputStatusTabs({
                     {visibleEdits.map((edit) => {
                         const editKey = getChatStatusEditKey(edit);
                         const selected = selectedEditKey === editKey;
+                        const inspectDiffLabelKey = selected
+                            ? 'chat.layout.inspectCurrentFullDiff'
+                            : 'chat.layout.inspectFullDiff';
+                        const translatedInspectDiffLabel = t(inspectDiffLabelKey, {file: edit.displayPath});
+                        const inspectDiffLabel = translatedInspectDiffLabel === inspectDiffLabelKey
+                            ? `${selected ? 'Current full diff' : 'Inspect full diff'}: ${edit.displayPath}`
+                            : translatedInspectDiffLabel;
+                        const editStatsTargetLabel = getEditStatsTargetLabel(edit);
+                        const editStatsDescriptionId = getEditStatsDescriptionId(edit);
                         return (
                             <button
                                 key={editKey}
@@ -251,7 +422,9 @@ export default function ChatInputStatusTabs({
                                     'disabled:cursor-default disabled:opacity-100 disabled:hover:bg-base-200/45',
                                     selected && 'chat-input-status-edit-selected ring-1 ring-primary/30 bg-primary/10',
                                 )}
-                                title={edit.displayPath}
+                                title={inspectDiffLabel}
+                                aria-label={inspectDiffLabel}
+                                aria-describedby={editStatsDescriptionId}
                                 aria-current={selected ? 'true' : undefined}
                                 disabled={!onSelectedEditChange}
                                 onClick={() => handleSelectEditRow(edit)}
@@ -267,81 +440,123 @@ export default function ChatInputStatusTabs({
                                         </div>
                                     )}
                                 </div>
-                                <div className="flex flex-shrink-0 items-center gap-1 text-[11px] font-medium">
+                                <div
+                                    id={editStatsDescriptionId}
+                                    className="flex flex-shrink-0 items-center gap-1 text-[11px] font-medium"
+                                    title={editStatsTargetLabel}
+                                    aria-label={editStatsTargetLabel}
+                                >
                                     <span className="text-success">+{edit.additions}</span>
                                     <span className="text-error">-{edit.deletions}</span>
                                 </div>
                             </button>
                         );
                     })}
-                    {edits.length > MAX_PANEL_ITEMS && (
+                    {hiddenEditCount > 0 && (
                         <div className="px-1 text-[10px] text-base-content/40">
-                            {t('chat.layout.inputStatusMoreEdits', {count: edits.length - MAX_PANEL_ITEMS})}
+                            {moreEditsLabel}
                         </div>
                     )}
                 </>
             ) : (
                 <div className="rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45">
-                    {t('chat.layout.inputStatusNoEdits')}
+                    {emptyEditsLabel}
                 </div>
             )}
         </div>
     );
 
-    const renderMcpServerRow = (server: ChatMcpAvailabilityServerSummary) => (
-        <div
-            key={server.id}
-            className="chat-input-status-mcp-server flex min-w-0 items-center gap-2 rounded-md bg-base-200/45 px-2 py-1.5"
-            title={server.id}
-        >
-            <Server size={13} className="flex-shrink-0 text-base-content/45" />
-            <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-medium text-base-content/75">
-                    {server.name}
+    const renderMcpServerRow = (server: ChatMcpAvailabilityServerSummary) => {
+        const mcpServerStatusLabel = getMcpServerStatusLabel(server);
+        const mcpServerNameTargetLabel = getMcpServerNameTargetLabel(server);
+        const mcpServerStatusTargetLabel = getMcpServerStatusTargetLabel(server);
+        const mcpServerTransportTargetLabel = getMcpServerTransportTargetLabel(server);
+
+        return (
+            <div
+                key={server.id}
+                className="chat-input-status-mcp-server flex min-w-0 items-center gap-2 rounded-md bg-base-200/45 px-2 py-1.5"
+            >
+                <Server size={13} className="flex-shrink-0 text-base-content/45" />
+                <div className="min-w-0 flex-1">
+                    <div
+                        className="truncate text-[11px] font-medium text-base-content/75"
+                        title={mcpServerNameTargetLabel}
+                        aria-label={mcpServerNameTargetLabel}
+                    >
+                        {server.name}
+                    </div>
+                    <div
+                        className="truncate text-[10px] text-base-content/40"
+                        title={mcpServerTransportTargetLabel}
+                        aria-label={mcpServerTransportTargetLabel}
+                    >
+                        {server.transport ?? mcpUnknownTransportLabel}
+                    </div>
                 </div>
-                <div className="truncate text-[10px] text-base-content/40">
-                    {server.transport ?? t('chat.layout.mcpLiveUnknown')}
-                </div>
+                <span
+                    className={`tool-state-pill ${server.enabled ? 'completed' : 'pending'}`}
+                    title={mcpServerStatusTargetLabel}
+                    aria-label={mcpServerStatusTargetLabel}
+                >
+                    {mcpServerStatusLabel}
+                </span>
             </div>
-            <span className={`tool-state-pill ${server.enabled ? 'completed' : 'pending'}`}>
-                {server.enabled ? t('chat.layout.mcpEnabled') : t('chat.layout.mcpDisabled')}
-            </span>
-        </div>
-    );
+        );
+    };
 
     const renderMcpPanel = () => {
         if (!mcpStatus) return null;
+        const mcpConfigurationErrorTargetLabel = mcpStatus.error
+            ? getMcpConfigurationErrorTargetLabel(mcpStatus.error)
+            : '';
+        const hiddenMcpServerCount = mcpStatus.servers.length - MAX_PANEL_ITEMS;
+        const moreMcpServersLabel = hiddenMcpServerCount > 0
+            ? translateWithFallback(
+                'chat.layout.inputStatusMoreMcpServers',
+                `+${hiddenMcpServerCount} more MCP server${hiddenMcpServerCount === 1 ? '' : 's'}`,
+                {count: hiddenMcpServerCount},
+            )
+            : '';
 
         return (
             <div className="space-y-1.5">
                 {mcpStatus.error && (
-                    <div className="rounded-md bg-error/10 px-2 py-1.5 text-[11px] text-error/85" title={mcpStatus.error}>
+                    <div
+                        className="rounded-md bg-error/10 px-2 py-1.5 text-[11px] text-error/85"
+                        title={mcpConfigurationErrorTargetLabel}
+                        aria-label={mcpConfigurationErrorTargetLabel}
+                    >
                         {mcpStatus.error}
                     </div>
                 )}
                 {mcpStatus.loading && (
-                    <div className="flex items-center gap-1.5 rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45">
+                    <div
+                        className="flex items-center gap-1.5 rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45"
+                        title={mcpLoadingTargetLabel}
+                        aria-label={mcpLoadingTargetLabel}
+                    >
                         <Loader2 size={12} className="animate-spin text-warning" />
-                        {t('chat.layout.mcpLoading')}
+                        {mcpLoadingLabel}
                     </div>
                 )}
                 {mcpStatus.servers.length > 0 ? (
                     <>
                         <div className="flex items-center justify-between px-1 text-[10px] text-base-content/40">
-                            <span>{t('chat.layout.mcpConfiguredServers')}</span>
+                            <span>{mcpConfiguredServersLabel}</span>
                             <span>{mcpStatus.enabledServers} / {mcpStatus.totalServers}</span>
                         </div>
                         {mcpStatus.servers.slice(0, MAX_PANEL_ITEMS).map(renderMcpServerRow)}
-                        {mcpStatus.servers.length > MAX_PANEL_ITEMS && (
+                        {hiddenMcpServerCount > 0 && (
                             <div className="px-1 text-[10px] text-base-content/40">
-                                {t('chat.layout.inputStatusMoreMcpServers', {count: mcpStatus.servers.length - MAX_PANEL_ITEMS})}
+                                {moreMcpServersLabel}
                             </div>
                         )}
                     </>
                 ) : (
                     !mcpStatus.loading && (
                         <div className="rounded-md bg-base-200/35 px-2 py-2 text-[11px] text-base-content/45">
-                            {t('chat.layout.mcpNoServers')}
+                            {mcpNoServersLabel}
                         </div>
                     )
                 )}
@@ -364,8 +579,9 @@ export default function ChatInputStatusTabs({
         label: string,
         stat: string,
         showSpinner = false,
+        accessibleLabelOverride?: string,
     ) => {
-        const accessibleLabel = `${label} ${stat}`;
+        const accessibleLabel = accessibleLabelOverride ?? `${label} ${stat}`;
 
         return (
             <button
@@ -404,11 +620,11 @@ export default function ChatInputStatusTabs({
                         <div
                             className="chat-input-status-git-branch flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-transparent bg-base-200/65 px-1.5 py-1.5 text-[11px] font-medium text-base-content/70 sm:px-2"
                             title={gitBranchTitle}
-                            aria-label={`${t('chat.layout.inputStatusGitBranch')} ${gitBranch}`}
+                            aria-label={`${gitBranchLabel} ${gitBranch}`}
                         >
                             <GitBranch size={13} className="flex-shrink-0 text-base-content/50" />
                             <span className="chat-input-status-git-label hidden sm:inline flex-shrink-0 text-base-content/45">
-                                {t('chat.layout.inputStatusGitBranch')}
+                                {gitBranchLabel}
                             </span>
                             <span className="chat-input-status-git-value min-w-0 max-w-[8rem] truncate text-base-content/80 sm:max-w-[10rem]">
                                 {gitBranch}
@@ -419,35 +635,33 @@ export default function ChatInputStatusTabs({
                         'tasks',
                         'chat-input-status-tab-tasks',
                         <ListChecks size={13} className="flex-shrink-0" />,
-                        t('chat.layout.inputStatusTasks'),
-                        t('chat.layout.inputStatusProgress', {completed: completedTools, total: taskTools.length}),
+                        taskTabLabel,
+                        taskTabStat,
                         isStreaming && pendingTasks,
                     )}
                     {hasSubagents && renderTabButton(
                         'subagents',
                         'chat-input-status-tab-subagents',
                         <Bot size={13} className="flex-shrink-0" />,
-                        t('chat.layout.inputStatusSubagents'),
-                        t('chat.layout.inputStatusProgress', {completed: completedAgents, total: agentTools.length}),
+                        subagentTabLabel,
+                        subagentTabStat,
                         isStreaming && pendingAgents,
                     )}
                     {hasEdits && renderTabButton(
                         'edits',
                         'chat-input-status-tab-edits',
                         <FilePenLine size={13} className="flex-shrink-0" />,
-                        t('chat.layout.inputStatusEdits'),
-                        t('chat.layout.inputStatusEditStats', {
-                            additions: statusSummary.totalAdditions,
-                            deletions: statusSummary.totalDeletions,
-                        }),
+                        editTabLabel,
+                        editTabStat,
                     )}
                     {hasMcpStatus && mcpStatus && renderTabButton(
                         'mcp',
                         'chat-input-status-tab-mcp',
                         <Server size={13} className="flex-shrink-0" />,
                         mcpTabLabel,
-                        `${mcpStatus.enabledServers} / ${mcpStatus.totalServers}`,
+                        mcpTabStat,
                         mcpStatus.loading,
+                        mcpTabAccessibleLabel,
                     )}
                 </div>
                 {activeOpenTab && (
@@ -458,7 +672,7 @@ export default function ChatInputStatusTabs({
                         )}
                         role="region"
                         tabIndex={0}
-                        aria-label={t('chat.layout.inputStatusDetailsRegion')}
+                        aria-label={statusDetailsRegionLabel}
                     >
                         {renderPanel()}
                     </div>

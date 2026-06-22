@@ -741,6 +741,20 @@ function findToolResult(
   updates the structured `raw` payload.
 - Assistant `raw` patches the current streaming assistant message first, then
   the latest assistant message. It must not erase streamed `content`.
+- Assistant `raw` payloads are incremental structured events. When multiple
+  assistant raw events arrive in one turn, merge their content blocks into the
+  current assistant message instead of replacing the previous `raw`. If the
+  assistant already has streamed `content` but no raw text block yet, seed the
+  merged raw with that streamed text so a later `tool_use` block does not hide
+  the visible answer text in `MessageItem`.
+- After assistant `raw` exists, later `chat://stream` content deltas must also
+  keep the assistant raw text block in sync with the full streamed `content`.
+  `MessageItem` renders raw blocks before `message.content`, so updating only
+  the hidden `content` field makes later text deltas disappear from the UI.
+- Assistant text `raw` deltas or snapshots that are already represented by the
+  full streamed `content` must be deduped instead of appended behind tool
+  blocks. Otherwise a provider that emits both stream text and assistant text
+  raw can show the same sentence twice in one turn.
 - A user `raw` containing only text can patch the matching visible user prompt,
   but it must preserve that prompt's existing `content`.
 - A user `raw` containing a `tool_result` is an internal protocol message. Store
@@ -748,6 +762,15 @@ function findToolResult(
   overwrite the original user prompt.
 - Tool rendering must resolve `tool_use.id` by scanning later messages for a
   matching `tool_result.tool_use_id`, starting at the assistant message index.
+  If no later result is found, fall back to earlier internal `tool_result`
+  messages for the same id. Later-message lookup stays first so ordinary
+  transcript order wins, while the fallback covers out-of-order frontend event
+  delivery where a `tool_result` raw event is stored before its assistant
+  `tool_use` raw event arrives.
+- `MessageList` may precompute a `toolResultById` map for visible-window
+  rendering, but that map must follow the same later-first / earlier-fallback
+  rule. Search result windows and collapsed transcripts must not hide an earlier
+  internal `tool_result` from a visible assistant `tool_use` block.
 - UI bubbles must hide internal user `tool_result` messages from the transcript.
 - UI bubbles must not render assistant messages that have no visible text,
   thinking block, tool block, error, or streaming status.
@@ -758,10 +781,16 @@ function findToolResult(
 |-----------|-------------------|
 | `chat://message` payload cannot be parsed | Log and ignore; keep existing messages unchanged. |
 | Assistant raw arrives before any assistant message exists | Append an assistant message derived from raw text blocks. |
+| Assistant streamed text is followed by a tool raw event | Keep the streamed text as a raw text block and append the tool block. |
+| Assistant raw exists and more stream text arrives | Update the raw text block to the full streamed content so the transcript keeps rendering the later text. |
+| Assistant text raw delta/snapshot repeats text already in streamed content | Skip that text raw block; keep one full raw text block plus the non-text blocks. |
+| Assistant receives multiple raw events in one turn | Preserve prior raw blocks and append only new blocks, deduping repeated snapshots. |
 | User text raw matches an existing prompt | Patch `raw`; keep original visible `content`. |
 | User raw contains `tool_result` | Append or update the internal `[tool_result]` message. |
 | Duplicate `tool_result` for the same `tool_use_id` arrives | Update the existing internal result message instead of appending duplicates. |
 | Tool result arrives after the assistant tool block | UI finds it by cross-message lookup and updates the tool block status. |
+| Tool result arrives before the assistant tool block | UI falls back to earlier internal `tool_result` lookup for the same id, after checking later messages first. |
+| Search/collapsed window starts at a visible assistant tool block while its result is earlier | `MessageList` precomputed tool-result map still finds the earlier internal result and renders completed/error status, not pending. |
 | Assistant message has empty content and only empty text/thinking blocks | Do not render an empty chat bubble. |
 | Assistant message has empty content but is streaming or has an error | Render status feedback so loading/error remains visible. |
 
@@ -781,6 +810,16 @@ function findToolResult(
   overwrite the prompt.
 - Unit test: `findToolResult()` resolves a later `tool_result` for an earlier
   assistant `tool_use`.
+- Unit test: `findToolResult()` resolves an earlier internal `tool_result` when
+  assistant `tool_use` raw arrives out of order.
+- Unit test: assistant raw merging preserves earlier text/raw blocks when a
+  later tool raw event arrives.
+- Unit test: streamed assistant text remains renderable when the first raw
+  assistant event is a tool block.
+- Store test: full live turn sequence keeps later streamed text visible after
+  assistant tool raw blocks have already arrived.
+- Store test: assistant text raw deltas/snapshots after raw sync do not create
+  duplicate visible text blocks.
 - Unit test: empty assistant messages are not renderable, while streaming/error
   assistant messages remain renderable.
 - Build check: `npm run build` must pass because strict TypeScript catches unused

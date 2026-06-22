@@ -42,7 +42,7 @@ pub struct UnifiedSessionMessageWindow {
     pub complete: bool,
 }
 
-fn normalize_message_window_limit(tail_limit: usize) -> usize {
+pub(crate) fn normalize_message_window_limit(tail_limit: usize) -> usize {
     tail_limit.clamp(1, MAX_MESSAGE_WINDOW_LIMIT)
 }
 

@@ -136,7 +136,9 @@ fn read_git_branch(git_dir: &std::path::Path) -> Option<String> {
 }
 
 fn resolve_chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceStatus, String> {
-    let Some(cwd) = cwd.map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+    let Some(cwd) = cwd
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
     else {
         return Ok(empty_chat_workspace_status());
     };
@@ -492,13 +494,19 @@ mod tests {
         let dir = unique_test_dir("workspace-status-git-branch");
         let nested = dir.join("packages").join("app");
         fs::create_dir_all(&nested).expect("create nested dir");
-        write_file(&dir.join(".git").join("HEAD"), "ref: refs/heads/feature/chat-status\n");
+        write_file(
+            &dir.join(".git").join("HEAD"),
+            "ref: refs/heads/feature/chat-status\n",
+        );
 
         let status = resolve_chat_workspace_status(Some(nested.to_string_lossy().to_string()))?;
 
         assert!(status.is_git_repository);
         assert_eq!(status.git_branch.as_deref(), Some("feature/chat-status"));
-        assert_eq!(status.git_root.as_deref(), Some(dir.to_string_lossy().as_ref()));
+        assert_eq!(
+            status.git_root.as_deref(),
+            Some(dir.to_string_lossy().as_ref())
+        );
 
         fs::remove_dir_all(dir).ok();
         Ok(())
@@ -509,13 +517,19 @@ mod tests {
         let dir = unique_test_dir("workspace-status-gitdir-file");
         let actual_git_dir = dir.join(".git-worktrees").join("app");
         write_file(&dir.join(".git"), "gitdir: .git-worktrees/app\n");
-        write_file(&actual_git_dir.join("HEAD"), "ref: refs/heads/worktree/status-strip\n");
+        write_file(
+            &actual_git_dir.join("HEAD"),
+            "ref: refs/heads/worktree/status-strip\n",
+        );
 
         let status = resolve_chat_workspace_status(Some(dir.to_string_lossy().to_string()))?;
 
         assert!(status.is_git_repository);
         assert_eq!(status.git_branch.as_deref(), Some("worktree/status-strip"));
-        assert_eq!(status.git_root.as_deref(), Some(dir.to_string_lossy().as_ref()));
+        assert_eq!(
+            status.git_root.as_deref(),
+            Some(dir.to_string_lossy().as_ref())
+        );
 
         fs::remove_dir_all(dir).ok();
         Ok(())

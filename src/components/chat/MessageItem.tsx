@@ -50,6 +50,11 @@ function getLastThinkingBlockIndex(blocks: ContentBlock[]): number | undefined {
     return undefined;
 }
 
+function translateWithFallback(t: (key: string) => string, key: string, fallback: string): string {
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+}
+
 export default function MessageItem({
     message,
     isLast,
@@ -91,12 +96,23 @@ export default function MessageItem({
         hour: '2-digit',
         minute: '2-digit',
     });
+    const userLabel = translateWithFallback(t, 'chat.message.user', 'You');
+    const assistantLabel = translateWithFallback(t, 'chat.message.assistant', 'AI Assistant');
+    const systemLabel = translateWithFallback(t, 'chat.message.system', 'System');
+    const copyLabel = translateWithFallback(t, 'chat.message.copy', 'Copy');
+    const copiedLabel = translateWithFallback(t, 'chat.message.copied', 'Copied');
+    const emptyUserLabel = translateWithFallback(t, 'chat.message.emptyUser', 'Empty message');
+    const streamingConnectedLabel = translateWithFallback(
+        t,
+        'chat.message.streamingConnected',
+        'Connected, generating response...',
+    );
 
     const roleLabel = isUser
-        ? t('chat.message.user')
+        ? userLabel
         : isAssistant
-            ? t('chat.message.assistant')
-            : t('chat.message.system');
+            ? assistantLabel
+            : systemLabel;
 
     const handleCopy = async () => {
         if (!copyText.trim()) return;
@@ -114,6 +130,7 @@ export default function MessageItem({
     };
 
     const canCopy = copyText.trim().length > 0;
+    const copyButtonLabel = copied ? copiedLabel : copyLabel;
     const handleAnchorRef = useCallback((node: HTMLElement | null) => {
         if (!anchorId || !onAnchorRef) return;
         onAnchorRef(anchorId, node);
@@ -129,13 +146,13 @@ export default function MessageItem({
                     : 'opacity-70 hover:opacity-100 focus:opacity-100',
                 copied && 'opacity-100 text-success',
             )}
-            title={copied ? t('chat.message.copied') : t('chat.message.copy')}
-            aria-label={copied ? t('chat.message.copied') : t('chat.message.copy')}
+            title={copyButtonLabel}
+            aria-label={copyButtonLabel}
             onClick={handleCopy}
             disabled={!canCopy}
         >
             {copied ? <Check size={14} /> : <Copy size={14} />}
-            <span className="hidden sm:inline">{copied ? t('chat.message.copied') : t('chat.message.copy')}</span>
+            <span className="hidden sm:inline">{copyButtonLabel}</span>
         </button>
     );
 
@@ -160,7 +177,7 @@ export default function MessageItem({
             ) : isEmptyStreamingPlaceholder ? (
                 <StreamingPlaceholder />
             ) : isUser ? (
-                <span className="italic text-base-content/40">{t('chat.message.emptyUser')}</span>
+                <span className="italic text-base-content/40">{emptyUserLabel}</span>
             ) : null}
 
             {message.error && (
@@ -226,7 +243,7 @@ export default function MessageItem({
                 {message.streaming && (
                     <div className="mb-1 inline-flex items-center gap-1.5 text-xs text-success/75">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success/80" />
-                        {t('chat.message.streamingConnected')}
+                        {streamingConnectedLabel}
                     </div>
                 )}
 

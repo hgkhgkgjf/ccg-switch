@@ -1,7 +1,40 @@
-import { useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Download, Trash2, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
-import { useSdkStore } from '../../stores/useSdkStore';
+import {useEffect} from 'react';
+import {useTranslation} from 'react-i18next';
+import {CheckCircle2, Download, Loader2, RefreshCw, Trash2} from 'lucide-react';
+import {useSdkStore} from '../../stores/useSdkStore';
+
+const SDK_DEPENDENCY_PANEL_FALLBACKS = {
+    title: 'SDK Dependencies',
+    close: 'Close',
+    refresh: 'Refresh',
+    hint: 'Install or repair the Claude/Codex SDK dependencies used by Chat.',
+    installed: 'Installed',
+    notInstalled: 'Not installed',
+    uninstall: 'Uninstall',
+    installing: 'Installing...',
+    install: 'Install',
+};
+
+type TranslateFn = (key: string) => string;
+
+function translateWithFallback(t: TranslateFn, key: string, fallback: string): string {
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+}
+
+export function getSdkDependencyPanelLabels(t: TranslateFn) {
+    return {
+        title: translateWithFallback(t, 'chat.sdk.title', SDK_DEPENDENCY_PANEL_FALLBACKS.title),
+        close: translateWithFallback(t, 'common.close', SDK_DEPENDENCY_PANEL_FALLBACKS.close),
+        refresh: translateWithFallback(t, 'chat.sdk.refresh', SDK_DEPENDENCY_PANEL_FALLBACKS.refresh),
+        hint: translateWithFallback(t, 'chat.sdk.hint', SDK_DEPENDENCY_PANEL_FALLBACKS.hint),
+        installed: translateWithFallback(t, 'chat.sdk.installed', SDK_DEPENDENCY_PANEL_FALLBACKS.installed),
+        notInstalled: translateWithFallback(t, 'chat.sdk.notInstalled', SDK_DEPENDENCY_PANEL_FALLBACKS.notInstalled),
+        uninstall: translateWithFallback(t, 'chat.sdk.uninstall', SDK_DEPENDENCY_PANEL_FALLBACKS.uninstall),
+        installing: translateWithFallback(t, 'chat.sdk.installing', SDK_DEPENDENCY_PANEL_FALLBACKS.installing),
+        install: translateWithFallback(t, 'chat.sdk.install', SDK_DEPENDENCY_PANEL_FALLBACKS.install),
+    };
+}
 
 /**
  * SDK 依赖管理面板 —— 安装 / 卸载 Claude / Codex SDK。
@@ -13,6 +46,7 @@ export default function SdkDependencyPanel() {
     const { t } = useTranslation();
     const { statuses, installing, logs, error, init, install, uninstall, refresh } =
         useSdkStore();
+    const labels = getSdkDependencyPanelLabels(t);
 
     useEffect(() => {
         init();
@@ -21,14 +55,20 @@ export default function SdkDependencyPanel() {
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between">
-                <h3 className="font-medium text-base-content">{t('chat.sdk.title')}</h3>
-                <button className="btn btn-ghost btn-xs" onClick={refresh}>
+                <h3 className="font-medium text-base-content">{labels.title}</h3>
+                <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    title={labels.refresh}
+                    aria-label={labels.refresh}
+                    onClick={refresh}
+                >
                     <RefreshCw size={14} />
-                    {t('chat.sdk.refresh')}
+                    {labels.refresh}
                 </button>
             </div>
 
-            <p className="text-sm text-base-content/60">{t('chat.sdk.hint')}</p>
+            <p className="text-sm text-base-content/60">{labels.hint}</p>
 
             <div className="space-y-2">
                 {statuses.map((sdk) => {
@@ -48,24 +88,30 @@ export default function SdkDependencyPanel() {
                                     <div className="font-medium text-sm">{sdk.displayName}</div>
                                     <div className="text-xs text-base-content/50">
                                         {sdk.installed
-                                            ? t('chat.sdk.installed')
-                                            : t('chat.sdk.notInstalled')}
+                                            ? labels.installed
+                                            : labels.notInstalled}
                                     </div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 {sdk.installed ? (
                                     <button
+                                        type="button"
                                         className="btn btn-ghost btn-sm text-error"
+                                        title={labels.uninstall}
+                                        aria-label={`${labels.uninstall}: ${sdk.displayName}`}
                                         onClick={() => uninstall(sdk.id)}
                                         disabled={!!installing}
                                     >
                                         <Trash2 size={15} />
-                                        {t('chat.sdk.uninstall')}
+                                        {labels.uninstall}
                                     </button>
                                 ) : (
                                     <button
+                                        type="button"
                                         className="btn btn-primary btn-sm"
+                                        title={isInstalling ? labels.installing : labels.install}
+                                        aria-label={`${isInstalling ? labels.installing : labels.install}: ${sdk.displayName}`}
                                         onClick={() => install(sdk.id)}
                                         disabled={!!installing}
                                     >
@@ -75,8 +121,8 @@ export default function SdkDependencyPanel() {
                                             <Download size={15} />
                                         )}
                                         {isInstalling
-                                            ? t('chat.sdk.installing')
-                                            : t('chat.sdk.install')}
+                                            ? labels.installing
+                                            : labels.install}
                                     </button>
                                 )}
                             </div>
@@ -92,7 +138,7 @@ export default function SdkDependencyPanel() {
                 <div className="mockup-code text-xs max-h-48 overflow-y-auto bg-base-300">
                     {logs.length === 0 ? (
                         <pre data-prefix="$">
-                            <code>{t('chat.sdk.installing')}...</code>
+                            <code>{labels.installing}</code>
                         </pre>
                     ) : (
                         logs.map((line, i) => (

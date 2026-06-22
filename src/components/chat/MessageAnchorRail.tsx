@@ -3,6 +3,7 @@ import {ArrowDown, ArrowUp, Circle, ListTree} from 'lucide-react';
 import {useTranslation} from 'react-i18next';
 import type {TFunction} from 'i18next';
 import {cn} from '../../utils/cn';
+import {getChatNavigationControlLabel} from '../../utils/chatUiBehavior';
 import type {AnchorPreviewKind} from '../../utils/chatNavigation';
 
 interface MessageAnchorItem {
@@ -162,6 +163,22 @@ export default function MessageAnchorRail({
         () => getVisibleAnchorRailItems(anchors, activeAnchorId),
         [activeAnchorId, anchors],
     );
+    const anchorRailLabel = getChatNavigationControlLabel({
+        control: 'anchor-rail',
+        translate: (key, options) => t(key, options),
+    });
+    const currentAnchorLabel = getChatNavigationControlLabel({
+        control: 'current-anchor',
+        translate: (key, options) => t(key, options),
+    });
+    const scrollToTopLabel = getChatNavigationControlLabel({
+        control: 'scroll-to-top',
+        translate: (key, options) => t(key, options),
+    });
+    const scrollToBottomLabel = getChatNavigationControlLabel({
+        control: 'scroll-to-bottom',
+        translate: (key, options) => t(key, options),
+    });
 
     useEffect(() => {
         const container = containerRef?.current;
@@ -233,20 +250,20 @@ export default function MessageAnchorRail({
     return (
         <aside
             className="hidden w-14 flex-shrink-0 border-r border-base-300 bg-base-100/70 lg:flex lg:flex-col lg:items-center lg:gap-3 lg:py-4"
-            aria-label={t('chat.layout.anchorRail')}
+            aria-label={anchorRailLabel}
         >
             <div className="flex h-8 w-8 items-center justify-center rounded-full border border-base-300 bg-base-100 text-base-content/50 shadow-sm">
                 <ListTree size={15} />
             </div>
             <div className="flex flex-col items-center gap-1 text-[10px] text-base-content/45">
                 <span>{anchorCount}</span>
-                <span className="leading-none">{t('chat.layout.anchorRail')}</span>
+                <span className="leading-none">{anchorRailLabel}</span>
             </div>
             {activeAnchorLabel && (
                 <div className="w-full px-2 text-center text-[10px] leading-tight text-base-content/45" title={activeAnchorLabel}>
                     <div className="mb-1 inline-flex items-center gap-1 text-success/70">
                         <Circle size={7} />
-                        <span>{t('chat.layout.currentAnchor')}</span>
+                        <span>{currentAnchorLabel}</span>
                     </div>
                     <div className="line-clamp-3 break-words">{activeAnchorLabel}</div>
                 </div>
@@ -260,6 +277,11 @@ export default function MessageAnchorRail({
                     const total = anchor.total ?? anchorCount;
                     const positionLabel = getAnchorPositionLabel(sequence, total, t);
                     const kindLabel = getAnchorKindLabel(anchorKind, t);
+                    const jumpToMessageLabel = getChatNavigationControlLabel({
+                        control: 'jump-to-message',
+                        index: sequence,
+                        translate: (key, options) => t(key, options),
+                    });
                     const anchorTime = formatAnchorTime(anchor.createdAt);
                     return (
                         <button
@@ -274,7 +296,7 @@ export default function MessageAnchorRail({
                             )}
                             style={{ top: anchor.top }}
                             title={`${positionLabel} · ${anchor.label}`}
-                            aria-label={t('chat.layout.jumpToMessage', { index: sequence })}
+                            aria-label={jumpToMessageLabel}
                             onClick={() => scrollToAnchor(anchor.id)}
                         >
                             <span className="pointer-events-none absolute left-6 top-1/2 z-50 hidden w-64 max-w-[calc(100vw-8rem)] -translate-y-1/2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-left text-[10px] leading-tight text-base-content/75 shadow-2xl ring-1 ring-base-300/60 group-hover:block group-focus-visible:block">
@@ -293,8 +315,8 @@ export default function MessageAnchorRail({
             <button
                 type="button"
                 className="btn btn-ghost btn-xs h-7 min-h-0 w-7 rounded-full p-0 text-base-content/45 hover:text-base-content disabled:opacity-30"
-                title={t('chat.layout.scrollToTop')}
-                aria-label={t('chat.layout.scrollToTop')}
+                title={scrollToTopLabel}
+                aria-label={scrollToTopLabel}
                 onClick={onScrollToTop}
                 disabled={!hasMessages}
             >
@@ -303,8 +325,8 @@ export default function MessageAnchorRail({
             <button
                 type="button"
                 className="btn btn-ghost btn-xs h-7 min-h-0 w-7 rounded-full p-0 text-base-content/45 hover:text-base-content disabled:opacity-30"
-                title={t('chat.layout.scrollToBottom')}
-                aria-label={t('chat.layout.scrollToBottom')}
+                title={scrollToBottomLabel}
+                aria-label={scrollToBottomLabel}
                 onClick={onScrollToBottom}
                 disabled={!hasMessages}
             >

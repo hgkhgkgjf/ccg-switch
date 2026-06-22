@@ -1,12 +1,13 @@
 // AgentGroupBlock - 子代理调用工具块
 
-import {memo, useState} from 'react';
+import {type KeyboardEvent, memo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Bot} from 'lucide-react';
 import type {ToolResultBlock} from '../../types/chat';
 import type {ToolInput} from '../../types/tools';
 import {useIsToolDenied} from '../../hooks/useIsToolDenied';
 import {extractAgentToolMeta, getToolDisplayStatus, summarizeAgentToolHeader,} from '../../utils/toolPresentation';
+import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 import SubagentHistoryPanel from './SubagentHistoryPanel';
 
 export interface AgentGroupBlockProps {
@@ -36,12 +37,29 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   const header = summarizeAgentToolHeader(meta, result, 'agent');
   const status = getToolDisplayStatus(result, isDenied);
   const hasVisibleMeta = header.hasVisibleMeta;
+  const toggleTarget = header.primarySummary || header.secondarySummary || meta.agentId || name || t('tools.agent');
+  const toggleLabel = t('tools.agentDetailsToggle', { target: toggleTarget });
+  const toggleExpanded = () => setExpanded((prev) => !prev);
+  const handleHeaderKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!isToolBlockToggleActivationKey(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    toggleExpanded();
+  };
 
   return (
     <div className={`task-container ${compact ? 'task-container-compact' : ''}`}>
       <div
         className={compact ? 'task-header task-header-compact' : 'task-header'}
-        onClick={() => setExpanded((prev) => !prev)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={toggleLabel}
+        title={toggleLabel}
+        onClick={toggleExpanded}
+        onKeyDown={handleHeaderKeyDown}
         style={{ cursor: 'pointer' }}
       >
         <div className="task-title-section">
@@ -51,17 +69,29 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
             {t('tools.agent')}
           </span>
           {header.primarySummary && !expanded && (
-            <span className="tool-title-summary task-summary-text" title={header.primarySummary}>
+            <span
+              className="tool-title-summary task-summary-text"
+              title={header.primarySummary}
+              aria-label={header.primarySummary}
+            >
               {header.primarySummary}
             </span>
           )}
           {header.secondarySummary && (
-            <span className="tool-title-secondary-summary" title={header.secondarySummary}>
+            <span
+              className="tool-title-secondary-summary"
+              title={header.secondarySummary}
+              aria-label={header.secondarySummary}
+            >
               {header.secondarySummary}
             </span>
           )}
           {header.runtimeSummary && (
-            <span className="tool-title-summary tool-title-runtime-summary" title={header.runtimeSummary}>
+            <span
+              className="tool-title-summary tool-title-runtime-summary"
+              title={header.runtimeSummary}
+              aria-label={header.runtimeSummary}
+            >
               {header.runtimeSummary}
             </span>
           )}
