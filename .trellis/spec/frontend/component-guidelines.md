@@ -958,8 +958,14 @@ See `src/components/providers/ProviderCard.tsx` and
   the final image source. The full-size lightbox must retain visible source
   context by rendering the image label/file name as a caption in addition to
   `alt`/`aria-label`, so users can inspect multiple screenshots or historical
-  attachments without losing which file they opened. System-role history
-  messages are protocol context and
+  attachments without losing which file they opened.
+  User-message image thumbnails must stay compact even when several uploads are
+  adjacent. In `imageDisplay="user-thumbnail"` mode, group consecutive `image`
+  / `input_image` blocks into a right-aligned thumbnail strip with fixed-size
+  thumbnail frames, wrapping only when needed. Do not let user-uploaded images
+  render as independent full-width blocks inside the message bubble; the
+  full-size image belongs in the click-to-preview lightbox.
+  System-role history messages are protocol context and
   must be filtered out before transcript rendering or anchor generation. Some
   historical providers replay runtime context as user text instead of `system`;
   hide recognizable Codex/Claude system prompts, Tools/Skills/Plugins/Heartbeats

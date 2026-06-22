@@ -1,10 +1,7 @@
-## 本轮 PLAN 2026-06-22 user image thumbnails
+## 迭代记录 2026-06-22 user image thumbnails
 
-- 目标：优化用户消息中的上传图片展示，让图片以紧凑缩略图形式呈现，多个连续图片聚合为右对齐缩略图组，点击后仍打开完整灯箱预览。
-- 功能点 1：补用户图片缩略图回归测试。验证方式：扩展 `ContentBlockRenderer.test.tsx`，断言 `imageDisplay="user-thumbnail"` 下多个连续 `image` / `input_image` block 会进入同一个缩略图组，并保留点击预览所需的图片按钮/标签。
-- 功能点 2：实现最小渲染调整。验证方式：只在 `user-thumbnail` 模式下聚合连续图片块；不改变助手消息、普通 `compact/default` 图片、工具块或 Markdown 文本渲染。
-- 功能点 3：优化缩略图样式。验证方式：在 `App.css` 中为用户缩略图组和缩略图画布设置固定尺寸、右对齐、自动换行和主题适配背景，避免图片撑满用户气泡。
-- 功能点 4：质量验证。验证方式：运行 `npm test -- src/components/chat/ContentBlockRenderer.test.tsx`、`npm run build`、`git diff --check`、IDE `build_project`，并清理 `dist` / `out` 等构建产物。
+- 本轮完成：优化用户消息上传图片展示。`ContentBlockRenderer` 在 `imageDisplay="user-thumbnail"` 模式下会把连续 `image` / `input_image` block 聚合为一个右对齐缩略图组；`App.css` 为用户缩略图组和缩略图画布设置固定尺寸、自动换行、主题适配背景，避免图片按原始尺寸撑满用户气泡；点击缩略图打开完整灯箱的既有逻辑保留。
+- 本轮验证：RED：`npm test -- src/components/chat/ContentBlockRenderer.test.tsx` 先失败 1 项，失败点为缺少 `chat-image-thumbnail-strip`。GREEN 定向通过：同命令通过（1 file / 13 tests）。`npm run build` 通过；IDE `build_project` 通过，`problems: []`；`git diff --check -- src/components/chat/ContentBlockRenderer.tsx src/components/chat/ContentBlockRenderer.test.tsx src/App.css .trellis/spec/frontend/component-guidelines.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已清理。
 
 ## 迭代记录 2026-06-22 guarded chat top-scroll reveal
 

@@ -52,6 +52,10 @@ When users hover over edited-file rows in the chat area, the diff preview must r
 - Browser computed-style validation passed on a temporary local page: light and dark theme preview shell/header/body/context/removed/added rows all reported non-transparent background colors and `opacity: 1`.
 - Chat surface adjustment: the main chat workspace is pure white in light theme and uses the same `base-100` surface as the sidebar in dark theme, avoiding the previous gray wash and the rejected pure-black background.
 - Browser computed-style validation passed on a temporary local page: light chat workspace/review surface reported `rgb(255, 255, 255)`, and dark chat workspace/review/sidebar probe all reported `rgb(31, 41, 55)`.
+- User image thumbnail adjustment: user-message `image` / `input_image` blocks now render through `imageDisplay="user-thumbnail"` as a compact right-aligned thumbnail strip when consecutive uploads are adjacent. The thumbnails use fixed-size frames in the transcript and preserve the existing click-to-preview lightbox for full-size inspection.
+- `npm test -- src/components/chat/ContentBlockRenderer.test.tsx` passed with 1 file and 13 tests after adding coverage for grouped user-uploaded thumbnails.
+- `npm run build` passed after the user image thumbnail adjustment.
+- `git diff --check -- src/components/chat/ContentBlockRenderer.tsx src/components/chat/ContentBlockRenderer.test.tsx src/App.css .trellis/spec/frontend/component-guidelines.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md TODO_LIST.md` passed with only Windows LF/CRLF conversion warnings.
 - IDE `build_project` passed with no problems.
 - `git diff --check -- src/styles/toolBlocks.css .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md` passed with only Windows LF/CRLF conversion warnings.
 - `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/chat/StatusPanel.test.tsx` still has 3 existing `StatusPanel.test.tsx` failures because the current `StatusPanel` SSR output does not render hover preview markup expected by those tests. This is outside the CSS-only scope of this task.
