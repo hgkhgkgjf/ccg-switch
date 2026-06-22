@@ -112,6 +112,10 @@ function resolveImageRenderData(block: ImageBlock): ImageRenderData {
     };
 }
 
+function isImageContentBlock(block: ContentBlock): block is ImageBlock {
+    return block.type === 'image' || block.type === 'input_image';
+}
+
 function ImageBlockRenderer({
     block,
     imageDisplay,
@@ -124,14 +128,14 @@ function ImageBlockRenderer({
     const image = useMemo(() => resolveImageRenderData(block), [block]);
     const isUserThumbnail = imageDisplay === 'user-thumbnail';
     const frameClassName = isUserThumbnail
-        ? 'group block max-w-full rounded-lg border border-base-300 bg-base-100 p-0.5 text-left shadow-sm transition hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30'
+        ? 'chat-image-thumbnail-frame-user group block rounded-lg border border-base-300 bg-base-100 p-0.5 text-left shadow-sm transition hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30'
         : 'group block max-w-full rounded-lg border border-base-300 bg-base-100 p-1 text-left shadow-sm transition hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/30';
     const imageClassName = isUserThumbnail
-        ? 'chat-image-thumbnail chat-image-thumbnail-user block h-auto max-h-[150px] max-w-[52vw] rounded-md object-contain sm:max-w-[200px]'
+        ? 'chat-image-thumbnail chat-image-thumbnail-user block rounded-md object-cover'
         : `chat-image-thumbnail block max-w-full rounded-md object-contain ${imageDisplay === 'compact' ? 'max-h-48' : 'max-h-64'}`;
 
     return (
-        <figure className={`chat-image-block inline-flex max-w-full flex-col gap-1 ${isUserThumbnail ? 'chat-image-block-user ml-auto items-end' : ''}`}>
+        <figure className={`chat-image-block inline-flex max-w-full flex-col gap-1 ${isUserThumbnail ? 'chat-image-block-user items-end' : ''}`}>
             {image.src ? (
                 <button
                     type="button"
@@ -156,6 +160,27 @@ function ImageBlockRenderer({
                 {image.label}
             </figcaption>
         </figure>
+    );
+}
+
+function ImageThumbnailStrip({
+    blocks,
+    onOpen,
+}: {
+    blocks: ImageBlock[];
+    onOpen: (image: ImageRenderData) => void;
+}) {
+    return (
+        <div className="chat-image-thumbnail-strip">
+            {blocks.map((block, index) => (
+                <ImageBlockRenderer
+                    key={`${block.type}-${index}`}
+                    block={block}
+                    imageDisplay="user-thumbnail"
+                    onOpen={onOpen}
+                />
+            ))}
+        </div>
     );
 }
 
@@ -321,6 +346,30 @@ export default function ContentBlockRenderer({
     return (
         <div className={compact ? 'chat-content-blocks chat-content-blocks-compact' : 'chat-content-blocks chat-content-blocks-default'}>
             {groupedBlocks.map((grouped, index) => {
+                if (resolvedImageDisplay === 'user-thumbnail' && grouped.type === 'single' && isImageContentBlock(grouped.block)) {
+                    const previousBlock = groupedBlocks[index - 1];
+                    if (previousBlock?.type === 'single' && isImageContentBlock(previousBlock.block)) {
+                        return null;
+                    }
+
+                    const imageBlocks: ImageBlock[] = [];
+                    for (let cursor = index; cursor < groupedBlocks.length; cursor += 1) {
+                        const candidate = groupedBlocks[cursor];
+                        if (candidate.type !== 'single' || !isImageContentBlock(candidate.block)) {
+                            break;
+                        }
+                        imageBlocks.push(candidate.block);
+                    }
+
+                    return (
+                        <ImageThumbnailStrip
+                            key={`user-image-strip-${grouped.originalIndex}`}
+                            blocks={imageBlocks}
+                            onOpen={setLightboxImage}
+                        />
+                    );
+                }
+
                 if (grouped.type === 'single') {
                     const block = grouped.block;
 

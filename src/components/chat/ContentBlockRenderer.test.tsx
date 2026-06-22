@@ -53,8 +53,12 @@ describe('ContentBlockRenderer', () => {
         expect(html).not.toContain('asset://file:///');
     });
 
-    it('renders user uploaded image blocks as compact thumbnails', () => {
+    it('groups user uploaded image blocks as compact thumbnails', () => {
         const blocks = [
+            {
+                type: 'text',
+                text: 'Please compare these screenshots.',
+            },
             {
                 type: 'image',
                 source: {
@@ -62,7 +66,12 @@ describe('ContentBlockRenderer', () => {
                     media_type: 'image/png',
                     data: 'iVBORw0KGgo=',
                 },
-                fileName: 'screen.png',
+                fileName: 'screen-one.png',
+            },
+            {
+                type: 'input_image',
+                image_url: 'file:///C:/Users/Administrator/Pictures/screen-two.jpg',
+                fileName: 'screen-two.jpg',
             },
         ] as unknown as ContentBlock[];
 
@@ -74,10 +83,12 @@ describe('ContentBlockRenderer', () => {
             />,
         );
 
+        expect(html.match(/chat-image-thumbnail-strip/g) ?? []).toHaveLength(1);
         expect(html).toContain('chat-image-block-user');
+        expect(html).toContain('chat-image-thumbnail-frame-user');
         expect(html).toContain('chat-image-thumbnail-user');
-        expect(html).toContain('max-w-[52vw]');
-        expect(html).toContain('sm:max-w-[200px]');
+        expect(html).toContain('screen-one.png');
+        expect(html).toContain('src="asset://C:/Users/Administrator/Pictures/screen-two.jpg"');
         expect(html).toContain('sr-only');
     });
 

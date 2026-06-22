@@ -385,6 +385,45 @@ a {
   overflow-wrap: anywhere;
 }
 
+.user-message-content .chat-content-blocks {
+  gap: 0.55rem;
+}
+
+.chat-image-thumbnail-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  max-width: min(100%, 360px);
+  margin-left: auto;
+}
+
+.chat-image-thumbnail-strip .chat-image-block-user {
+  flex: 0 0 auto;
+  margin: 0;
+  max-width: none;
+}
+
+.chat-image-thumbnail-frame-user {
+  width: 112px;
+  height: 84px;
+  overflow: hidden;
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
+}
+
+.chat-image-thumbnail-user {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  background-color: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+
+[data-theme="dark"] .chat-image-thumbnail-frame-user {
+  background-color: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+
 .user-message-content,
 .user-message-bubble .markdown-block {
   font-size: 13px;
@@ -469,6 +508,16 @@ a {
 @media (max-width: 640px) {
   .user-message-bubble {
     max-width: 92%;
+  }
+
+  .chat-image-thumbnail-strip {
+    gap: 0.375rem;
+    max-width: min(100%, 296px);
+  }
+
+  .chat-image-thumbnail-frame-user {
+    width: 92px;
+    height: 70px;
   }
 
   .assistant-message-flow {
