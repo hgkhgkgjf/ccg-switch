@@ -7,7 +7,7 @@
 ## Current Status
 
 @@@auto:current-status
-- **Active File**: `journal-0.md`
+- **Active File**: `journal-1.md`
 - **Total Sessions**: 4
 - **Last Active**: 2026-06-22
 @@@/auto:current-status
@@ -19,6 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
+| `journal-1.md` | ~53 | Active |
 
 @@@/auto:active-documents
 
@@ -27,4 +28,7 @@
 ## Session History
 
 @@@auto:session-history
+| # | Date | Title | Commits | Branch |
+|---|------|-------|---------|--------|
+| 4 | 2026-06-22 | Tool Call Visualization | `360c1c1`, `6c792c6`, `a33cdb8`, `ee57986`, `90246c4`, `98d835f`, `be49a16`, `34290a6`, `8f36c40`, `9d9ee7c` | `cc-gui` |
 @@@/auto:session-history
