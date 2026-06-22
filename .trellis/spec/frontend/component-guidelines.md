@@ -290,9 +290,16 @@ See `src/components/providers/ProviderCard.tsx` and
   expanded for immediate inspection; once the user manually expands/collapses
   folders, preserve that choice during subsequent transcript updates. Diff
   hover previews used from this panel should be solid, high-contrast surfaces
-  that can sit outside the scroll pane without being clipped; the preview body
-  and added/removed/context diff rows should also use opaque high-contrast
-  backgrounds so the code remains readable over busy chat/status surfaces.
+  that can sit outside the scroll pane without being clipped; the preview shell,
+  header, body, and added/removed/context diff rows should also use opaque
+  theme-adaptive DaisyUI surfaces using the same fallback style as DaisyUI
+  generated CSS (`var(--fallback-b1, oklch(var(--b1) / 1))`,
+  `var(--fallback-b2, oklch(var(--b2) / 1))`,
+  `var(--fallback-b3, oklch(var(--b3) / 1))`,
+  `var(--fallback-bc, oklch(var(--bc) / 1))`, plus success/error tokens for
+  diff accents) so the code remains readable over busy chat/status surfaces
+  without hardcoding a permanent dark preview or depending on a single advanced
+  color function for opacity-critical backgrounds.
   Status-panel hover previews also need a wider readable-width variant than
   compact tooltip chrome, because users are scanning actual code lines and
   paths, not only labels or counts. Since these hover previews are temporary

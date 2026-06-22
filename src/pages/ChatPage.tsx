@@ -877,7 +877,7 @@ export default function ChatPage() {
             )}
 
             {/* 消息区：预留 cc-gui 风格的搜索、锚点和状态扩展槽 */}
-            <div className="relative flex min-h-0 flex-1 overflow-hidden bg-base-200/20">
+            <div className="chat-workspace-surface relative flex min-h-0 flex-1 overflow-hidden">
                 <ChatSessionSidebar
                     activeSession={activeSession}
                     currentCwd={currentCwd}

@@ -1,5 +1,26 @@
 /* 工具块样式 */
 
+/* Fallback CSS 变量 - 当 DaisyUI 主题变量未加载时使用 */
+:root {
+  --fallback-b1: #ffffff;
+  --fallback-b2: #f3f4f6;
+  --fallback-b3: #e5e7eb;
+  --fallback-bc: #1f2937;
+  --fallback-n: #000000;
+  --fallback-er: #ef4444;
+  --fallback-su: #10b981;
+}
+
+[data-theme="dark"] {
+  --fallback-b1: #1f2937;
+  --fallback-b2: #374151;
+  --fallback-b3: #4b5563;
+  --fallback-bc: #f3f4f6;
+  --fallback-n: #000000;
+  --fallback-er: #f87171;
+  --fallback-su: #4ade80;
+}
+
 /* 工具块容器 */
 .task-container {
   border: 1px solid oklch(var(--b2));
@@ -574,20 +595,42 @@
   width: min(720px, calc(100vw - 420px));
   max-width: calc(100vw - 48px);
   transform: translateX(-50%);
-  border: 1px solid rgba(203, 213, 225, 0.68);
+  --diff-hover-surface: var(--fallback-b1, oklch(var(--b1) / 1));
+  --diff-hover-subtle-surface: var(--fallback-b2, oklch(var(--b2) / 1));
+  --diff-hover-border: var(--fallback-b3, oklch(var(--b3) / 1));
+  --diff-hover-text: var(--fallback-bc, oklch(var(--bc) / 1));
+  --diff-hover-muted-text: var(--fallback-bc, oklch(var(--bc) / 0.66));
+  --diff-hover-context-bg: var(--diff-hover-surface);
+  --diff-hover-context-text: var(--diff-hover-text);
+  --diff-hover-removed-bg: var(--diff-hover-subtle-surface);
+  --diff-hover-removed-text: var(--fallback-er, oklch(var(--er) / 1));
+  --diff-hover-added-bg: var(--diff-hover-subtle-surface);
+  --diff-hover-added-text: var(--fallback-su, oklch(var(--su) / 1));
+  border: 1px solid var(--diff-hover-border);
   border-radius: 8px;
-  background: #ffffff;
-  color: #1e293b;
-  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(148, 163, 184, 0.2);
+  background-color: var(--diff-hover-surface);
+  background-image: none;
+  color: var(--diff-hover-text);
+  box-shadow: 0 22px 52px oklch(var(--n) / 0.18), 0 0 0 1px oklch(var(--bc) / 0.1);
   overflow: hidden;
   pointer-events: none;
   opacity: 1;
+  isolation: isolate;
+}
+
+@supports (color: color-mix(in srgb, black 50%, white)) {
+  .edit-diff-hover-preview {
+    --diff-hover-muted-text: color-mix(in srgb, var(--diff-hover-text) 66%, transparent);
+    --diff-hover-context-text: color-mix(in srgb, var(--diff-hover-text) 72%, transparent);
+    --diff-hover-removed-bg: color-mix(in srgb, var(--diff-hover-removed-text) 18%, var(--diff-hover-surface));
+    --diff-hover-removed-text: color-mix(in srgb, var(--fallback-er, oklch(var(--er) / 1)) 72%, var(--diff-hover-text));
+    --diff-hover-added-bg: color-mix(in srgb, var(--diff-hover-added-text) 18%, var(--diff-hover-surface));
+    --diff-hover-added-text: color-mix(in srgb, var(--fallback-su, oklch(var(--su) / 1)) 72%, var(--diff-hover-text));
+  }
 }
 
 [data-theme="dark"] .edit-diff-hover-preview {
-  background: #0f172a;
-  color: #e5e7eb;
-  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.74), 0 0 0 1px rgba(15, 23, 42, 0.9);
+  box-shadow: 0 22px 52px oklch(var(--n) / 0.46), 0 0 0 1px oklch(var(--bc) / 0.12);
 }
 
 .edit-diff-panel {
@@ -919,12 +962,14 @@
   width: min(300px, calc(100vw - 48px));
   max-width: min(300px, calc(100vw - 48px));
   z-index: 1700;
-  border-color: #475569;
-  background: #020617;
-  color: #f8fafc;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.88), 0 0 0 1px #0f172a;
+  border-color: var(--diff-hover-border);
+  background-color: var(--diff-hover-surface);
+  background-image: none;
+  color: var(--diff-hover-text);
+  box-shadow: 0 24px 60px oklch(var(--n) / 0.42), 0 0 0 1px oklch(var(--bc) / 0.1);
   opacity: 1;
   backdrop-filter: none;
+  isolation: isolate;
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-readable {
@@ -962,11 +1007,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid #475569;
+  border: 1px solid var(--diff-hover-border);
   border-radius: 999px;
   padding: 1px 5px;
-  background: #1e293b;
-  color: #fbbf24;
+  background-color: var(--diff-hover-subtle-surface);
+  color: var(--diff-hover-muted-text);
   line-height: 1.25;
 }
 
@@ -986,6 +1031,8 @@
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-body {
   max-height: 260px;
   overflow: hidden;
+  background-color: var(--diff-hover-surface);
+  color: var(--diff-hover-text);
   font-size: 10.5px;
   line-height: 1.45;
 }
@@ -996,17 +1043,22 @@
 
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-line {
   grid-template-columns: 34px 14px minmax(0, 1fr);
+  background-color: var(--diff-hover-surface);
+  color: var(--diff-hover-text);
   padding: 0 7px;
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-split-row {
   display: block;
+  background-color: var(--diff-hover-surface);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-status .edit-diff-hover-split-cell {
   grid-template-columns: 34px 14px minmax(0, 1fr);
   min-width: 0;
   border-right: 0;
+  background-color: var(--diff-hover-surface);
+  color: var(--diff-hover-text);
   padding: 0 7px;
 }
 
@@ -1045,8 +1097,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 11px;
-  background: #1e293b;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.38);
+  background-color: var(--diff-hover-subtle-surface, var(--fallback-b2, oklch(var(--b2) / 1)));
+  border-bottom: 1px solid var(--diff-hover-border, var(--fallback-b3, oklch(var(--b3) / 1)));
 }
 
 .edit-diff-hover-path {
@@ -1054,7 +1106,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #f9fafb;
+  color: var(--diff-hover-text, var(--fallback-bc, oklch(var(--bc) / 1)));
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 12px;
   font-weight: 600;
@@ -1074,15 +1126,12 @@
   display: block;
   max-height: 360px;
   overflow: hidden;
-  background: #ffffff;
+  background-color: var(--diff-hover-surface, var(--fallback-b1, oklch(var(--b1) / 1)));
+  color: var(--diff-hover-text, var(--fallback-bc, oklch(var(--bc) / 1)));
   padding: 7px 0;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.5;
-}
-
-[data-theme="dark"] .edit-diff-hover-body {
-  background: #0f172a;
 }
 
 .edit-diff-panel .edit-diff-hover-header {
@@ -1334,67 +1383,115 @@
   background: transparent;
 }
 
+.edit-diff-hover-preview .edit-diff-hover-line.context {
+  background-color: var(--diff-hover-context-bg);
+  color: var(--diff-hover-context-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-line.removed {
+  background-color: var(--diff-hover-removed-bg);
+  color: var(--diff-hover-removed-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-line.added {
+  background-color: var(--diff-hover-added-bg);
+  color: var(--diff-hover-added-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split-cell.empty {
+  background-color: var(--diff-hover-subtle-surface);
+  color: var(--diff-hover-muted-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split-row.removed .edit-diff-hover-split-cell.old {
+  background-color: var(--diff-hover-removed-bg);
+  color: var(--diff-hover-removed-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split-row.added .edit-diff-hover-split-cell.new {
+  background-color: var(--diff-hover-added-bg);
+  color: var(--diff-hover-added-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split-row.context .edit-diff-hover-split-cell,
+.edit-diff-hover-preview .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.old,
+.edit-diff-hover-preview .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.new {
+  background-color: var(--diff-hover-context-bg);
+  color: var(--diff-hover-context-text);
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split,
+.edit-diff-hover-preview .edit-diff-hover-split-row,
+.edit-diff-hover-preview .edit-diff-hover-line,
+.edit-diff-hover-preview .edit-diff-hover-split-cell {
+  background-image: none;
+}
+
+.edit-diff-hover-preview .edit-diff-hover-split {
+  background-color: var(--diff-hover-surface);
+}
+
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-header {
-  background: #111827;
-  border-bottom-color: #334155;
+  background-color: var(--diff-hover-subtle-surface);
+  border-bottom-color: var(--diff-hover-border);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-body {
-  background: #020617;
+  background-color: var(--diff-hover-surface);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.context {
-  background: #020617;
-  color: #e2e8f0;
+  background-color: var(--diff-hover-context-bg);
+  color: var(--diff-hover-context-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.removed {
-  background: #451a1a;
-  color: #fecaca;
+  background-color: var(--diff-hover-removed-bg);
+  color: var(--diff-hover-removed-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.added {
-  background: #052e16;
-  color: #bbf7d0;
+  background-color: var(--diff-hover-added-bg);
+  color: var(--diff-hover-added-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-number {
-  color: #cbd5e1;
+  color: var(--diff-hover-muted-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.removed .edit-diff-hover-marker,
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.removed .edit-diff-hover-marker {
-  color: #fca5a5;
+  color: var(--diff-hover-removed-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-line.added .edit-diff-hover-marker,
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.added .edit-diff-hover-marker {
-  color: #86efac;
+  color: var(--diff-hover-added-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-cell {
-  background: #020617;
+  background-color: var(--diff-hover-surface);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-cell.old {
-  border-right-color: #334155;
+  border-right-color: var(--diff-hover-border);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.removed .edit-diff-hover-split-cell.old {
-  background: #451a1a;
-  color: #fecaca;
+  background-color: var(--diff-hover-removed-bg);
+  color: var(--diff-hover-removed-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.added .edit-diff-hover-split-cell.new {
-  background: #052e16;
-  color: #bbf7d0;
+  background-color: var(--diff-hover-added-bg);
+  color: var(--diff-hover-added-text);
 }
 
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell,
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.old,
 .status-edit-diff-trigger .edit-diff-hover-preview-solid .edit-diff-hover-split-row.context .edit-diff-hover-split-cell.new {
-  background: #020617;
-  color: #e2e8f0;
+  background-color: var(--diff-hover-context-bg);
+  color: var(--diff-hover-context-text);
 }
 
 .edit-diff-hover-split-row .edit-diff-hover-marker {
@@ -1423,6 +1520,14 @@
   }
 }
 
+.chat-workspace-surface {
+  background-color: #ffffff;
+}
+
+[data-theme="dark"] .chat-workspace-surface {
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
+}
+
 .chat-review-layout {
   position: relative;
   display: flex;
@@ -1430,7 +1535,11 @@
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  background: oklch(var(--b2) / 0.2);
+  background-color: #ffffff;
+}
+
+[data-theme="dark"] .chat-review-layout {
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
 }
 
 .chat-diff-pane-reopen-floating {
