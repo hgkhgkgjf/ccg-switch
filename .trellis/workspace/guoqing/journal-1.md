@@ -51,3 +51,41 @@ Completed tool call visualization for chat, including specialized tool blocks, g
 ### Next Steps
 
 - Audit the duplicate `06-16-toolblocks` and `06-16-06-16-toolblocks` child records before changing parent progress metadata.
+
+
+## Session 5: Trellis Journal Consistency Repair
+
+**Date**: 2026-06-22
+**Task**: Trellis Journal Consistency Repair
+**Branch**: `cc-gui`
+
+### Summary
+
+Restored missing Trellis workspace journal state and documented duplicate toolblocks task metadata without changing application code.
+
+### Main Changes
+
+- Created and archived a Trellis maintenance task for the journal consistency repair.
+- Restored `.trellis/workspace/guoqing/journal-1.md` with the missing Tool Call Visualization session and business commit table.
+- Updated the workspace journal index so `get_context.py` resolves the active journal file instead of reporting it missing.
+- Audited duplicate `06-16-toolblocks` / `06-16-06-16-toolblocks` chat child records and documented the safe follow-up in the maintenance task PRD.
+- Verified `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, Trellis context output, journal commit search, and staged diff checks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9926b21` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
