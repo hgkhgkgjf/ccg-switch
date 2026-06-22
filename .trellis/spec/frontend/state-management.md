@@ -843,6 +843,163 @@ const result = findToolResult(messages, toolUse.id, assistantMessageIndex);
 
 ---
 
+## Scenario: Chat Transcript Window Calculation Contract
+
+### 1. Scope / Trigger
+
+- Trigger: chat transcript rendering uses `getRecentRenderableMessages()` to compute visible window + hidden count for progressive reveal UI
+- This is a frontend data-structure contract. Window functions must compute accurate `hiddenRenderableCount` across the full message array to support multi-page scroll-to-load.
+
+### 2. Signatures
+
+```ts
+interface RenderableMessageWindow {
+    renderableMessages: RenderableMessage[];
+    hiddenRenderableCount: number;
+    totalRenderableCount: number;
+}
+
+function getRecentRenderableMessages(
+    messages: ChatMessage[],
+    visibleCount: number,
+): RenderableMessageWindow;
+
+function getManualRevealWindow({
+    remainingHiddenCount: number,
+    revealedCount: number,
+    pageSize?: number,
+}): {
+    totalEarlierMessages: number;
+    collapsedCount: number;
+    nextRevealCount: number;
+};
+
+function getNextRevealState(
+    state: TranscriptRevealState,
+    transcriptKey: string,
+    totalEarlierMessages: number,
+    pageSize?: number,
+): TranscriptRevealState;
+```
+
+### 3. Contracts
+
+- `getRecentRenderableMessages` must traverse the **entire message array** to collect all renderable messages before slicing the visible window, not terminate traversal after collecting `visibleCount` items.
+- `hiddenRenderableCount` must equal `totalRenderableCount - renderableMessages.length` even when `visibleCount` exceeds the actual renderable count.
+- `getManualRevealWindow` computes `totalEarlierMessages = remainingHiddenCount + revealedCount`. This stable total is the baseline for `getNextRevealState()` and must not be confused with the remaining count.
+- `getNextRevealState(state, transcriptKey, totalEarlierMessages, pageSize)` advances `revealedCount` by `pageSize` up to `totalEarlierMessages`. Passing `remainingHiddenCount` instead causes premature reveal termination.
+- `shouldAutoRevealEarlierMessages({ scrollTop, collapsedCount, isSearching, revealPending })` only triggers when `collapsedCount > 0`. If window calculation incorrectly reports zero while earlier history exists, auto-reveal stops.
+- `MessageList` passes `renderableWindow.hiddenRenderableCount` (remaining hidden) to `getManualRevealWindow`, which combines it with `revealedCount` to produce `totalEarlierMessages` for reveal advancement.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| 100 messages, `visibleCount = 15` | `hiddenRenderableCount === 85`, window shows last 15 |
+| First reveal (+30): `visibleCount = 45` | `hiddenRenderableCount === 55`, window shows last 45 |
+| Second reveal (+30): `visibleCount = 75` | `hiddenRenderableCount === 25`, window shows last 75 |
+| Third reveal (+30): `visibleCount = 105` | `hiddenRenderableCount === 0`, window shows all 100 |
+| Mixed 50 renderable + 50 system messages, `visibleCount = 30` | `hiddenRenderableCount === 20` (only renderable counted) |
+| `visibleCount` exceeds `totalRenderableCount` | `hiddenRenderableCount === 0`, all messages returned |
+| Early-termination loop after collecting window | ❌ `hiddenRenderableCount` incomplete, reveal stops prematurely |
+
+### 5. Good/Base/Bad Cases
+
+- Good: user scrolls to top of 100-message transcript four times, each reveal loads 30 more until `hiddenRenderableCount` reaches zero and scroll-load stops naturally
+- Base: transcript with exactly `VISIBLE_MESSAGE_WINDOW` messages shows full history immediately with zero hidden count
+- Bad: after two reveals (45 visible of 100 total), user scrolls to top but no more messages load because `hiddenRenderableCount` prematurely dropped to zero
+
+### 6. Tests Required
+
+- Unit test: `getRecentRenderableMessages` with 100 messages and `visibleCount = 15/45/75/105` produces `hiddenRenderableCount` sequence `85/55/25/0`
+- Unit test: mixed renderable/non-renderable messages, verify hidden count reflects only renderable subset
+- Integration test: `MessageList` four-cycle reveal progression (15 -> 45 -> 75 -> 100+) with scroll-triggered auto-reveal
+- Unit test: `getManualRevealWindow` combines `remainingHiddenCount + revealedCount` into `totalEarlierMessages`
+- Unit test: `getNextRevealState` advances from 30 to 46 when `totalEarlierMessages === 46` (not stuck at 30)
+
+### 7. Wrong vs Correct
+
+#### Wrong (early-termination)
+
+```ts
+export function getRecentRenderableMessages(
+    messages: ChatMessage[],
+    visibleCount: number,
+): RenderableMessageWindow {
+    const maxVisible = Math.max(0, Math.floor(visibleCount));
+    const renderableMessages: RenderableMessage[] = [];
+    let hiddenRenderableCount = 0;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (!shouldRenderChatMessage(message)) continue;
+
+        if (renderableMessages.length < maxVisible) {
+            renderableMessages.push({ message, originalIndex: index });
+            continue;
+        }
+
+        hiddenRenderableCount += 1;  // ⚠️ Counting, but may not complete full traversal
+    }
+
+    renderableMessages.reverse();
+
+    return {
+        renderableMessages,
+        hiddenRenderableCount,
+        totalRenderableCount: hiddenRenderableCount + renderableMessages.length,
+    };
+}
+```
+
+**Why it fails**: When `maxVisible` approaches `totalRenderableCount`, the loop may not complete full traversal due to non-renderable message gaps, causing `hiddenRenderableCount` to be incomplete.
+
+#### Correct (full-traversal then slice)
+
+```ts
+export function getRecentRenderableMessages(
+    messages: ChatMessage[],
+    visibleCount: number,
+): RenderableMessageWindow {
+    const maxVisible = Math.max(0, Math.floor(visibleCount));
+    
+    // Step 1: Full traversal to collect ALL renderable messages
+    const allRenderableMessages: RenderableMessage[] = [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (!shouldRenderChatMessage(message)) continue;
+        allRenderableMessages.push({ message, originalIndex: index });
+    }
+    
+    allRenderableMessages.reverse();
+    
+    // Step 2: Slice the window from the complete set
+    const totalRenderableCount = allRenderableMessages.length;
+    const hiddenRenderableCount = Math.max(0, totalRenderableCount - maxVisible);
+    const renderableMessages = allRenderableMessages.slice(hiddenRenderableCount);
+    
+    return {
+        renderableMessages,
+        hiddenRenderableCount,
+        totalRenderableCount,
+    };
+}
+```
+
+### 8. Root Cause History
+
+This window calculation flaw caused **three archived reveal regression tasks**:
+
+1. **`06-22-chat-top-scroll-reveal`**: Disabled auto-reveal to fix "can't reach top" symptom
+2. **`06-22-chat-reveal-pagination-regression`**: Fixed UI display logic but not the underlying window calculation
+3. **`06-22-06-22-chat-guarded-scroll-reveal`**: Restored auto-reveal with guards, but early-termination remained
+
+Each fix addressed trigger logic or state propagation without recognizing that `getRecentRenderableMessages` early collection stop prevented accurate hidden-count reporting. When `requestedVisibleCount` grew close to total, the function stopped traversing early, `hiddenRenderableCount` dropped to zero prematurely, and scroll-load halted.
+
+**Pattern**: Window functions that need to report "items remaining outside visible range" must complete full enumeration before windowing. Early-termination optimization only works when the UI does not depend on accurate remaining-count (e.g., infinite-scroll with no "X items left" display).
+
+---
+
 ## Scenario: Chat Completion Command Payload Normalization
 
 ### 1. Scope / Trigger
