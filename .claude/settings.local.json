@@ -64,7 +64,8 @@
       "Bash(export AI_BRIDGE_DEPS_DIR=\"/tmp/ccg-deps-test\")",
       "Bash(cd *)",
       "Bash(echo *)",
-      "Read(//c/Users/Administrator/.codemoss/**)"
+      "Read(//c/Users/Administrator/.codemoss/**)",
+      "Bash(pkill *)"
     ]
   }
 }
