@@ -89,3 +89,36 @@ Restored missing Trellis workspace journal state and documented duplicate toolbl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 优化聊天界面：Dashboard悬浮窗、Diff换行对齐、图片附件预览
+
+**Date**: 2026-06-22
+**Task**: 优化聊天界面：Dashboard悬浮窗、Diff换行对齐、图片附件预览
+**Branch**: `cc-gui`
+
+### Summary
+
+1. 移除Dashboard最近改动区域的鼠标悬浮显示悬浮窗 2. 修复StatusPanel中最近改动文件列表的鼠标悬停预览 3. 修复split视图换行错乱（添加align-items:start）4. 修复no-wrap split视图左侧内容溢出（使用CSS subgrid）5. 优化ContextBar图片附件显示：从文件名改为缩略图预览（h-16 w-16）6. 实现图片点击全屏预览功能（使用Portal渲染到body，支持ESC键关闭）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02d06ca` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
