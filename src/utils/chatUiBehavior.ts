@@ -1,9 +1,9 @@
 export const COMPOSER_MIN_HEIGHT = 44;
 export const COMPOSER_DEFAULT_MAX_HEIGHT = 120;
 export const COMPOSER_MAX_HEIGHT = 320;
-export const AUTO_REVEAL_SCROLL_THRESHOLD = 48;
 export const VISIBLE_MESSAGE_WINDOW = 15;
 export const REVEAL_PAGE_SIZE = 30;
+export const AUTO_REVEAL_SCROLL_THRESHOLD = 48;
 export const CONVERSATION_PANE_MIN_WIDTH = 380;
 export const CONVERSATION_PANE_MAX_WIDTH = 960;
 export const DIFF_PANE_MIN_WIDTH = 360;
@@ -691,22 +691,6 @@ export function getActivePermissionDialog({
     return candidates[0].type;
 }
 
-interface AutoRevealInput {
-    scrollTop: number;
-    collapsedCount: number;
-    isSearching: boolean;
-    threshold?: number;
-}
-
-export function shouldAutoRevealEarlierMessages({
-    scrollTop,
-    collapsedCount,
-    isSearching,
-    threshold = AUTO_REVEAL_SCROLL_THRESHOLD,
-}: AutoRevealInput): boolean {
-    return !isSearching && collapsedCount > 0 && scrollTop <= threshold;
-}
-
 interface CollapsedMessageWindowInput {
     filteredCount: number;
     revealedCount: number;
@@ -718,6 +702,51 @@ interface CollapsedMessageWindowResult {
     collapsedCount: number;
     nextRevealCount: number;
     visibleStartIndex: number;
+}
+
+interface ManualRevealWindowInput {
+    remainingHiddenCount: number;
+    revealedCount: number;
+    pageSize?: number;
+}
+
+interface AutoRevealEarlierMessagesInput {
+    scrollTop: number;
+    collapsedCount: number;
+    isSearching: boolean;
+    revealPending: boolean;
+    threshold?: number;
+}
+
+export function getManualRevealWindow({
+    remainingHiddenCount,
+    revealedCount,
+    pageSize = REVEAL_PAGE_SIZE,
+}: ManualRevealWindowInput): Omit<CollapsedMessageWindowResult, 'visibleStartIndex'> {
+    const safeRemainingHiddenCount = Math.max(0, Math.floor(remainingHiddenCount));
+    const safeRevealedCount = Math.max(0, Math.floor(revealedCount));
+
+    return {
+        totalEarlierMessages: safeRemainingHiddenCount + safeRevealedCount,
+        collapsedCount: safeRemainingHiddenCount,
+        nextRevealCount: safeRemainingHiddenCount > 0
+            ? Math.min(Math.max(0, Math.floor(pageSize)), safeRemainingHiddenCount)
+            : 0,
+    };
+}
+
+export function shouldAutoRevealEarlierMessages({
+    scrollTop,
+    collapsedCount,
+    isSearching,
+    revealPending,
+    threshold = AUTO_REVEAL_SCROLL_THRESHOLD,
+}: AutoRevealEarlierMessagesInput): boolean {
+    if (isSearching || revealPending || collapsedCount <= 0) {
+        return false;
+    }
+
+    return Math.max(0, Math.floor(scrollTop)) <= Math.max(0, Math.floor(threshold));
 }
 
 export function getEffectiveRevealedCount(

@@ -6,6 +6,7 @@ import {
     getClampedRevealState,
     getCollapsedMessageWindow,
     getEffectiveRevealedCount,
+    getManualRevealWindow,
     getNextRevealState,
     getScrollTopAfterPrepend,
     REVEAL_PAGE_SIZE,
@@ -125,9 +126,11 @@ export default function MessageList({
         if (!isSearching) {
             const hiddenCount = renderableWindow.hiddenRenderableCount;
             return {
-                totalEarlierMessages: hiddenCount,
-                collapsedCount: hiddenCount,
-                nextRevealCount: hiddenCount > 0 ? Math.min(REVEAL_PAGE_SIZE, hiddenCount) : 0,
+                ...getManualRevealWindow({
+                    remainingHiddenCount: hiddenCount,
+                    revealedCount,
+                    pageSize: REVEAL_PAGE_SIZE,
+                }),
                 visibleStartIndex: 0,
             };
         }
@@ -143,7 +146,7 @@ export default function MessageList({
         : filteredMessages;
     const showEarlierLabel = translateWithFallback(
         'chat.message.showEarlier',
-        `${collapsedCount} earlier message${collapsedCount === 1 ? '' : 's'} ${collapsedCount === 1 ? 'is' : 'are'} collapsed. Scroll to the top to load ${nextRevealCount} more`,
+        `${collapsedCount} earlier message${collapsedCount === 1 ? '' : 's'} ${collapsedCount === 1 ? 'is' : 'are'} collapsed. Click to load ${nextRevealCount} more`,
         {count: nextRevealCount, total: collapsedCount},
     );
     const lastRenderableIndex = renderableMessages.length > 0
@@ -216,26 +219,32 @@ export default function MessageList({
         });
     }, [scrollContainerRef, visibleMessages.length]);
 
+    const handleRevealEarlierMessages = () => {
+        if (revealPendingRef.current || isSearching) return;
+        revealEarlierMessages(scrollContainerRef?.current);
+    };
+
+    const handleAutoRevealScroll = useCallback(() => {
+        const scrollEl = scrollContainerRef?.current;
+        if (!scrollEl || !shouldAutoRevealEarlierMessages({
+            scrollTop: scrollEl.scrollTop,
+            collapsedCount,
+            isSearching,
+            revealPending: revealPendingRef.current,
+        })) {
+            return;
+        }
+
+        revealEarlierMessages(scrollEl);
+    }, [collapsedCount, isSearching, revealEarlierMessages, scrollContainerRef]);
+
     useEffect(() => {
         const scrollEl = scrollContainerRef?.current;
-        if (!scrollEl) return;
+        if (!scrollEl || isSearching || collapsedCount <= 0) return undefined;
 
-        const handleScroll = () => {
-            if (revealPendingRef.current) return;
-            if (!shouldAutoRevealEarlierMessages({
-                scrollTop: scrollEl.scrollTop,
-                collapsedCount,
-                isSearching,
-            })) {
-                return;
-            }
-
-            revealEarlierMessages(scrollEl);
-        };
-
-        scrollEl.addEventListener('scroll', handleScroll, {passive: true});
-        return () => scrollEl.removeEventListener('scroll', handleScroll);
-    }, [collapsedCount, isSearching, revealEarlierMessages, scrollContainerRef]);
+        scrollEl.addEventListener('scroll', handleAutoRevealScroll, {passive: true});
+        return () => scrollEl.removeEventListener('scroll', handleAutoRevealScroll);
+    }, [collapsedCount, handleAutoRevealScroll, isSearching, scrollContainerRef]);
 
     return (
         <div className="space-y-1 pb-6">
@@ -279,12 +288,15 @@ export default function MessageList({
 
             {collapsedCount > 0 && (
                 <div className="mx-auto flex w-full max-w-4xl justify-center py-1">
-                    <div
-                        className="rounded-full border border-base-300 bg-base-100/80 px-3 py-1 text-[11px] text-base-content/50 shadow-sm backdrop-blur"
+                    <button
+                        type="button"
+                        className="rounded-full border border-base-300 bg-base-100/80 px-3 py-1 text-[11px] text-base-content/55 shadow-sm backdrop-blur transition-colors hover:border-primary/35 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
                         title={showEarlierLabel}
+                        aria-label={showEarlierLabel}
+                        onClick={handleRevealEarlierMessages}
                     >
                         {showEarlierLabel}
-                    </div>
+                    </button>
                 </div>
             )}
 

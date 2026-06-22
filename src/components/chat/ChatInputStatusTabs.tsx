@@ -1,5 +1,5 @@
 import {type ReactNode, useEffect, useRef, useState} from 'react';
-import {AlertTriangle, Bot, CheckCircle2, FilePenLine, GitBranch, ListChecks, Loader2, Server} from 'lucide-react';
+import {AlertTriangle, Bot, CheckCircle2, FilePenLine, ListChecks, Loader2, Server} from 'lucide-react';
 import {useTranslation} from 'react-i18next';
 import {
     type ChatStatusEditSummary,
@@ -8,7 +8,6 @@ import {
     getChatStatusEditKey,
 } from '../../utils/chatStatusSummary';
 import type {ChatMcpAvailabilityServerSummary, ChatMcpAvailabilitySummary} from '../../utils/chatMcpStatus';
-import type {ChatWorkspaceStatus} from '../../utils/chatWorkspaceStatus';
 import {cn} from '../../utils/cn';
 
 type ChatInputStatusTab = 'tasks' | 'subagents' | 'edits' | 'mcp';
@@ -20,7 +19,6 @@ interface ChatInputStatusTabsProps {
     onSelectedEditChange?: (edit: ChatStatusEditSummary) => void;
     onSelectTool?: (tool: ChatStatusToolSummary) => void;
     defaultOpenTab?: ChatInputStatusTab | null;
-    workspaceStatus?: ChatWorkspaceStatus;
     mcpStatus?: ChatMcpAvailabilitySummary;
     collapseStatusTabsOnDesktop?: boolean;
 }
@@ -119,7 +117,6 @@ export default function ChatInputStatusTabs({
     onSelectedEditChange,
     onSelectTool,
     defaultOpenTab = null,
-    workspaceStatus,
     mcpStatus,
     collapseStatusTabsOnDesktop = false,
 }: ChatInputStatusTabsProps) {
@@ -130,8 +127,6 @@ export default function ChatInputStatusTabs({
     const taskTools = toolTimeline.filter((tool) => tool.type !== 'agent');
     const agentTools = statusSummary.agentTools ?? toolTimeline.filter((tool) => tool.type === 'agent');
     const edits = statusSummary.allEdits.length > 0 ? statusSummary.allEdits : statusSummary.recentEdits;
-    const gitBranch = workspaceStatus?.isGitRepository ? workspaceStatus.gitBranch : null;
-    const hasGitBranch = Boolean(gitBranch);
     const hasTasks = taskTools.length > 0;
     const hasSubagents = agentTools.length > 0;
     const hasEdits = edits.length > 0;
@@ -186,7 +181,6 @@ export default function ChatInputStatusTabs({
     const mcpLoadingLabel = translateWithFallback('chat.layout.mcpLoading', 'Loading MCP configuration...');
     const mcpConfiguredServersLabel = translateWithFallback('chat.layout.mcpConfiguredServers', 'Configured servers');
     const mcpNoServersLabel = translateWithFallback('chat.layout.mcpNoServers', 'No MCP servers configured');
-    const gitBranchLabel = translateWithFallback('chat.layout.inputStatusGitBranch', 'Git');
     const statusDetailsRegionLabel = translateWithFallback('chat.layout.inputStatusDetailsRegion', 'Status details');
     const getMcpServerStatusLabel = (server: ChatMcpAvailabilityServerSummary) => (
         server.enabled ? mcpEnabledLabel : mcpDisabledLabel
@@ -223,12 +217,6 @@ export default function ChatInputStatusTabs({
         : mcpStatus?.loading
             ? mcpLoadingTargetLabel
             : `${mcpTabLabel}: ${mcpConfiguredSummaryLabel}`;
-    const gitBranchTitle = hasGitBranch
-        ? [
-            `${gitBranchLabel}: ${gitBranch}`,
-            workspaceStatus?.gitRoot,
-        ].filter(Boolean).join(' · ')
-        : undefined;
     const emptyTasksLabel = getInputStatusEmptyPanelLabel('tasks', t);
     const emptySubagentsLabel = getInputStatusEmptyPanelLabel('subagents', t);
     const emptyEditsLabel = getInputStatusEmptyPanelLabel('edits', t);
@@ -260,7 +248,7 @@ export default function ChatInputStatusTabs({
         };
     }, [activeOpenTab]);
 
-    if (!hasGitBranch && !hasTasks && !hasSubagents && !hasEdits && !hasMcpStatus) {
+    if (!hasTasks && !hasSubagents && !hasEdits && !hasMcpStatus) {
         return null;
     }
 
@@ -610,27 +598,12 @@ export default function ChatInputStatusTabs({
     return (
         <div
             className={cn(
-                'chat-input-status-tabs bg-base-200/20 px-3 pt-2 sm:px-5',
-                collapseStatusTabsOnDesktop && !hasGitBranch && hasExpandableStatusTabs && 'xl:hidden',
+                'chat-input-status-tabs bg-base-200/20 px-2 pt-2 sm:px-3',
+                collapseStatusTabsOnDesktop && hasExpandableStatusTabs && 'xl:hidden',
             )}
         >
-            <div className="mx-auto relative w-full max-w-2xl" ref={popoverRootRef}>
+            <div className="relative w-full" ref={popoverRootRef}>
                 <div className="flex flex-wrap items-stretch gap-1 rounded-md border border-base-300 bg-base-100/70 p-1 shadow-sm shadow-base-300/20">
-                    {hasGitBranch && (
-                        <div
-                            className="chat-input-status-git-branch flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-transparent bg-base-200/65 px-1.5 py-1.5 text-[11px] font-medium text-base-content/70 sm:px-2"
-                            title={gitBranchTitle}
-                            aria-label={`${gitBranchLabel} ${gitBranch}`}
-                        >
-                            <GitBranch size={13} className="flex-shrink-0 text-base-content/50" />
-                            <span className="chat-input-status-git-label hidden sm:inline flex-shrink-0 text-base-content/45">
-                                {gitBranchLabel}
-                            </span>
-                            <span className="chat-input-status-git-value min-w-0 max-w-[8rem] truncate text-base-content/80 sm:max-w-[10rem]">
-                                {gitBranch}
-                            </span>
-                        </div>
-                    )}
                     {hasTasks && renderTabButton(
                         'tasks',
                         'chat-input-status-tab-tasks',

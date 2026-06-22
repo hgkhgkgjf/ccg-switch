@@ -191,7 +191,9 @@ describe('MessageList', () => {
         expect(searchHtml).not.toContain('chat.layout.searchNoResults');
         expect(searchHtml).not.toContain('chat.layout.searchFullHistoryError');
         expect(searchHtml).not.toContain('chat.layout.searchFullHistoryRetry');
-        expect(collapsedHtml).toContain('2 earlier messages are collapsed. Scroll to the top to load 2 more');
+        expect(collapsedHtml).toContain('2 earlier messages are collapsed. Click to load 2 more');
+        expect(collapsedHtml).toMatch(/<button(?=[^>]*type="button")(?=[^>]*title="2 earlier messages are collapsed\. Click to load 2 more")[^>]*>/);
+        expect(collapsedHtml).not.toContain('Scroll to the top');
         expect(collapsedHtml).not.toContain('chat.message.showEarlier');
     });
 });

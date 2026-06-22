@@ -1120,6 +1120,7 @@
   grid-template-columns: 54px 18px minmax(0, 1fr);
   width: 100%;
   min-width: 0;
+  align-items: start;
 }
 
 .edit-diff-panel-wrap .edit-diff-hover-content,
@@ -1134,15 +1135,40 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   width: 100%;
   min-width: 0;
+  align-items: start;
 }
 
 .edit-diff-panel-wrap .edit-diff-hover-split-cell {
   grid-template-columns: 54px 18px minmax(0, 1fr);
   min-width: 0;
+  align-items: start;
 }
 
 .edit-diff-panel-nowrap .edit-diff-hover-body {
   overflow: auto;
+}
+
+.edit-diff-panel-nowrap .edit-diff-hover-split {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  width: max-content;
+  min-width: 100%;
+}
+
+.edit-diff-panel-nowrap .edit-diff-hover-split-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.edit-diff-panel-nowrap .edit-diff-hover-split-cell {
+  grid-template-columns: 54px 18px max-content;
+  min-width: 0;
+}
+
+.edit-diff-panel-nowrap .edit-diff-hover-split-row .edit-diff-hover-content {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre;
 }
 
 .edit-diff-hover-line {

@@ -43,7 +43,6 @@ import type {ChatMcpAvailabilitySummary} from '../../utils/chatMcpStatus';
 import {cn} from '../../utils/cn';
 import {AVAILABLE_MODES, type PermissionMode, REASONING_LEVELS, type ReasoningEffort} from './composer/constants';
 import type {EditDiffPreviewMode} from '../toolBlocks/EditDiffPreview';
-import EditDiffPreview from '../toolBlocks/EditDiffPreview';
 import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 
 const EMPTY_EDIT_SUMMARIES: ChatStatusEditSummary[] = [];
@@ -221,10 +220,6 @@ function createEditSetKey(edits: ChatStatusEditSummary[], touchedFileCount: numb
     return `${touchedFileCount}:${edits
         .map((edit) => `${edit.openPath || edit.displayPath}:${edit.additions}:${edit.deletions}:${edit.status}`)
         .join('|')}`;
-}
-
-function createStatusEditPreviewId(key: string): string {
-    return `status-edit-diff-preview-${key.replace(/[^A-Za-z0-9_-]/g, '-')}`;
 }
 
 function createDefaultCollapsedFolders(edits: ChatStatusEditSummary[], touchedFileCount: number): Set<string> {
@@ -448,7 +443,6 @@ export default function StatusPanel({
         userModified: false,
     }));
     const [localDiffViewMode, setLocalDiffViewMode] = useState<EditDiffPreviewMode>('unified');
-    const [floatingPreview, setFloatingPreview] = useState<{ key: string; top: number } | null>(null);
     const activeDiffViewMode = diffViewMode ?? localDiffViewMode;
     const visibleEdits = showAllEdits ? allEdits : recentEdits;
     const editTree = useMemo(() => buildEditTree(visibleEdits), [visibleEdits]);
@@ -684,15 +678,6 @@ export default function StatusPanel({
                 userModified: true,
             };
         });
-    };
-
-    const showFloatingPreview = (key: string, element: HTMLElement) => {
-        const rect = element.getBoundingClientRect();
-        setFloatingPreview({ key, top: getStatusEditPreviewTop(rect.top, window.innerHeight) });
-    };
-
-    const hideFloatingPreview = (key: string) => {
-        setFloatingPreview((current) => (current?.key === key ? null : current));
     };
 
     const getStatusLabel = (status: ChatStatusEditSummary['status']) => (
@@ -986,10 +971,8 @@ export default function StatusPanel({
 
         const edit = node.edit;
         if (!edit) return null;
-        const isPreviewVisible = floatingPreview?.key === node.key;
         const editKey = getChatStatusEditKey(edit);
         const isSelected = selectedEditKey === editKey;
-        const previewId = edit.diffPreviewLines.length > 0 ? createStatusEditPreviewId(node.key) : undefined;
         const inspectDiffLabel = getInspectDiffLabel(isSelected, edit.displayPath);
         const openEditedFileLabel = getOpenEditedFileLabel(edit.displayPath);
         const editStatusTargetLabel = getEditStatusTargetLabel(edit);
@@ -1008,13 +991,8 @@ export default function StatusPanel({
                 title={inspectDiffLabel}
                 aria-label={inspectDiffLabel}
                 aria-current={isSelected ? 'true' : undefined}
-                aria-describedby={previewId}
                 onClick={() => handleSelectEditedFile(edit)}
                 onKeyDown={(event) => handleEditedFileKeyDown(event, edit)}
-                onMouseEnter={(event) => showFloatingPreview(node.key, event.currentTarget)}
-                onMouseLeave={() => hideFloatingPreview(node.key)}
-                onFocus={(event) => showFloatingPreview(node.key, event.currentTarget)}
-                onBlur={() => hideFloatingPreview(node.key)}
             >
                 <FileDiff size={12} className="status-edit-tree-file-icon" />
                 <div className="min-w-0 flex-1">
@@ -1060,19 +1038,6 @@ export default function StatusPanel({
                         <ExternalLink size={11} />
                     </button>
                 </div>
-                {edit.diffPreviewLines.length > 0 && (
-                    <EditDiffPreview
-                        id={previewId}
-                        filePath={edit.displayPath}
-                        additions={edit.additions}
-                        deletions={edit.deletions}
-                        lines={edit.diffPreviewLines}
-                        mode={activeDiffViewMode}
-                        visible={isPreviewVisible}
-                        floatingTop={isPreviewVisible ? floatingPreview.top : undefined}
-                        surface="status"
-                    />
-                )}
             </div>
         );
     };

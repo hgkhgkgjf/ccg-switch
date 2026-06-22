@@ -52,7 +52,7 @@
             "copied": "已复制",
             "emptyUser": "空消息",
             "unknownBlock": "未知内容块",
-            "showEarlier": "已折叠更早 {{total}} 条消息，滚动到顶部继续加载 {{count}} 条",
+            "showEarlier": "已折叠更早 {{total}} 条消息，点击加载 {{count}} 条",
             "waiting": "正在等待响应…",
             "streamingConnected": "已连接，正在生成回复…"
         },

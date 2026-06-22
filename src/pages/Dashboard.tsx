@@ -1,7 +1,18 @@
-import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Clock, Coins, FolderOpen, Hash, MessageSquare, PieChart, RefreshCw, TrendingUp } from 'lucide-react';
-import { useState, useEffect, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
-import { useDashboardStore } from '../stores/useDashboardStore';
+import {useTranslation} from 'react-i18next';
+import {
+    Activity,
+    BarChart3,
+    Clock,
+    Coins,
+    FolderOpen,
+    Hash,
+    MessageSquare,
+    PieChart,
+    RefreshCw,
+    TrendingUp
+} from 'lucide-react';
+import {type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useState} from 'react';
+import {useDashboardStore} from '../stores/useDashboardStore';
 
 interface PieShareItem {
     name: string;
@@ -205,12 +216,9 @@ function Dashboard() {
                                         {recentActivity.map((entry, i) => {
                                             const height = Math.max((entry.count / maxCount) * 100, 4);
                                             return (
-                                                <div key={i} className="flex-1 h-full flex flex-col items-center justify-end group relative">
-                                                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                                                        {entry.count}
-                                                    </div>
+                                                <div key={i} className="flex-1 h-full flex flex-col items-center justify-end">
                                                     <div
-                                                        className="w-full rounded-t bg-gradient-to-t from-blue-500 to-blue-400 dark:from-blue-600 dark:to-blue-400 transition-all duration-200 group-hover:from-blue-600 group-hover:to-blue-500 group-hover:scale-y-105 min-w-[4px]"
+                                                        className="w-full rounded-t bg-gradient-to-t from-blue-500 to-blue-400 dark:from-blue-600 dark:to-blue-400 transition-all duration-200 min-w-[4px]"
                                                         style={{ height: `${height}%` }}
                                                     />
                                                 </div>

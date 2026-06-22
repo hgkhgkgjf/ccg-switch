@@ -35,6 +35,7 @@ import {
     getChatComposerInputLabel,
     getComposerHeightFromDrag,
 } from '../../../utils/chatUiBehavior';
+import type {ChatWorkspaceStatus} from '../../../utils/chatWorkspaceStatus';
 
 interface ChatComposerProps {
     /** 当前 provider 对应 SDK 是否缺失（缺失时拦截发送，提示安装） */
@@ -42,6 +43,7 @@ interface ChatComposerProps {
     onSdkMissing: () => void;
     /** 工作目录（@ 文件补全用） */
     cwd?: string;
+    workspaceStatus?: ChatWorkspaceStatus;
 }
 
 type FileWithPath = File & {
@@ -173,7 +175,7 @@ export function shouldBlockPromptEnhance({
  * 发送控制台：顶部上下文栏 + 富输入框（@/#/!// 补全）+ 底部控制工具栏。
  * 整合自 jcc-gui ChatInputBox 的交互能力，用 ccg-switch 现有栈重写。
  */
-export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProps) {
+export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }: ChatComposerProps) {
     const { t } = useTranslation();
     const {
         provider,
@@ -603,14 +605,15 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd }: ChatComposerProp
     });
 
     return (
-        <div className="bg-base-200/20 px-3 pb-4 pt-2 sm:px-5">
-            <div className="mx-auto w-full max-w-2xl rounded-xl border border-base-300 bg-base-100/95 p-2 shadow-lg shadow-base-300/30 backdrop-blur">
+        <div className="bg-base-200/20 px-2 pb-4 pt-2 sm:px-3">
+            <div className="w-full rounded-xl border border-base-300 bg-base-100/95 p-2 shadow-lg shadow-base-300/30 backdrop-blur">
                 {/* 顶部上下文栏 */}
                 <ContextBar
                     attachments={attachments}
                     percentage={percentage}
                     usedTokens={contextTokens}
                     maxTokens={maxTokens}
+                    workspaceStatus={workspaceStatus}
                     onRemoveAttachment={(index) => {
                         setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
                     }}

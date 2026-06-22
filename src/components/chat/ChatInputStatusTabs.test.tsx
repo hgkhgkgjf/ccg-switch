@@ -140,66 +140,10 @@ describe('ChatInputStatusTabs', () => {
         expect(getInputStatusEmptyPanelLabel('edits', translate)).toBe('暂无文件编辑');
     });
 
-    it('renders a git branch chip when the current workspace is a git repository', () => {
-        const html = renderToStaticMarkup(
-            <ChatInputStatusTabs
-                statusSummary={{
-                    recentEdits: [],
-                    allEdits: [],
-                    touchedFileCount: 0,
-                    totalAdditions: 0,
-                    totalDeletions: 0,
-                    pendingToolCount: 0,
-                    completedToolCount: 0,
-                    errorToolCount: 0,
-                    toolTimeline: [],
-                    agentTools: [],
-                }}
-                workspaceStatus={{
-                    gitBranch: 'codex/chat-status',
-                    gitRoot: 'C:/repo',
-                    isGitRepository: true,
-                }}
-            />,
-        );
-
-        expect(html).toContain('chat-input-status-git-branch');
-        expect(html).toContain('codex/chat-status');
-        expect(html).not.toContain('chat-input-status-tab-tasks');
-        expect(html).not.toContain('chat-input-status-tab-subagents');
-        expect(html).not.toContain('chat-input-status-tab-edits');
-    });
-
-    it('keeps the git branch chip compact while preserving accessible branch context', () => {
+    it('hides the status strip when there is no triggered activity', () => {
         const html = renderToStaticMarkup(
             <ChatInputStatusTabs
                 statusSummary={emptyStatusSummary}
-                workspaceStatus={{
-                    gitBranch: 'feature/very-long-chat-ui-parity-branch-name',
-                    gitRoot: 'C:/repo',
-                    isGitRepository: true,
-                }}
-            />,
-        );
-
-        expect(html).toContain('chat-input-status-git-branch');
-        expect(html).toContain('chat-input-status-git-label hidden sm:inline');
-        expect(html).toContain('chat-input-status-git-value');
-        expect(html).toContain('feature/very-long-chat-ui-parity-branch-name');
-        expect(html).toContain('aria-label="Git feature/very-long-chat-ui-parity-branch-name"');
-        expect(html).toContain('title="Git: feature/very-long-chat-ui-parity-branch-name');
-        expect(html).not.toContain('chat.layout.inputStatusGitBranch');
-    });
-
-    it('hides the status strip when there is no git branch or triggered activity', () => {
-        const html = renderToStaticMarkup(
-            <ChatInputStatusTabs
-                statusSummary={emptyStatusSummary}
-                workspaceStatus={{
-                    gitBranch: null,
-                    gitRoot: null,
-                    isGitRepository: false,
-                }}
             />,
         );
 
@@ -635,18 +579,12 @@ describe('ChatInputStatusTabs', () => {
                 statusSummary={statusSummary}
                 isStreaming
                 defaultOpenTab="tasks"
-                workspaceStatus={{
-                    gitBranch: 'codex/chat-status',
-                    gitRoot: 'C:/repo',
-                    isGitRepository: true,
-                }}
                 mcpStatus={mcpStatus}
                 collapseStatusTabsOnDesktop
             />,
         );
 
-        expect(html).toContain('chat-input-status-git-branch');
-        expect(html).not.toContain('chat-input-status-git-branch flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-transparent bg-base-200/65 px-1.5 py-1.5 text-[11px] font-medium text-base-content/70 sm:px-2 xl:hidden');
+        expect(html).not.toContain('chat-input-status-git-branch');
         expect(html).toContain('chat-input-status-tab-tasks xl:hidden');
         expect(html).toContain('chat-input-status-tab-subagents xl:hidden');
         expect(html).toContain('chat-input-status-tab-edits xl:hidden');
@@ -677,7 +615,8 @@ describe('ChatInputStatusTabs', () => {
             />,
         );
 
-        expect(html).toContain('mx-auto relative w-full max-w-2xl');
+        expect(html).toContain('relative w-full');
+        expect(html).not.toContain('max-w-2xl');
         expect(html).toContain('chat-input-status-popover-panel');
         expect(html).toContain('absolute bottom-full');
         expect(html).toContain('z-[30]');

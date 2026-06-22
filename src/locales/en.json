@@ -63,7 +63,7 @@
             "copied": "Copied",
             "emptyUser": "Empty message",
             "unknownBlock": "Unknown content block",
-            "showEarlier": "{{total}} earlier messages are collapsed. Scroll to the top to load {{count}} more",
+            "showEarlier": "{{total}} earlier messages are collapsed. Click to load {{count}} more",
             "waiting": "Waiting for response…",
             "streamingConnected": "Connected, generating response…"
         },

@@ -116,6 +116,28 @@ describe('ChatComposer render integration', () => {
         expect(html).not.toContain('chat.richPlaceholder');
     });
 
+    it('renders workspace git context in the top composer bar without a centered max-width cap', () => {
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:\\repo"
+                workspaceStatus={{
+                    gitBranch: 'ai-report',
+                    gitRoot: 'C:/repo',
+                    isGitRepository: true,
+                }}
+            />,
+        );
+
+        expect(html).toContain('chat-composer-git-branch');
+        expect(html).toContain('ai-report');
+        expect(html).toContain('aria-label="Git ai-report"');
+        expect(html).toContain('title="Git: ai-report · C:/repo"');
+        expect(html).not.toContain('max-w-2xl');
+        expect(html).not.toContain('mx-auto w-full max-w-2xl');
+    });
+
     it('renders completion menu loading and items with readable accessibility chrome', () => {
         const loadingHtml = renderToStaticMarkup(
             <CompletionMenu

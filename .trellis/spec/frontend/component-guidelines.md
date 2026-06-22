@@ -804,14 +804,26 @@ See `src/components/providers/ProviderCard.tsx` and
   matches as final. If that explicit full-history search fails, keep the loaded
   window searchable and expose a compact retry affordance owned by `ChatPage`;
   `MessageList` should receive this as display props and must not invoke the
-  store directly. MessageList search/reveal chrome must use readable i18n
+  store directly. MessageList reveal pagination must keep total and remaining
+  counts separate: helpers that advance reveal state take the stable total
+  revealable earlier-message count, while the collapsed notice displays the
+  current remaining hidden count and next page size. Do not pass a shrinking
+  remaining count as the total bound, or histories such as 46 hidden messages
+  can reveal 30 and then get stuck before the final 16.
+  Loading earlier messages may happen through either the explicit collapsed
+  notice button or a guarded top-scroll auto reveal. The auto reveal must only
+  fire while normal browsing has remaining collapsed earlier messages, no
+  reveal is already pending, and the scroll position is within the top
+  threshold. Once the collapsed count reaches zero, top scrolling must settle at
+  the true transcript top without triggering another reveal attempt.
+  MessageList search/reveal chrome must use readable i18n
   fallbacks at the rendering boundary: search result summaries, no-result
   states, full-history loading/error text, retry button `aria-label`/text, and
   collapsed-earlier message notices should fall back to labels such as
   `Found 2 matching messages`, `No matching messages found`, `Searching
   complete history for older matches...`, `Complete history search failed.
   Current results only cover the loaded window.`, `Retry`, and `2 earlier
-  messages are collapsed. Scroll to the top to load 2 more` instead of raw
+  messages are collapsed. Click to load 2 more` instead of raw
   `chat.layout.search*` or `chat.message.showEarlier` keys. Message transcript
   chrome follows the same fallback rule: role labels, copy/copied actions, empty
   user placeholders, waiting indicators, and streaming-connected chips must

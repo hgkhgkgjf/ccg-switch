@@ -1,3 +1,8 @@
+## 迭代记录 2026-06-22 guarded chat top-scroll reveal
+
+- 本轮完成：创建 Trellis 任务 `06-22-06-22-chat-guarded-scroll-reveal`，恢复对话历史“滚动触顶自动加载更早消息”的体验，同时保留显式点击加载兜底。`MessageList` 重新绑定受控 scroll listener，只在非搜索、存在 collapsed earlier messages、没有 pending reveal、滚动接近顶部时触发；`collapsedCount === 0` 后不再触发，滚动条可停在真实顶部。`chatUiBehavior` 新增 pending-aware `shouldAutoRevealEarlierMessages()`，保留原 `AUTO_REVEAL_SCROLL_THRESHOLD = 48`，并继续使用 `getManualRevealWindow()` 避免 46 条历史先加载 30 条后卡住剩余 16 条。
+- 本轮验证：`npm test -- src/utils/chatUiBehavior.test.ts src/components/chat/MessageList.test.tsx src/components/chat/ChatInputStatusTabs.test.tsx src/components/chat/composer/ChatComposer.render.test.tsx src/components/chat/composer/ButtonArea.test.tsx` 通过（5 files / 68 tests）；`npm run build` 通过；IDE `build_project` 通过，`problems: []`；`git diff --check` 通过，仅 Windows LF/CRLF 转换提示；IDE 生成的 `out` 已清理。
+
 ## 本轮 PLAN 2026-06-21 small-screen edit stats target label
 
 - 目标：让 `ChatInputStatusTabs` 小屏 fallback 的 edit row `+N` / `-N` 统计在保持紧凑可见文本的同时，通过 `title` / `aria-label` 暴露 `Edit stats: <file> · +N / -N`，避免多个文件编辑行里重复裸数字脱离文件上下文。

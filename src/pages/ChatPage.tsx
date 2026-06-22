@@ -938,7 +938,6 @@ export default function ChatPage() {
                             selectedEditKey={activeSelectedEditKey}
                             onSelectedEditChange={handleSelectedEditChange}
                             onSelectTool={handleSelectStatusTool}
-                            workspaceStatus={workspaceStatus}
                             mcpStatus={mcpStatus}
                             collapseStatusTabsOnDesktop
                         />
@@ -946,6 +945,7 @@ export default function ChatPage() {
                             sdkMissing={sdkMissing}
                             onSdkMissing={() => setSdkModalOpen(true)}
                             cwd={currentCwd ?? undefined}
+                            workspaceStatus={workspaceStatus}
                         />
                     </section>
 

@@ -18,6 +18,7 @@ import {
     getComposerHeightFromDrag,
     getDiffPaneReopenLabel,
     getEffectiveRevealedCount,
+    getManualRevealWindow,
     getNextRevealState,
     getPaneResizeHandleLabel,
     getPaneWidthsAfterResize,
@@ -74,32 +75,6 @@ describe('chat UI behavior', () => {
         });
     });
 
-    it('reveals earlier messages only when the transcript is near the top', () => {
-        expect(shouldAutoRevealEarlierMessages({
-            scrollTop: 24,
-            collapsedCount: 12,
-            isSearching: false,
-        })).toBe(true);
-
-        expect(shouldAutoRevealEarlierMessages({
-            scrollTop: 120,
-            collapsedCount: 12,
-            isSearching: false,
-        })).toBe(false);
-
-        expect(shouldAutoRevealEarlierMessages({
-            scrollTop: 0,
-            collapsedCount: 0,
-            isSearching: false,
-        })).toBe(false);
-
-        expect(shouldAutoRevealEarlierMessages({
-            scrollTop: 0,
-            collapsedCount: 12,
-            isSearching: true,
-        })).toBe(false);
-    });
-
     it('computes collapsed history paging for normal transcript browsing', () => {
         expect(getCollapsedMessageWindow({
             filteredCount: 96,
@@ -140,6 +115,82 @@ describe('chat UI behavior', () => {
             transcriptKey: 'session-a-first-message',
             revealedCount: 20,
         });
+    });
+
+    it('keeps manual reveal totals stable when the remaining hidden count is below one page', () => {
+        expect(getManualRevealWindow({
+            remainingHiddenCount: 16,
+            revealedCount: 30,
+        })).toEqual({
+            totalEarlierMessages: 46,
+            collapsedCount: 16,
+            nextRevealCount: 16,
+        });
+    });
+
+    it('advances through a full reveal page and a remaining partial page', () => {
+        const initialState = {
+            transcriptKey: 'session-a-first-message',
+            revealedCount: 0,
+        };
+        const firstPage = getNextRevealState(initialState, 'session-a-first-message', 46);
+        const finalPage = getNextRevealState(firstPage, 'session-a-first-message', 46);
+
+        expect(firstPage).toEqual({
+            transcriptKey: 'session-a-first-message',
+            revealedCount: 30,
+        });
+        expect(finalPage).toEqual({
+            transcriptKey: 'session-a-first-message',
+            revealedCount: 46,
+        });
+        expect(getManualRevealWindow({
+            remainingHiddenCount: 0,
+            revealedCount: finalPage.revealedCount,
+        })).toEqual({
+            totalEarlierMessages: 46,
+            collapsedCount: 0,
+            nextRevealCount: 0,
+        });
+    });
+
+    it('only auto-reveals earlier messages when the top threshold is stable and revealable', () => {
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 0,
+            collapsedCount: 16,
+            isSearching: false,
+            revealPending: false,
+        })).toBe(true);
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 48,
+            collapsedCount: 16,
+            isSearching: false,
+            revealPending: false,
+        })).toBe(true);
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 49,
+            collapsedCount: 16,
+            isSearching: false,
+            revealPending: false,
+        })).toBe(false);
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 0,
+            collapsedCount: 0,
+            isSearching: false,
+            revealPending: false,
+        })).toBe(false);
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 0,
+            collapsedCount: 16,
+            isSearching: false,
+            revealPending: true,
+        })).toBe(false);
+        expect(shouldAutoRevealEarlierMessages({
+            scrollTop: 0,
+            collapsedCount: 16,
+            isSearching: true,
+            revealPending: false,
+        })).toBe(false);
     });
 
     it('disables history collapsing while searching so all matches stay visible', () => {
