@@ -1,5 +1,4 @@
 import {
-    type ChangeEvent,
     type ClipboardEvent,
     type DragEvent,
     type KeyboardEvent,
@@ -36,6 +35,8 @@ import {
     getComposerHeightFromDrag,
 } from '../../../utils/chatUiBehavior';
 import type {ChatWorkspaceStatus} from '../../../utils/chatWorkspaceStatus';
+import {useContentEditable, removeFileTag, getPlainText, getCaretOffset} from './useContentEditable';
+import './FileTag.css';
 
 interface ChatComposerProps {
     /** 当前 provider 对应 SDK 是否缺失（缺失时拦截发送，提示安装） */
@@ -201,8 +202,16 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         loadAllProviders,
     } = useProviderStore();
 
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const composingRef = useRef(false);
+    const {
+        editorRef,
+        composingRef,
+        getText,
+        insertTag,
+        clearEditor,
+        setEditorText,
+        focus: focusEditor,
+    } = useContentEditable();
+
     const draftHistoryRef = useRef<string[]>([]);
     const historyCursorRef = useRef<number | null>(null);
     const resizeCleanupRef = useRef<(() => void) | null>(null);
@@ -213,7 +222,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
     const [isSending, setIsSending] = useState(false);
     const [isDraggingFile, setIsDraggingFile] = useState(false);
     const [isResizingComposer, setIsResizingComposer] = useState(false);
-    const [textareaHeight, setTextareaHeight] = useState(COMPOSER_MIN_HEIGHT);
+    const [editorHeight, setEditorHeight] = useState(COMPOSER_MIN_HEIGHT);
     const [statusPanelExpanded, setStatusPanelExpanded] = useState(true);
     const [modelConfigVersion, setModelConfigVersion] = useState(0);
     const [modelsRefreshing, setModelsRefreshing] = useState(false);
@@ -275,30 +284,46 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
     }, [providerId, modelRefreshSource?.url]);
 
     // 自适应高度
-    const applyTextareaHeight = useCallback((height: number) => {
+    const applyEditorHeight = useCallback((height: number) => {
         const nextHeight = clampComposerHeight(height);
-        setTextareaHeight(nextHeight);
-        const el = textareaRef.current;
+        setEditorHeight(nextHeight);
+        const el = editorRef.current;
         if (el) {
             el.style.height = `${nextHeight}px`;
         }
-    }, []);
+    }, [editorRef]);
 
-    const autosize = useCallback((preferredHeight = textareaHeight) => {
-        const el = textareaRef.current;
+    const autosize = useCallback((preferredHeight = editorHeight) => {
+        const el = editorRef.current;
         if (!el) return;
         el.style.height = 'auto';
-        applyTextareaHeight(Math.max(el.scrollHeight, preferredHeight));
-    }, [applyTextareaHeight, textareaHeight]);
+        applyEditorHeight(Math.max(el.scrollHeight, preferredHeight));
+    }, [applyEditorHeight, editorHeight, editorRef]);
 
     useEffect(() => () => {
         resizeCleanupRef.current?.();
     }, []);
 
+    // Sync external draft changes into contenteditable (e.g. history navigation)
+    const lastSyncedDraftRef = useRef(draft);
+    useEffect(() => {
+        const el = editorRef.current;
+        if (!el) return;
+        // Only sync if draft was changed externally (not from our own input)
+        if (draft !== lastSyncedDraftRef.current) {
+            const currentText = getPlainText(el);
+            if (draft !== currentText) {
+                // External change — set text content
+                el.textContent = draft;
+            }
+            lastSyncedDraftRef.current = draft;
+        }
+    }, [draft, editorRef]);
+
     const handleResizePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
         event.preventDefault();
         const startClientY = event.clientY;
-        const startHeight = textareaHeight;
+        const startHeight = editorHeight;
         const previousCursor = document.body.style.cursor;
         const previousUserSelect = document.body.style.userSelect;
 
@@ -315,7 +340,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                 moveEvent.clientY,
             );
             manualResizeRef.current = true;
-            applyTextareaHeight(nextHeight);
+            applyEditorHeight(nextHeight);
         };
 
         const cleanup = () => {
@@ -334,15 +359,27 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         window.addEventListener('pointercancel', cleanup, {once: true});
     };
 
-    const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-        const value = e.target.value;
-        setDraft(value);
-        completions.onTextChange(value, e.target.selectionStart ?? value.length);
+    const syncDraftFromEditor = useCallback(() => {
+        const el = editorRef.current;
+        if (!el) return;
+        const text = getPlainText(el);
+        lastSyncedDraftRef.current = text;
+        setDraft(text);
+    }, [editorRef, setDraft]);
+
+    const handleInput = useCallback(() => {
+        const el = editorRef.current;
+        if (!el) return;
+        const text = getPlainText(el);
+        const caret = getCaretOffset(el);
+        lastSyncedDraftRef.current = text;
+        setDraft(text);
+        completions.onTextChange(text, caret);
         requestAnimationFrame(() => autosize());
-    };
+    }, [editorRef, setDraft, completions, autosize]);
 
     const handleSend = async () => {
-        const text = draft.trim();
+        const text = getText().trim();
         if (shouldBlockChatComposerSubmit({
             hasPromptText: text.length > 0,
             hasAttachments: attachments.length > 0,
@@ -378,18 +415,18 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                 if (text && !useChatStore.getState().draft.trim()) {
                     setDraft(text);
                 }
+            } else {
+                // Clear the contenteditable on successful send
+                clearEditor();
             }
         } finally {
             sendInFlightRef.current = false;
             setIsSending(false);
 
-            // 确保 textarea 高度重置
+            // 确保编辑器高度重置
             requestAnimationFrame(() => {
-                const el = textareaRef.current;
-                if (el) {
-                    autosize(manualResizeRef.current ? textareaHeight : COMPOSER_MIN_HEIGHT);
-                    el.focus();
-                }
+                autosize(manualResizeRef.current ? editorHeight : COMPOSER_MIN_HEIGHT);
+                focusEditor();
             });
         }
     };
@@ -399,10 +436,8 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         historyCursorRef.current = historyIndex;
         setDraft(nextDraft);
         requestAnimationFrame(() => {
-            const el = textareaRef.current;
-            if (!el) return;
-            el.focus();
-            el.setSelectionRange(nextDraft.length, nextDraft.length);
+            setEditorText(nextDraft);
+            focusEditor();
             autosize();
         });
     };
@@ -424,27 +459,41 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         return true;
     };
 
-    const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    const applyCompletionSelection = useCallback((index: number) => {
+        const el = editorRef.current;
+        if (!el) return;
+        const text = getPlainText(el);
+        const result = completions.applySelection(index, text);
+        if (!result) return;
+
+        if (result.fileMeta) {
+            // @ file completion: insert a styled chip
+            insertTag(
+                result.fileMeta.triggerStart,
+                result.fileMeta.queryLength,
+                result.fileMeta.filePath,
+                result.fileMeta.isDir,
+            );
+            syncDraftFromEditor();
+        } else {
+            // Other completions: plain text replacement
+            setEditorText(result.text);
+            lastSyncedDraftRef.current = result.text;
+            setDraft(result.text);
+            requestAnimationFrame(() => {
+                focusEditor();
+                autosize();
+            });
+        }
+    }, [editorRef, completions, insertTag, syncDraftFromEditor, setEditorText, setDraft, focusEditor, autosize]);
+
+    const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
         // 补全菜单优先消费方向键 / Esc / Enter
         const consumed = completions.handleKeyDown(e);
         if (consumed) {
-            // Enter / Tab：确认补全并写回文本
+            // Enter / Tab：确认补全
             if ((e.key === 'Enter' || e.key === 'Tab') && completions.isOpen) {
-                const el = textareaRef.current;
-                if (el) {
-                    const result = completions.applySelection(
-                        completions.activeIndex,
-                        el.value,
-                    );
-                    if (result) {
-                        setDraft(result.text);
-                        requestAnimationFrame(() => {
-                            el.focus();
-                            el.setSelectionRange(result.caret, result.caret);
-                            autosize();
-                        });
-                    }
-                }
+                applyCompletionSelection(completions.activeIndex);
             }
             return;
         }
@@ -479,9 +528,16 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         }
     };
 
-    const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
+        // Handle image paste
         if (e.clipboardData.files.length > 0) {
             void handleAddAttachment(e.clipboardData.files);
+        }
+        // For text paste: only allow plain text (strip HTML)
+        const text = e.clipboardData.getData('text/plain');
+        if (text) {
+            e.preventDefault();
+            document.execCommand('insertText', false, text);
         }
     };
 
@@ -512,8 +568,24 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         e.preventDefault();
         setIsDraggingFile(false);
         void handleAddAttachment(e.dataTransfer.files);
-        textareaRef.current?.focus();
+        focusEditor();
     };
+
+    // Handle click on file-tag close button
+    const handleEditorClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains('file-tag-close')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tag = target.closest('.file-tag') as HTMLElement | null;
+            const el = editorRef.current;
+            if (tag && el) {
+                removeFileTag(el, tag);
+                syncDraftFromEditor();
+                requestAnimationFrame(() => autosize());
+            }
+        }
+    }, [editorRef, syncDraftFromEditor, autosize]);
 
     const handleEnhance = async () => {
         const text = draft.trim();
@@ -570,6 +642,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
     const applyEnhanced = () => {
         if (enhancedText) {
             setDraft(enhancedText);
+            setEditorText(enhancedText);
             requestAnimationFrame(() => autosize());
         }
         setEnhancerOpen(false);
@@ -641,17 +714,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                             loadingText={completionLoadingText}
                             menuLabel={completionMenuLabel}
                             onSelect={(i) => {
-                                const el = textareaRef.current;
-                                if (!el) return;
-                                const result = completions.applySelection(i, el.value);
-                                if (result) {
-                                    setDraft(result.text);
-                                    requestAnimationFrame(() => {
-                                        el.focus();
-                                        el.setSelectionRange(result.caret, result.caret);
-                                        autosize();
-                                    });
-                                }
+                                applyCompletionSelection(i);
                             }}
                             onHover={completions.setActiveIndex}
                         />
@@ -667,22 +730,27 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                     >
                         <span className="h-1 w-10 rounded-full bg-current" />
                     </button>
-                    <textarea
-                        ref={textareaRef}
-                        className="textarea textarea-bordered min-h-[36px] w-full resize-none overflow-y-auto py-1.5 text-sm leading-5"
-                        rows={1}
-                        placeholder={richPlaceholder}
-                        value={draft}
+                    <div
+                        ref={editorRef}
+                        contentEditable
+                        suppressContentEditableWarning
+                        className="chat-composer-editable textarea textarea-bordered min-h-[36px] w-full resize-none overflow-y-auto py-1.5 text-sm leading-5"
+                        role="textbox"
+                        aria-multiline="true"
+                        data-placeholder={richPlaceholder}
                         style={{
-                            height: `${textareaHeight}px`,
+                            height: `${editorHeight}px`,
                             maxHeight: `${COMPOSER_MAX_HEIGHT}px`,
                         }}
-                        onChange={handleChange}
+                        onInput={handleInput}
+                        onClick={handleEditorClick}
                         onCompositionStart={() => {
                             composingRef.current = true;
                         }}
                         onCompositionEnd={() => {
                             composingRef.current = false;
+                            // Trigger input sync after IME composition ends
+                            handleInput();
                         }}
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}

@@ -201,7 +201,7 @@ export interface CompletionState {
     applySelection: (
         index: number,
         text: string,
-    ) => { text: string; caret: number } | null;
+    ) => { text: string; caret: number; fileMeta?: { filePath: string; isDir: boolean; triggerStart: number; queryLength: number } } | null;
     close: () => void;
 }
 
@@ -349,8 +349,17 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
                 active.trigger === '/' || active.trigger === '!' ? insert : `${active.trigger}${insert}`;
             const newText = `${before}${replacement} ${after}`;
             const caret = before.length + replacement.length + 1;
+            // For @ file completions, also return metadata for chip rendering
+            const fileMeta = active.trigger === '@'
+                ? {
+                    filePath: insert,
+                    isDir: item.label.endsWith('/'),
+                    triggerStart: active.start,
+                    queryLength: active.query.length,
+                }
+                : undefined;
             close();
-            return { text: newText, caret };
+            return { text: newText, caret, fileMeta };
         },
         [active, items, close],
     );
