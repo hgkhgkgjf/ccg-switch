@@ -21,19 +21,21 @@ When users hover over edited-file rows in the chat area, the diff preview must r
 - Ensure the status edit diff hover preview has an opaque, high-contrast background in normal, dark, and custom themes.
 - Use theme-adaptive DaisyUI CSS variables for the hover preview surface, text, borders, and diff row colors; do not hardcode a permanent dark preview.
 - Keep the change scoped to `src/styles/toolBlocks.css` unless class application is proven incorrect.
-- Preserve existing preview sizing, positioning, and line wrapping behavior.
+- Preserve existing preview sizing and line wrapping behavior.
+- For ordinary transcript edit hover previews that are scrollable, keep the preview shell connected to the trigger hit area so users can move the pointer into the preview and scroll it.
 
 ## Acceptance Criteria
 
 - [x] `src/styles/toolBlocks.css` has balanced CSS block structure around `.edit-diff-hover-preview-status` and `.edit-diff-hover-preview-readable`.
 - [x] The status edit diff hover preview no longer renders transparent over chat text.
 - [x] Status edit diff preview remains opaque and readable while adapting to light, dark, and custom themes.
+- [x] Ordinary transcript edit hover previews can be entered from the trigger row without dropping hover state before scroll interaction.
 - [x] Frontend build passes.
 - [x] CSS diff check passes without whitespace errors.
 
 ## Out of Scope
 
-- Reworking hover preview positioning.
+- Reworking hover preview positioning beyond the minimal transcript hover hit-area bridge.
 - Replacing the hover preview component.
 - Changing unrelated tool block styles.
 
@@ -59,3 +61,11 @@ When users hover over edited-file rows in the chat area, the diff preview must r
 - IDE `build_project` passed with no problems.
 - `git diff --check -- src/styles/toolBlocks.css .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md` passed with only Windows LF/CRLF conversion warnings.
 - `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/chat/StatusPanel.test.tsx` still has 3 existing `StatusPanel.test.tsx` failures because the current `StatusPanel` SSR output does not render hover preview markup expected by those tests. This is outside the CSS-only scope of this task.
+- Regression fix 2026-06-23: transcript edit hover previews no longer inherit transparency from `.tool-title-summary` / assistant-flow parent `opacity`; muted summary chrome now uses theme-token color alpha so the nested hover preview can remain fully opaque.
+- Regression fix 2026-06-23: ordinary transcript edit hover previews now render the full available `diffPreviewLines` by default inside a viewport-capped scrollable body. Status-panel hover previews remain capped at 24 lines with the hidden-line clue in the header.
+- Regression fix 2026-06-23: scrollable ordinary transcript edit hover previews now sit directly against the trigger edge (`bottom: 100%`) so the pointer can move into the preview without crossing an unhoverable gap; status-panel hover preview spacing is unchanged.
+- RED/GREEN verification 2026-06-23: `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx` first failed on the missing `bottom: 100%` scrollable hover rule, then passed with 1 file and 9 tests after the CSS fix.
+- Related verification 2026-06-23: `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/components/toolBlocks/EditToolGroupBlock.test.tsx` passed with 3 files and 25 tests.
+- RED/GREEN verification 2026-06-23: `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/components/toolBlocks/EditToolGroupBlock.test.tsx` passed after first failing on the old 16-line transcript hover cap and missing scrollable CSS rule.
+- Build verification 2026-06-23: `npm run build` passed; IDE `build_project` passed with `problems: []`; `git diff --check -- src/styles/toolBlocks.css src/components/toolBlocks/EditDiffPreview.test.tsx .trellis/spec/frontend/component-guidelines.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md TODO_LIST.md` passed with only Windows LF/CRLF conversion warnings.
+- Build verification 2026-06-23: `npm run build` passed; IDE `build_project` passed with `problems: []`; `git diff --check -- src/components/toolBlocks/EditDiffPreview.tsx src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/styles/toolBlocks.css .trellis/spec/frontend/component-guidelines.md TODO_LIST.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md` passed with only Windows LF/CRLF conversion warnings.

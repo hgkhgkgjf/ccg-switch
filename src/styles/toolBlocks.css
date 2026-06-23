@@ -65,7 +65,7 @@
 
 .tool-title-summary {
   font-size: 12px;
-  opacity: 0.78;
+  color: oklch(var(--bc) / 0.62);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -618,6 +618,18 @@
 
 [data-theme="dark"] .edit-diff-hover-preview {
   box-shadow: 0 22px 52px oklch(var(--n) / 0.46), 0 0 0 1px oklch(var(--bc) / 0.12);
+}
+
+.edit-diff-hover-preview-scrollable {
+  bottom: 100%;
+  pointer-events: auto;
+}
+
+.edit-diff-hover-preview-scrollable .edit-diff-hover-body {
+  max-height: min(520px, calc(100vh - 96px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .edit-diff-panel {
@@ -2826,10 +2838,10 @@
   color: oklch(var(--bc) / 0.72);
 }
 
-.assistant-message-flow .tool-title-summary {
+.assistant-message-flow .tool-title-summary:not(.clickable-file) {
   max-width: min(680px, 58vw);
   font-size: 11.5px;
-  opacity: 0.58;
+  color: oklch(var(--bc) / 0.58);
 }
 
 .assistant-message-flow .tool-status-indicator {
@@ -3003,7 +3015,7 @@
 .assistant-message-flow .task-group-header .tool-title-secondary-summary,
 .assistant-message-flow .task-group-header .tool-title-runtime-summary,
 .assistant-message-flow .task-group-header .task-summary-text {
-  opacity: 0.5;
+  color: oklch(var(--bc) / 0.5);
 }
 
 .assistant-message-flow .task-group-list {
@@ -3066,19 +3078,19 @@
 .assistant-message-flow .tool-title-secondary-summary {
   max-width: min(360px, 32vw);
   font-size: 10.5px;
-  opacity: 0.52;
+  color: oklch(var(--bc) / 0.52);
 }
 
 .assistant-message-flow .tool-title-runtime-summary {
   max-width: min(220px, 20vw);
   font-size: 10px;
-  opacity: 0.42;
+  color: oklch(var(--bc) / 0.42);
 }
 
 .assistant-message-flow .task-summary-text {
   max-width: min(360px, 32vw);
   font-size: 10.5px;
-  opacity: 0.52;
+  color: oklch(var(--bc) / 0.52);
 }
 
 .assistant-message-flow .task-group-actions {

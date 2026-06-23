@@ -2,6 +2,22 @@ import {describe, expect, it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import EditDiffPreview from './EditDiffPreview';
 
+type NodeFsSubset = {
+    readFileSync(path: string | URL, encoding: 'utf8'): string;
+};
+
+async function readToolBlocksCss(): Promise<string> {
+    const processLike = (globalThis as unknown as {
+        process?: { getBuiltinModule?: (specifier: 'node:fs') => NodeFsSubset };
+    }).process;
+    const fs = processLike?.getBuiltinModule?.('node:fs');
+    if (!fs) {
+        throw new Error('node:fs builtin module is unavailable in this test environment');
+    }
+    const { readFileSync } = fs;
+    return readFileSync(new URL('../../styles/toolBlocks.css', import.meta.url), 'utf8');
+}
+
 describe('EditDiffPreview', () => {
     const diffLines = [
         {kind: 'context' as const, oldLineNumber: 10, newLineNumber: 10, text: 'keep before'},
@@ -127,7 +143,7 @@ describe('EditDiffPreview', () => {
         expect(html).not.toContain('edit-diff-hover-more');
     });
 
-    it('uses a larger default line budget for status hover previews only', () => {
+    it('renders complete transcript hover previews while keeping status previews capped', () => {
         const longDiffLines = Array.from({length: 25}, (_, index) => ({
             kind: 'context' as const,
             oldLineNumber: index + 1,
@@ -160,11 +176,25 @@ describe('EditDiffPreview', () => {
             />,
         );
 
-        expect(defaultHtml).toContain('budget line 16');
-        expect(defaultHtml).not.toContain('budget line 17');
-        expect(defaultHtml).toContain('9 more lines');
-        expect(defaultHtml).toContain('title="9 more lines"');
-        expect(defaultHtml).toContain('aria-label="9 more lines"');
-        expect(defaultHtml).toContain('edit-diff-hover-more');
+        expect(defaultHtml).toContain('edit-diff-hover-preview-scrollable');
+        expect(defaultHtml).toContain('budget line 25');
+        expect(defaultHtml).not.toContain('more lines');
+        expect(defaultHtml).not.toContain('edit-diff-hover-more');
+    });
+
+    it('keeps transcript hover preview bodies scrollable instead of clipped', async () => {
+        const toolBlocksCss = await readToolBlocksCss();
+
+        expect(toolBlocksCss).toMatch(
+            /\.edit-diff-hover-preview-scrollable\s+\.edit-diff-hover-body\s*\{[^}]*\boverflow-y:\s*auto;/s,
+        );
+    });
+
+    it('keeps scrollable transcript hover previews connected to the trigger hit area', async () => {
+        const toolBlocksCss = await readToolBlocksCss();
+        const scrollableRule = toolBlocksCss.match(/\.edit-diff-hover-preview-scrollable\s*\{(?<body>[^}]*)\}/s);
+
+        expect(scrollableRule?.groups?.body).toMatch(/\bbottom:\s*100%;/);
+        expect(scrollableRule?.groups?.body).toMatch(/\bpointer-events:\s*auto;/);
     });
 });

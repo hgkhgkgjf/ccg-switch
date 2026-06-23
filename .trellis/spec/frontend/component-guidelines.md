@@ -325,11 +325,18 @@ See `src/components/providers/ProviderCard.tsx` and
   stats area as well as the body/footer, because the body can be clipped before
   the footer clue is visible. For status-panel hover previews specifically,
   prefer the header hidden-line clue and do not duplicate a footer-only clue
-  inside the clipped preview body; ordinary transcript hover previews can keep
-  the compact footer clue. Match the status preview's default line budget to
-  that taller body instead of reusing the compact tooltip limit; ordinary
-  transcript hover previews should remain tighter. When a status-panel file row
-  renders a hover diff tooltip, give the tooltip a stable id and connect the row
+  inside the clipped preview body. Ordinary transcript hover previews should
+  render the complete diff by default inside a viewport-capped scrollable body
+  instead of reusing a compact 16-line tooltip limit. Because those transcript
+  previews are interactive scroll targets, their hit area must stay continuous
+  from the trigger row into the preview shell; do not leave a pointer gap that
+  drops `:hover` before the user can enter and scroll the preview. Only
+  explicit `lineLimit` callers should show the compact footer hidden-line
+  clue. Keep the status preview's default line budget matched to its taller
+  body because status rows are quick-scan chrome, not the full transcript
+  inspection surface. When a
+  status-panel file row renders a hover diff tooltip, give the tooltip a stable
+  id and connect the row
   with `aria-describedby`; rows without tooltip content must not emit dangling
   references. File rows that select the
   central diff review pane must expose an accessible action label that says
@@ -1117,6 +1124,21 @@ See `src/components/providers/ProviderCard.tsx` and
   should use solid backgrounds, high z-index, and viewport-aware placement:
   center previews in the transcript area, and expand right-sidebar previews left
   into the conversation area so code is readable and not clipped by side panels.
+  Do not render a diff hover preview inside an opacity-reduced parent such as
+  `.tool-title-summary { opacity: ... }`: parent opacity is composited after all
+  descendants paint, so the tooltip remains translucent even if the preview sets
+  `opacity: 1` and an opaque background. If summary text needs to look muted,
+  use theme-token color alpha (for example `oklch(var(--bc) / 0.58)`) on the
+  text rule instead of parent `opacity`, and keep clickable file links excluded
+  from generic muted summary overrides.
+  Transcript hover previews should show the full available diff by default and
+  let the preview body scroll with `overflow-y: auto`; otherwise a change such
+  as `+19 / -12` can show only the first 16 ordered lines and hide most added
+  content with no recovery path. Keep pointer events enabled on the scrollable
+  transcript preview and stop wheel/click propagation at the tooltip so users
+  can inspect the diff without accidentally triggering the outer open-file
+  button. Status-surface hover previews are the exception: they remain capped and
+  expose the hidden-line count in the header.
   Diff preview header values that are exposed through `title` must also expose
   the same value through `aria-label`: file path, line-change summary, and
   status-surface hidden-line clues are key preview context, not decorative

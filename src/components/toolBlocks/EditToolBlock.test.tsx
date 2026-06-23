@@ -3,6 +3,22 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import EditToolBlock from './EditToolBlock';
 
+type NodeFsSubset = {
+  readFileSync(path: string | URL, encoding: 'utf8'): string;
+};
+
+async function readToolBlocksCss(): Promise<string> {
+  const processLike = (globalThis as unknown as {
+    process?: { getBuiltinModule?: (specifier: 'node:fs') => NodeFsSubset };
+  }).process;
+  const fs = processLike?.getBuiltinModule?.('node:fs');
+  if (!fs) {
+    throw new Error('node:fs builtin module is unavailable in this test environment');
+  }
+  const { readFileSync } = fs;
+  return readFileSync(new URL('../../styles/toolBlocks.css', import.meta.url), 'utf8');
+}
+
 const mockUseState = vi.hoisted(() => vi.fn());
 
 vi.mock('react', async (importOriginal) => {
@@ -109,6 +125,23 @@ describe('EditToolBlock header accessibility', () => {
     expect(html).toContain('class="edit-item-stats" title="Edit stats: src/App.tsx · +1 / -1" aria-label="Edit stats: src/App.tsx · +1 / -1"');
     expect(html).toContain('<span class="edit-stat-added" aria-hidden="true">+1</span>');
     expect(html).toContain('<span class="edit-stat-deleted" aria-hidden="true">-1</span>');
+  });
+});
+
+describe('EditToolBlock hover preview styling', () => {
+  it('does not weaken title summary descendants with parent opacity', async () => {
+    const toolBlocksCss = await readToolBlocksCss();
+    const opacityRules: string[] = [];
+
+    for (const match of toolBlocksCss.matchAll(/([^{}]*\.tool-title-summary[^{}]*)\{([^{}]*)\}/g)) {
+      const selector = match[1]?.trim();
+      const body = match[2] ?? '';
+      if (selector && /\bopacity\s*:/.test(body)) {
+        opacityRules.push(selector);
+      }
+    }
+
+    expect(opacityRules).toEqual([]);
   });
 });
 

@@ -1,3 +1,13 @@
+## 迭代记录 2026-06-23 edit diff hover hit area
+
+- 本轮完成：修复聊天消息内“编辑文件”hover diff 预览无法移入的问题。根因是基础 hover 预览使用 `bottom: calc(100% + 8px)`，触发行和预览框之间存在 8px 不可 hover 间隙；鼠标移动到间隙时 `.edit-diff-hover-trigger:hover` 失效，预览被隐藏，导致用户无法进入悬浮框，也无法滚动内部 diff。现只对普通 transcript 的 `.edit-diff-hover-preview-scrollable` 覆盖为 `bottom: 100%` 并保留 `pointer-events: auto`，让触发器到预览框的命中区域连续；右侧 status-panel hover 预览间距不变。
+- 本轮验证：RED：`npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx` 先失败 1 项，失败点为 `.edit-diff-hover-preview-scrollable` 缺少 `bottom: 100%`。GREEN：同命令通过（1 file / 9 tests）；相关验证 `npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/components/toolBlocks/EditToolGroupBlock.test.tsx` 通过（3 files / 25 tests）。`npm run build` 通过；IDE `build_project` 通过，`problems: []`；`git diff --check -- src/styles/toolBlocks.css src/components/toolBlocks/EditDiffPreview.test.tsx .trellis/spec/frontend/component-guidelines.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已清理。
+
+## 迭代记录 2026-06-23 edit diff hover opacity/full scroll
+
+- 本轮完成：修复聊天消息内“编辑文件”hover diff 预览两类回归。透明问题根因是预览挂在 `.tool-title-summary` 子树下，父级/assistant 覆盖规则用 `opacity` 弱化整棵子树；现已改为主题色 alpha，不恢复会污染 DaisyUI 的全局 `--fallback-*`。截断问题根因是普通 hover 默认 `lineLimit = 16` 且 body `overflow: hidden`；现普通 transcript hover 默认展示完整 `diffPreviewLines`，通过 `edit-diff-hover-preview-scrollable` 让 body 内部滚动，并阻止滚轮/点击事件冒泡到外层文件按钮；右侧 status hover 仍保留 24 行限制和 header hidden-line clue。
+- 本轮验证：RED：`npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx` 先失败 2 项，失败点为普通 hover 缺少 `edit-diff-hover-preview-scrollable`、仍只显示到第 16 行且缺少 `overflow-y: auto` 样式；`npm test -- src/components/toolBlocks/EditToolBlock.test.tsx` 先失败 1 项，失败点为 `.tool-title-summary` 相关规则仍设置 `opacity`。GREEN：`npm test -- src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/components/toolBlocks/EditToolGroupBlock.test.tsx` 通过（3 files / 24 tests）。`npm run build` 通过；IDE `build_project` 通过，`problems: []`；`git diff --check -- src/components/toolBlocks/EditDiffPreview.tsx src/components/toolBlocks/EditDiffPreview.test.tsx src/components/toolBlocks/EditToolBlock.test.tsx src/styles/toolBlocks.css .trellis/spec/frontend/component-guidelines.md TODO_LIST.md .trellis/tasks/06-22-chat-edit-diff-hover-opacity/prd.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已清理。
+
 ## 迭代记录 2026-06-23 session provider icons
 
 - 本轮完成：把会话列表中的 `Claude` / `Codex` 文本 provider 标签替换为与聊天框模型切换区一致的共享 provider 图标。`ChatSessionSidebar.tsx` 新增 `SessionProviderBadge`，对 `claude/codex` 复用 `ProviderBrandIcon`，保留 `title` / `aria-label`，未知 provider 继续显示文本 fallback，不改会话缓存、选择或加载逻辑。

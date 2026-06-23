@@ -1,4 +1,5 @@
 import {useTranslation} from 'react-i18next';
+import type {SyntheticEvent} from 'react';
 import type {DiffPreviewLine} from '../../utils/toolPresentation';
 
 export type EditDiffPreviewMode = 'unified' | 'split';
@@ -82,8 +83,9 @@ export default function EditDiffPreview({
   if (lines.length === 0) return null;
 
   const isPanel = variant === 'panel';
+  const isScrollableHover = !isPanel && surface !== 'status';
   const shouldWrapLines = isPanel ? (wrapLines ?? true) : false;
-  const defaultHoverLineLimit = surface === 'status' ? 24 : 16;
+  const defaultHoverLineLimit = surface === 'status' ? 24 : undefined;
   const effectiveLineLimit = lineLimit ?? (isPanel ? undefined : defaultHoverLineLimit);
   const previewLines = typeof effectiveLineLimit === 'number' ? lines.slice(0, effectiveLineLimit) : lines;
   const hiddenLineCount = Math.max(0, lines.length - previewLines.length);
@@ -156,7 +158,11 @@ export default function EditDiffPreview({
   };
   const rootClassName = isPanel
     ? `edit-diff-panel edit-diff-panel-${mode} ${shouldWrapLines ? 'edit-diff-panel-wrap' : 'edit-diff-panel-nowrap'}`
-    : `edit-diff-hover-preview edit-diff-hover-preview-${mode}${surface === 'status' ? ' edit-diff-hover-preview-status edit-diff-hover-preview-solid edit-diff-hover-preview-readable edit-diff-hover-preview-wrap edit-diff-hover-preview-tall' : ''}${visible ? ' is-visible' : ''}`;
+    : `edit-diff-hover-preview edit-diff-hover-preview-${mode}${isScrollableHover ? ' edit-diff-hover-preview-scrollable' : ''}${surface === 'status' ? ' edit-diff-hover-preview-status edit-diff-hover-preview-solid edit-diff-hover-preview-readable edit-diff-hover-preview-wrap edit-diff-hover-preview-tall' : ''}${visible ? ' is-visible' : ''}`;
+  const stopScrollableHoverEvent = (event: SyntheticEvent) => {
+    if (!isScrollableHover) return;
+    event.stopPropagation();
+  };
 
   return (
     <span
@@ -164,6 +170,10 @@ export default function EditDiffPreview({
       className={rootClassName}
       role="tooltip"
       style={!isPanel && typeof floatingTop === 'number' ? { top: floatingTop } : undefined}
+      onClick={stopScrollableHoverEvent}
+      onDoubleClick={stopScrollableHoverEvent}
+      onMouseDown={stopScrollableHoverEvent}
+      onWheel={stopScrollableHoverEvent}
     >
       <span className="edit-diff-hover-header">
         <span className="edit-diff-hover-path" title={filePath} aria-label={filePath}>{filePath}</span>
