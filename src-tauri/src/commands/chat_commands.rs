@@ -309,8 +309,22 @@ pub async fn permission_respond_tool(
 /// `dir` 为工作目录（缺省用用户主目录）；`query` 为已输入的过滤词（按文件名/
 /// 相对路径子串匹配，大小写不敏感）。最多返回 50 项，跳过常见的重型目录
 /// （node_modules / .git / target / dist 等）与隐藏目录，限制扫描深度防卡顿。
+///
+/// 注意：文件系统遍历是阻塞操作，必须放到 `spawn_blocking` 线程池执行，
+/// 否则会阻塞 Tauri 主线程导致界面卡死（"未响应"）。
 #[tauri::command]
-pub fn chat_list_workspace_files(
+pub async fn chat_list_workspace_files(
+    dir: Option<String>,
+    query: Option<String>,
+) -> Result<Vec<WorkspaceFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_workspace_files_blocking(dir, query))
+        .await
+        .map_err(|e| format!("文件扫描任务失败: {e}"))?
+}
+
+/// 同步执行工作目录文件扫描（阻塞）。由 `chat_list_workspace_files` 在
+/// 后台线程池调用，不可直接在命令层（主线程）调用。
+fn list_workspace_files_blocking(
     dir: Option<String>,
     query: Option<String>,
 ) -> Result<Vec<WorkspaceFile>, String> {

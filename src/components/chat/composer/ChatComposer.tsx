@@ -35,7 +35,7 @@ import {
     getComposerHeightFromDrag,
 } from '../../../utils/chatUiBehavior';
 import type {ChatWorkspaceStatus} from '../../../utils/chatWorkspaceStatus';
-import {useContentEditable, removeFileTag, getPlainText, getCaretOffset} from './useContentEditable';
+import {getCaretOffset, getPlainText, removeFileTag, useContentEditable} from './useContentEditable';
 import './FileTag.css';
 
 interface ChatComposerProps {
@@ -186,6 +186,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         draft,
         contextTokens,
         activeRequestId,
+        activeSession,
         setProvider,
         setPermissionMode,
         setModel,
@@ -234,6 +235,16 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
     const [enhancedText, setEnhancedText] = useState('');
 
     const completions = useCompletions({ cwd, provider });
+
+    // 切换会话时强制关闭补全下拉，避免上一个会话遗留的「正在加载建议…」
+    // 转圈状态挂在新会话上（active 状态只在输入/选中时才重置）。
+    const sessionKey = activeSession
+        ? `${activeSession.providerId}::${activeSession.sourcePath}`
+        : null;
+    const completionsClose = completions.close;
+    useEffect(() => {
+        completionsClose();
+    }, [sessionKey, completionsClose]);
 
     const isStreaming = activeRequestId !== null;
     const providerId = provider as ChatProviderId;

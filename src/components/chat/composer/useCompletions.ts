@@ -238,7 +238,8 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
         setLoading(false);
     }, []);
 
-    // 拉取补全项（带请求序号防竞态）
+    // 拉取补全项（带请求序号防竞态 + 防抖，避免快速输入时对后端发起大量
+    // 文件系统扫描请求，导致主线程拥塞/界面卡死）。
     useEffect(() => {
         if (!active) return;
         const seq = ++reqSeq.current;
@@ -304,18 +305,25 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
             }
         };
 
-        fetchItems()
-            .then((result) => {
-                if (seq !== reqSeq.current) return;
-                setItems(result);
-                setActiveIndex(0);
-                setLoading(false);
-            })
-            .catch(() => {
-                if (seq !== reqSeq.current) return;
-                setItems([]);
-                setLoading(false);
-            });
+        // `@` 文件补全要遍历文件系统，开销最大 → 给更长的防抖；
+        // 其余触发符走内存/轻量数据源，短防抖即可保持响应。
+        const debounceMs = active.trigger === '@' ? 220 : 60;
+        const timer = setTimeout(() => {
+            fetchItems()
+                .then((result) => {
+                    if (seq !== reqSeq.current) return;
+                    setItems(result);
+                    setActiveIndex(0);
+                    setLoading(false);
+                })
+                .catch(() => {
+                    if (seq !== reqSeq.current) return;
+                    setItems([]);
+                    setLoading(false);
+                });
+        }, debounceMs);
+
+        return () => clearTimeout(timer);
     }, [active, cwd, provider]);
 
     const onTextChange = useCallback(
