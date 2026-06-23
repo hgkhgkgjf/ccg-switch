@@ -189,3 +189,36 @@ Restored missing Trellis workspace journal state and documented duplicate toolbl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: @文件引用 chip 标签 + Toast 玻璃拟态样式
+
+**Date**: 2026-06-23
+**Task**: @文件引用 chip 标签 + Toast 玻璃拟态样式
+**Branch**: `cc-gui`
+
+### Summary
+
+输入框 textarea 改为 contenteditable，@选择文件后渲染为带图标/文件名/删除按钮的原子 chip，基于 plain-text 偏移统一处理光标/插入/文本提取（chip 还原为 @filepath）。Toast 移至右下角并改用玻璃拟态（半透明+backdrop-blur+左侧类型色条）。两任务均通过 npm run build 验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8beee23` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
