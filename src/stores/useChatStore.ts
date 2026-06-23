@@ -322,6 +322,7 @@ interface ChatState {
     }) => Promise<boolean>;
     loadSession: (session: SessionMeta) => Promise<void>;
     loadActiveSessionFullHistory: () => Promise<ChatMessage[] | null>;
+    expandActiveSessionHistory: () => Promise<void>;
     startNewSession: (cwd?: string | null) => Promise<void>;
     abort: () => Promise<void>;
     clear: () => Promise<void>;
@@ -1357,6 +1358,116 @@ export const useChatStore = create<ChatState>((set, get) => ({
             );
             set({lastSessionLoadMetrics: errorMetrics, error: errorText});
             return null;
+        }
+    },
+
+    expandActiveSessionHistory: async () => {
+        const stateBeforeLoad = get();
+        const session = stateBeforeLoad.activeSession;
+        if (!session || !isChatProvider(session.providerId)) {
+            return;
+        }
+        // 仅在仍处于「窗口模式」时扩展；其它状态意味着已是完整历史或正在加载。
+        if (stateBeforeLoad.lastSessionLoadMetrics?.status !== 'windowed') {
+            return;
+        }
+
+        const loadToken = latestSessionLoadToken;
+        const sessionKey = getSessionSelectionKey(session);
+        const startedAt = nowMs();
+        const currentMetrics = stateBeforeLoad.lastSessionLoadMetrics?.sessionKey === sessionKey
+            ? stateBeforeLoad.lastSessionLoadMetrics
+            : createSessionLoadMetrics(session, startedAt);
+
+        const applyFullHistory = (mappedHistory: ChatMessage[]): void => {
+            rememberSessionHistory(session, mappedHistory);
+        };
+
+        const cachedHistory = getCachedSessionHistory(session);
+        if (cachedHistory) {
+            if (!isActiveSessionLoadCurrent(get(), session, loadToken)) {
+                return;
+            }
+            applyFullHistory(cachedHistory);
+            const completedAt = nowMs();
+            const cacheMetrics = finishSessionLoadMetrics(
+                {
+                    ...currentMetrics,
+                    cacheHit: true,
+                    windowMessageCount: cachedHistory.length,
+                    totalMessageCount: cachedHistory.length,
+                    fullMessageCount: cachedHistory.length,
+                    fullLoadMs: currentMetrics.fullLoadMs ?? 0,
+                    fullMapMs: currentMetrics.fullMapMs ?? 0,
+                    error: null,
+                },
+                completedAt,
+                'complete',
+            );
+            set({messages: cachedHistory, lastSessionLoadMetrics: cacheMetrics, error: null});
+            return;
+        }
+
+        const fullLoadStartedAt = nowMs();
+        set({
+            lastSessionLoadMetrics: {
+                ...currentMetrics,
+                status: 'loading',
+                completedAt: null,
+                elapsedMs: null,
+                error: null,
+            },
+            error: null,
+        });
+
+        try {
+            const history = await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
+                providerId: session.providerId,
+                sourcePath: session.sourcePath,
+            });
+            const fullLoadedAt = nowMs();
+            if (!isActiveSessionLoadCurrent(get(), session, loadToken)) {
+                return;
+            }
+
+            const mappedHistory = await mapHistoryMessagesInChunks(session, history);
+            const fullMappedAt = nowMs();
+            if (!isActiveSessionLoadCurrent(get(), session, loadToken)) {
+                return;
+            }
+
+            applyFullHistory(mappedHistory);
+            const fullMetrics = finishSessionLoadMetrics(
+                {
+                    ...currentMetrics,
+                    cacheHit: false,
+                    windowMessageCount: mappedHistory.length,
+                    totalMessageCount: history.length,
+                    fullMessageCount: mappedHistory.length,
+                    fullLoadMs: fullLoadedAt - fullLoadStartedAt,
+                    fullMapMs: fullMappedAt - fullLoadedAt,
+                    error: null,
+                },
+                fullMappedAt,
+                'complete',
+            );
+            set({messages: mappedHistory, lastSessionLoadMetrics: fullMetrics, error: null});
+        } catch (e) {
+            if (!isActiveSessionLoadCurrent(get(), session, loadToken)) {
+                return;
+            }
+            // 失败时保留当前窗口化的可见消息，仅记录错误并维持 windowed 状态以便重试。
+            const errorText = String(e);
+            const errorMetrics = finishSessionLoadMetrics(
+                {
+                    ...currentMetrics,
+                    status: 'windowed',
+                },
+                nowMs(),
+                'windowed',
+                errorText,
+            );
+            set({lastSessionLoadMetrics: errorMetrics, error: errorText});
         }
     },
 

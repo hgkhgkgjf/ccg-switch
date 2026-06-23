@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Large History First-Paint Contract + Chat Session Transition Abort Boundary define the loadToken ownership rules and the windowed-vs-complete status contract this fix must respect"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component structure conventions for the MessageList/ChatPage prop additions"}

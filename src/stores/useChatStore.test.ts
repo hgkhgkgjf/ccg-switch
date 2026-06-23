@@ -920,6 +920,117 @@ describe('useChatStore session transitions', () => {
         });
     });
 
+    it('expands a windowed session into the full transcript and caches it', async () => {
+        const fullHistory: UnifiedSessionMessage[] = Array.from({length: 240}, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `expand history ${index}`,
+            ts: new Date(1_786_000_000_000 + index).toISOString(),
+        }));
+
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_message_window') {
+                return buildTestHistoryWindow(fullHistory.slice(-120), 120, fullHistory.length, false);
+            }
+            if (command === 'get_unified_session_messages') {
+                return fullHistory;
+            }
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+        expect(useChatStore.getState().messages).toHaveLength(120);
+        expect(useChatStore.getState().lastSessionLoadMetrics).toMatchObject({status: 'windowed'});
+
+        await useChatStore.getState().expandActiveSessionHistory();
+
+        expect(tauriMocks.invoke).toHaveBeenCalledTimes(2);
+        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(2, 'get_unified_session_messages', {
+            providerId: loadedSession.providerId,
+            sourcePath: loadedSession.sourcePath,
+        });
+        expect(useChatStore.getState().messages).toHaveLength(240);
+        expect(useChatStore.getState().messages[0]).toMatchObject({
+            id: `history-codex-${loadedSession.sessionId}-0`,
+            content: 'expand history 0',
+        });
+        expect(useChatStore.getState().lastSessionLoadMetrics).toMatchObject({
+            status: 'complete',
+            fullMessageCount: 240,
+            cacheHit: false,
+        });
+
+        // A second expand reuses the cached complete history without another backend read.
+        await useChatStore.getState().expandActiveSessionHistory();
+        expect(tauriMocks.invoke).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops a late expansion result after the session-load token advances', async () => {
+        const fullHistory: UnifiedSessionMessage[] = Array.from({length: 240}, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `late expand history ${index}`,
+            ts: new Date(1_786_000_000_000 + index).toISOString(),
+        }));
+        let resolveFull: ((value: UnifiedSessionMessage[]) => void) | null = null;
+
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'get_unified_session_message_window') {
+                return Promise.resolve(buildTestHistoryWindow(fullHistory.slice(-120), 120, fullHistory.length, false));
+            }
+            if (command === 'get_unified_session_messages') {
+                return new Promise<UnifiedSessionMessage[]>((resolve) => {
+                    resolveFull = resolve;
+                });
+            }
+            if (command === 'chat_abort') return Promise.resolve(undefined);
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+        expect(useChatStore.getState().messages).toHaveLength(120);
+
+        const expandPromise = useChatStore.getState().expandActiveSessionHistory();
+        await Promise.resolve();
+        expect(resolveFull).not.toBeNull();
+
+        // User starts a brand-new session before the expansion resolves -> token advances.
+        await useChatStore.getState().startNewSession(null);
+
+        resolveFull!(fullHistory);
+        await expandPromise;
+
+        // The late full-history result must not overwrite the new (empty) transcript.
+        expect(useChatStore.getState().messages).toHaveLength(0);
+        expect(useChatStore.getState().activeSession).toBeNull();
+    });
+
+    it('keeps the windowed transcript and records an error when expansion fails', async () => {
+        const fullHistory: UnifiedSessionMessage[] = Array.from({length: 240}, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `failing expand history ${index}`,
+            ts: new Date(1_786_000_000_000 + index).toISOString(),
+        }));
+
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'get_unified_session_message_window') {
+                return Promise.resolve(buildTestHistoryWindow(fullHistory.slice(-120), 120, fullHistory.length, false));
+            }
+            if (command === 'get_unified_session_messages') {
+                return Promise.reject(new Error('history unreadable'));
+            }
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+        expect(useChatStore.getState().messages).toHaveLength(120);
+
+        await useChatStore.getState().expandActiveSessionHistory();
+
+        // Visible window is preserved, status stays windowed so the user can retry, error is recorded.
+        expect(useChatStore.getState().messages).toHaveLength(120);
+        expect(useChatStore.getState().lastSessionLoadMetrics).toMatchObject({status: 'windowed'});
+        expect(useChatStore.getState().error).toBe('Error: history unreadable');
+    });
+
     it('records window timings for a large history session without full-stage noise', async () => {
         const fullHistory: UnifiedSessionMessage[] = Array.from({length: 5000}, (_, index) => ({
             role: index % 2 === 0 ? 'user' : 'assistant',

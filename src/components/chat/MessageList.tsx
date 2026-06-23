@@ -8,9 +8,11 @@ import {
     getEffectiveRevealedCount,
     getManualRevealWindow,
     getNextRevealState,
+    getRevealStateAfterServerExpansion,
     getScrollTopAfterPrepend,
     REVEAL_PAGE_SIZE,
     shouldAutoRevealEarlierMessages,
+    shouldLoadEarlierServerHistory,
     type TranscriptRevealState,
     VISIBLE_MESSAGE_WINDOW,
 } from '../../utils/chatUiBehavior';
@@ -32,6 +34,9 @@ interface MessageListProps {
     onCollapsedCountChange?: (count: number) => void;
     onMessageNodeRef?: (messageId: string, node: HTMLElement | null) => void;
     onRetryFullHistorySearch?: () => void;
+    hasEarlierServerHistory?: boolean;
+    isLoadingEarlierServerHistory?: boolean;
+    onLoadEarlierServerHistory?: () => void;
 }
 
 function collectToolResultsInRange(
@@ -57,6 +62,9 @@ export default function MessageList({
     onCollapsedCountChange,
     onMessageNodeRef,
     onRetryFullHistorySearch,
+    hasEarlierServerHistory = false,
+    isLoadingEarlierServerHistory = false,
+    onLoadEarlierServerHistory,
 }: MessageListProps) {
     const { t } = useTranslation();
     const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
@@ -72,6 +80,10 @@ export default function MessageList({
         previousScrollTop: number;
     } | null>(null);
     const revealPendingRef = useRef(false);
+    const prevLastMessageIdRef = useRef<string | null>(null);
+    const prevTranscriptKeyRef = useRef<string | null>(null);
+    const prevMessagesLengthRef = useRef(0);
+    const prevVisibleRenderableCountRef = useRef(0);
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const isSearching = normalizedSearchQuery.length > 0;
     const showFullHistorySearchLoading = isSearching && fullHistorySearchStatus === 'loading';
@@ -94,8 +106,46 @@ export default function MessageList({
         'chat.layout.searchFullHistoryError',
         'Complete history search failed. Current results only cover the loaded window.',
     );
+    const loadEarlierServerHistoryLabel = translateWithFallback(
+        'chat.layout.loadEarlierServerHistory',
+        'Load earlier history from this session',
+    );
+    const loadingEarlierServerHistoryLabel = translateWithFallback(
+        'chat.layout.loadingEarlierServerHistory',
+        'Loading earlier history...',
+    );
 
     const transcriptKey = messages[0]?.id ?? '';
+    const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
+
+    // 服务端补全完整历史时，messages 由窗口尾部（如 120 条）被替换为完整记录（如 5000 条），
+    // 第一条消息 id 从窗口首条变为真正的首条。若不迁移 reveal 状态，transcriptKey 改变会让
+    // revealedCount 归零、视图被甩回最近 15 条尾部。这里检测此类「前置扩展」并迁移 reveal 状态，
+    // 让之前可见的消息保持可见，并额外多露出一页更早历史。
+    if (!isSearching) {
+        const expansion = getRevealStateAfterServerExpansion({
+            prevLastMessageId: prevLastMessageIdRef.current,
+            prevTranscriptKey: prevTranscriptKeyRef.current,
+            prevMessagesLength: prevMessagesLengthRef.current,
+            prevVisibleRenderableCount: prevVisibleRenderableCountRef.current,
+            nextLastMessageId: lastMessageId,
+            nextTranscriptKey: transcriptKey,
+            nextMessagesLength: messages.length,
+        });
+
+        if (expansion.isServerExpansion && expansion.revealState) {
+            // 同步更新 refs，避免迁移后的重渲染再次命中扩展判定造成循环。
+            prevLastMessageIdRef.current = lastMessageId;
+            prevTranscriptKeyRef.current = transcriptKey;
+            prevMessagesLengthRef.current = messages.length;
+            const migratedRevealState = expansion.revealState;
+            if (revealState.transcriptKey !== migratedRevealState.transcriptKey
+                || revealState.revealedCount !== migratedRevealState.revealedCount) {
+                setRevealState(migratedRevealState);
+            }
+        }
+    }
+
     const revealedCount = getEffectiveRevealedCount(revealState, transcriptKey);
     const requestedVisibleCount = VISIBLE_MESSAGE_WINDOW + revealedCount;
     const renderableWindow = useMemo(() => {
@@ -178,6 +228,14 @@ export default function MessageList({
         onCollapsedCountChange?.(collapsedCount);
     }, [collapsedCount, onCollapsedCountChange]);
 
+    // 提交后记录本次渲染的快照，供下一次「前置扩展」检测使用。
+    useEffect(() => {
+        prevLastMessageIdRef.current = lastMessageId;
+        prevTranscriptKeyRef.current = transcriptKey;
+        prevMessagesLengthRef.current = messages.length;
+        prevVisibleRenderableCountRef.current = renderableMessages.length;
+    }, [lastMessageId, messages.length, renderableMessages.length, transcriptKey]);
+
     const revealEarlierMessages = useCallback((scrollEl?: HTMLDivElement | null) => {
         if (collapsedCount <= 0) return;
 
@@ -219,32 +277,72 @@ export default function MessageList({
         });
     }, [scrollContainerRef, visibleMessages.length]);
 
+    const triggerLoadEarlierServerHistory = useCallback((scrollEl?: HTMLDivElement | null) => {
+        // 在 messages 增长前捕获滚动锚点，使完整历史前置插入后视口停在原来的顶部消息。
+        if (scrollEl) {
+            revealAnchorRef.current = {
+                previousScrollHeight: scrollEl.scrollHeight,
+                previousScrollTop: scrollEl.scrollTop,
+            };
+            revealPendingRef.current = true;
+        }
+        onLoadEarlierServerHistory?.();
+    }, [onLoadEarlierServerHistory]);
+
     const handleRevealEarlierMessages = () => {
         if (revealPendingRef.current || isSearching) return;
-        revealEarlierMessages(scrollContainerRef?.current);
+        if (collapsedCount > 0) {
+            revealEarlierMessages(scrollContainerRef?.current);
+            return;
+        }
+        if (hasEarlierServerHistory && !isLoadingEarlierServerHistory) {
+            triggerLoadEarlierServerHistory(scrollContainerRef?.current);
+        }
     };
 
     const handleAutoRevealScroll = useCallback(() => {
         const scrollEl = scrollContainerRef?.current;
-        if (!scrollEl || !shouldAutoRevealEarlierMessages({
+        if (!scrollEl) return;
+
+        if (shouldAutoRevealEarlierMessages({
             scrollTop: scrollEl.scrollTop,
             collapsedCount,
             isSearching,
             revealPending: revealPendingRef.current,
         })) {
+            revealEarlierMessages(scrollEl);
             return;
         }
 
-        revealEarlierMessages(scrollEl);
-    }, [collapsedCount, isSearching, revealEarlierMessages, scrollContainerRef]);
+        if (revealPendingRef.current) return;
+
+        if (shouldLoadEarlierServerHistory({
+            scrollTop: scrollEl.scrollTop,
+            collapsedCount,
+            isSearching,
+            hasEarlierServerHistory,
+            isLoadingEarlierServerHistory,
+        })) {
+            triggerLoadEarlierServerHistory(scrollEl);
+        }
+    }, [
+        collapsedCount,
+        hasEarlierServerHistory,
+        isLoadingEarlierServerHistory,
+        isSearching,
+        revealEarlierMessages,
+        scrollContainerRef,
+        triggerLoadEarlierServerHistory,
+    ]);
 
     useEffect(() => {
         const scrollEl = scrollContainerRef?.current;
-        if (!scrollEl || isSearching || collapsedCount <= 0) return undefined;
+        if (!scrollEl || isSearching) return undefined;
+        if (collapsedCount <= 0 && !hasEarlierServerHistory) return undefined;
 
         scrollEl.addEventListener('scroll', handleAutoRevealScroll, {passive: true});
         return () => scrollEl.removeEventListener('scroll', handleAutoRevealScroll);
-    }, [collapsedCount, handleAutoRevealScroll, isSearching, scrollContainerRef]);
+    }, [collapsedCount, handleAutoRevealScroll, hasEarlierServerHistory, isSearching, scrollContainerRef]);
 
     return (
         <div className="space-y-1 pb-6">
@@ -296,6 +394,24 @@ export default function MessageList({
                         onClick={handleRevealEarlierMessages}
                     >
                         {showEarlierLabel}
+                    </button>
+                </div>
+            )}
+
+            {!isSearching && collapsedCount <= 0 && hasEarlierServerHistory && (
+                <div className="mx-auto flex w-full max-w-4xl justify-center py-1">
+                    <button
+                        type="button"
+                        className="flex items-center gap-1 rounded-full border border-base-300 bg-base-100/80 px-3 py-1 text-[11px] text-base-content/55 shadow-sm backdrop-blur transition-colors hover:border-primary/35 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={isLoadingEarlierServerHistory ? loadingEarlierServerHistoryLabel : loadEarlierServerHistoryLabel}
+                        aria-label={isLoadingEarlierServerHistory ? loadingEarlierServerHistoryLabel : loadEarlierServerHistoryLabel}
+                        disabled={isLoadingEarlierServerHistory}
+                        onClick={handleRevealEarlierMessages}
+                    >
+                        {isLoadingEarlierServerHistory && (
+                            <Loader2 size={11} className="animate-spin" />
+                        )}
+                        {isLoadingEarlierServerHistory ? loadingEarlierServerHistoryLabel : loadEarlierServerHistoryLabel}
                     </button>
                 </div>
             )}

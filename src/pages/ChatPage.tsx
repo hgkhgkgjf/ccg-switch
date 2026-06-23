@@ -133,6 +133,7 @@ export default function ChatPage() {
         clear,
         loadSession,
         loadActiveSessionFullHistory,
+        expandActiveSessionHistory,
         startNewSession,
         answerAskUserQuestion,
         answerToolPermission,
@@ -259,6 +260,10 @@ export default function ChatPage() {
     const searchSourceMessages = isSearchingTranscript && fullHistorySearchMessages
         ? fullHistorySearchMessages
         : messages;
+    const hasEarlierServerHistory = !isSearchingTranscript
+        && lastSessionLoadMetrics?.status === 'windowed';
+    const isLoadingEarlierServerHistory = !isSearchingTranscript
+        && lastSessionLoadMetrics?.status === 'loading';
     const baseNavigationWindow = useMemo(() => {
         if (isSearchingTranscript) return null;
         return getRecentRenderableMessages(messages, VISIBLE_MESSAGE_WINDOW);
@@ -627,6 +632,10 @@ export default function ChatPage() {
         setFullHistorySearchRetryCount((count) => count + 1);
     }, []);
 
+    const handleLoadEarlierServerHistory = useCallback(() => {
+        void expandActiveSessionHistory();
+    }, [expandActiveSessionHistory]);
+
     const handleSelectStatusTool = useCallback((tool: ChatStatusToolSummary) => {
         const scrollEl = scrollRef.current;
         if (!scrollEl) return;
@@ -923,6 +932,9 @@ export default function ChatPage() {
                                 onCollapsedCountChange={setCollapsedAnchorCount}
                                 onMessageNodeRef={handleMessageNodeRef}
                                 onRetryFullHistorySearch={handleRetryFullHistorySearch}
+                                hasEarlierServerHistory={hasEarlierServerHistory}
+                                isLoadingEarlierServerHistory={isLoadingEarlierServerHistory}
+                                onLoadEarlierServerHistory={handleLoadEarlierServerHistory}
                             />
                         </div>
 

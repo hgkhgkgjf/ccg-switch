@@ -843,160 +843,143 @@ const result = findToolResult(messages, toolUse.id, assistantMessageIndex);
 
 ---
 
-## Scenario: Chat Transcript Window Calculation Contract
+## Scenario: Chat History Scroll-Load Two-Tier Window Contract
+
+> **Correction note**: An earlier version of this section blamed an "early-termination
+> bug" in `getRecentRenderableMessages()`. That diagnosis was WRONG. That function's loop
+> uses `continue` (not `break`), already traverses the full array, and computes
+> `hiddenRenderableCount` correctly. The real truncation has nothing to do with render-layer
+> window math — it is a **data-layer** boundary described below.
 
 ### 1. Scope / Trigger
 
-- Trigger: chat transcript rendering uses `getRecentRenderableMessages()` to compute visible window + hidden count for progressive reveal UI
-- This is a frontend data-structure contract. Window functions must compute accurate `hiddenRenderableCount` across the full message array to support multi-page scroll-to-load.
+- Trigger: a user opens a large historical chat session and scrolls up to read older messages.
+- This is a cross-layer (store ↔ page ↔ component) contract spanning TWO distinct windows that
+  are easy to conflate:
+  1. **Data window** — how many messages the store has actually loaded into `messages` from the
+     backend (`useChatStore.loadSession` loads only the last `SESSION_HISTORY_FIRST_PAINT_LIMIT`
+     = 120 for large histories, status `windowed`).
+  2. **Render window** — how many of the in-memory messages `MessageList` chooses to paint
+     (`VISIBLE_MESSAGE_WINDOW` + revealed pages, via `getRecentRenderableMessages` /
+     `getManualRevealWindow`).
 
-### 2. Signatures
+### 2. The real root cause
 
-```ts
-interface RenderableMessageWindow {
-    renderableMessages: RenderableMessage[];
-    hiddenRenderableCount: number;
-    totalRenderableCount: number;
-}
+Scroll-reveal (`shouldAutoRevealEarlierMessages` / `getManualRevealWindow`) only pages within the
+**data window**. Once all in-memory earlier messages are revealed, `collapsedCount` reaches 0 and
+reveal stops — but messages older than the 120-message tail were **never fetched from the
+backend**. The transcript visibly truncates ("明明上面还有，但滚不动了") even though the render-layer
+window math is correct.
 
-function getRecentRenderableMessages(
-    messages: ChatMessage[],
-    visibleCount: number,
-): RenderableMessageWindow;
-
-function getManualRevealWindow({
-    remainingHiddenCount: number,
-    revealedCount: number,
-    pageSize?: number,
-}): {
-    totalEarlierMessages: number;
-    collapsedCount: number;
-    nextRevealCount: number;
-};
-
-function getNextRevealState(
-    state: TranscriptRevealState,
-    transcriptKey: string,
-    totalEarlierMessages: number,
-    pageSize?: number,
-): TranscriptRevealState;
-```
+The only pre-existing full-history fetch path was search
+(`shouldRequestFullHistoryForSearch` → `loadActiveSessionFullHistory`). Normal browsing had no
+bridge from "render window exhausted" to "load more from the backend".
 
 ### 3. Contracts
 
-- `getRecentRenderableMessages` must traverse the **entire message array** to collect all renderable messages before slicing the visible window, not terminate traversal after collecting `visibleCount` items.
-- `hiddenRenderableCount` must equal `totalRenderableCount - renderableMessages.length` even when `visibleCount` exceeds the actual renderable count.
-- `getManualRevealWindow` computes `totalEarlierMessages = remainingHiddenCount + revealedCount`. This stable total is the baseline for `getNextRevealState()` and must not be confused with the remaining count.
-- `getNextRevealState(state, transcriptKey, totalEarlierMessages, pageSize)` advances `revealedCount` by `pageSize` up to `totalEarlierMessages`. Passing `remainingHiddenCount` instead causes premature reveal termination.
-- `shouldAutoRevealEarlierMessages({ scrollTop, collapsedCount, isSearching, revealPending })` only triggers when `collapsedCount > 0`. If window calculation incorrectly reports zero while earlier history exists, auto-reveal stops.
-- `MessageList` passes `renderableWindow.hiddenRenderableCount` (remaining hidden) to `getManualRevealWindow`, which combines it with `revealedCount` to produce `totalEarlierMessages` for reveal advancement.
+- Reaching the top of the in-memory window is an **explicit full-history intent**, on par with
+  entering a search query. It is NOT the forbidden first-paint auto-hydration in the "Large
+  History First-Paint Contract" — that rule forbids hydrating the full transcript on session
+  *click*, not on an explicit scroll-to-top gesture.
+- `useChatStore.expandActiveSessionHistory()` is the browse-mode bridge:
+  - No-op unless `lastSessionLoadMetrics.status === 'windowed'`, there is an active chat-provider
+    session, and no load is already in flight (it synchronously sets `status: 'loading'` before
+    awaiting, which doubles as the in-flight guard).
+  - Reuses the `latestSessionLoadToken` / `isActiveSessionLoadCurrent` ownership guard. Every
+    `set()` after an `await` must re-check the token so a late full-history result cannot
+    overwrite a transcript after the user sent a new prompt, switched sessions, cleared, or
+    started a new session.
+  - On success: `rememberSessionHistory`, replace visible `messages` with the full mapped
+    transcript, set metrics `status = 'complete'`. On cache hit, serve from cache without a
+    backend round trip.
+  - On failure: keep the current windowed transcript, set `error`, and KEEP `status = 'windowed'`
+    so the user can retry.
+- `loadActiveSessionFullHistory()` (the search path) stays unchanged: it returns the mapped array
+  for search without permanently hydrating browse `messages`. Both paths share the
+  `rememberSessionHistory` / `getCachedSessionHistory` cache.
+- `ChatPage` derives `hasEarlierServerHistory = !isSearching && status === 'windowed'` and
+  `isLoadingEarlierServerHistory = !isSearching && status === 'loading'`, passing them plus an
+  `onLoadEarlierServerHistory` callback to `MessageList`.
+- In `MessageList`, in-window reveal (`shouldAutoRevealEarlierMessages`, fires when
+  `collapsedCount > 0`) and server load (`shouldLoadEarlierServerHistory`, fires only when
+  `collapsedCount === 0` and `hasEarlierServerHistory`) are **mutually exclusive**. The scroll
+  handler checks reveal first, server-load second. The explicit top button remains available when
+  `hasEarlierServerHistory` is true even if in-window `collapsedCount === 0`.
 
-### 4. Validation & Error Matrix
+### 4. Scroll anchoring across server expansion
+
+When `expandActiveSessionHistory()` replaces the 120-message array with the full transcript,
+`transcriptKey = messages[0]?.id` changes (old top was the window's first id, new top is the true
+first id). A naive implementation resets `revealedCount` to 0 and snaps the view back to the
+recent tail — the user scrolled UP and gets thrown to the BOTTOM.
+
+Contract for `MessageList`:
+
+- Detect a **server-driven prepend expansion**: same session (LAST message id unchanged) but
+  `messages.length` grew and the FIRST message id changed. Track previous values in refs.
+- On detection, migrate `revealState` to the new `transcriptKey` with a `revealedCount` large
+  enough to keep all previously-visible renderable messages visible PLUS one `REVEAL_PAGE_SIZE`
+  page of newly-available older messages. The migration math lives in the pure, unit-tested
+  helper `getRevealStateAfterServerExpansion()` in `chatUiBehavior.ts` (reveal counts are in
+  RENDERABLE-message units, not raw-message units).
+- Capture the scroll anchor (`scrollHeight` / `scrollTop` into `revealAnchorRef`) before the
+  array grows and restore via `getScrollTopAfterPrepend` after the new render, reusing the same
+  mechanism as local prepend-reveal.
+- A genuine session SWITCH (both first AND last id change) must still reset reveal to the tail.
+
+### 5. Validation & Error Matrix
 
 | Condition | Required behavior |
 |-----------|-------------------|
-| 100 messages, `visibleCount = 15` | `hiddenRenderableCount === 85`, window shows last 15 |
-| First reveal (+30): `visibleCount = 45` | `hiddenRenderableCount === 55`, window shows last 45 |
-| Second reveal (+30): `visibleCount = 75` | `hiddenRenderableCount === 25`, window shows last 75 |
-| Third reveal (+30): `visibleCount = 105` | `hiddenRenderableCount === 0`, window shows all 100 |
-| Mixed 50 renderable + 50 system messages, `visibleCount = 30` | `hiddenRenderableCount === 20` (only renderable counted) |
-| `visibleCount` exceeds `totalRenderableCount` | `hiddenRenderableCount === 0`, all messages returned |
-| Early-termination loop after collecting window | ❌ `hiddenRenderableCount` incomplete, reveal stops prematurely |
+| `status === 'windowed'`, scroll to top, in-window collapsed exhausted | `expandActiveSessionHistory()` fires once, loads full transcript |
+| `expandActiveSessionHistory()` while already loading | No-op (status is `loading`, not `windowed`) |
+| Full-history result returns after a new prompt / session switch | Dropped via token guard; transcript not overwritten |
+| Full-history load fails | Keep windowed transcript, set `error`, keep `status === 'windowed'` for retry |
+| Cache hit | Replace `messages` from cache, `status === 'complete'`, no backend call |
+| Server expansion completes (same last id, grown length) | Previously-visible messages stay put; reveal state migrated, not reset |
+| Session switch (different last id) | Reveal resets to recent tail |
+| `collapsedCount > 0` | Only in-window reveal fires; server load suppressed |
 
-### 5. Good/Base/Bad Cases
+### 6. Good/Base/Bad Cases
 
-- Good: user scrolls to top of 100-message transcript four times, each reveal loads 30 more until `hiddenRenderableCount` reaches zero and scroll-load stops naturally
-- Base: transcript with exactly `VISIBLE_MESSAGE_WINDOW` messages shows full history immediately with zero hidden count
-- Bad: after two reveals (45 visible of 100 total), user scrolls to top but no more messages load because `hiddenRenderableCount` prematurely dropped to zero
+- Good: user opens a 5000-message session (120 loaded), scrolls up through the 120, reaches the
+  top, the full transcript loads, the view holds position, and reveal continues paging through
+  the now-complete history to the true top.
+- Base: a session with ≤120 messages loads `complete` on click; scroll-to-top never triggers a
+  server load because `status !== 'windowed'`.
+- Bad: scroll-to-top hydrates the full transcript but snaps the view to the recent 15-message
+  tail, hiding the older messages the user was trying to read.
 
-### 6. Tests Required
+### 7. Tests Required
 
-- Unit test: `getRecentRenderableMessages` with 100 messages and `visibleCount = 15/45/75/105` produces `hiddenRenderableCount` sequence `85/55/25/0`
-- Unit test: mixed renderable/non-renderable messages, verify hidden count reflects only renderable subset
-- Integration test: `MessageList` four-cycle reveal progression (15 -> 45 -> 75 -> 100+) with scroll-triggered auto-reveal
-- Unit test: `getManualRevealWindow` combines `remainingHiddenCount + revealedCount` into `totalEarlierMessages`
-- Unit test: `getNextRevealState` advances from 30 to 46 when `totalEarlierMessages === 46` (not stuck at 30)
-
-### 7. Wrong vs Correct
-
-#### Wrong (early-termination)
-
-```ts
-export function getRecentRenderableMessages(
-    messages: ChatMessage[],
-    visibleCount: number,
-): RenderableMessageWindow {
-    const maxVisible = Math.max(0, Math.floor(visibleCount));
-    const renderableMessages: RenderableMessage[] = [];
-    let hiddenRenderableCount = 0;
-
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (!shouldRenderChatMessage(message)) continue;
-
-        if (renderableMessages.length < maxVisible) {
-            renderableMessages.push({ message, originalIndex: index });
-            continue;
-        }
-
-        hiddenRenderableCount += 1;  // ⚠️ Counting, but may not complete full traversal
-    }
-
-    renderableMessages.reverse();
-
-    return {
-        renderableMessages,
-        hiddenRenderableCount,
-        totalRenderableCount: hiddenRenderableCount + renderableMessages.length,
-    };
-}
-```
-
-**Why it fails**: When `maxVisible` approaches `totalRenderableCount`, the loop may not complete full traversal due to non-renderable message gaps, causing `hiddenRenderableCount` to be incomplete.
-
-#### Correct (full-traversal then slice)
-
-```ts
-export function getRecentRenderableMessages(
-    messages: ChatMessage[],
-    visibleCount: number,
-): RenderableMessageWindow {
-    const maxVisible = Math.max(0, Math.floor(visibleCount));
-    
-    // Step 1: Full traversal to collect ALL renderable messages
-    const allRenderableMessages: RenderableMessage[] = [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (!shouldRenderChatMessage(message)) continue;
-        allRenderableMessages.push({ message, originalIndex: index });
-    }
-    
-    allRenderableMessages.reverse();
-    
-    // Step 2: Slice the window from the complete set
-    const totalRenderableCount = allRenderableMessages.length;
-    const hiddenRenderableCount = Math.max(0, totalRenderableCount - maxVisible);
-    const renderableMessages = allRenderableMessages.slice(hiddenRenderableCount);
-    
-    return {
-        renderableMessages,
-        hiddenRenderableCount,
-        totalRenderableCount,
-    };
-}
-```
+- Store test: `expandActiveSessionHistory()` on a `windowed` session calls
+  `get_unified_session_messages`, replaces `messages` with the full transcript, sets
+  `status = 'complete'`, and caches the history.
+- Store test: a late expansion result is dropped after the load token advances.
+- Store test: expansion failure keeps the windowed transcript and records `error`.
+- Helper test: `getRevealStateAfterServerExpansion()` migrates reveal state on a same-last-id
+  grow, returns no-op for first mount / pure append, and resets for a session switch.
+- `MessageList` test: windowed tail growing into the full transcript keeps previously-visible
+  messages rendered (reveal migrated, not reset to tail); a session switch resets to tail.
 
 ### 8. Root Cause History
 
-This window calculation flaw caused **three archived reveal regression tasks**:
+The truncation was misdiagnosed three times as a render-layer reveal problem:
 
-1. **`06-22-chat-top-scroll-reveal`**: Disabled auto-reveal to fix "can't reach top" symptom
-2. **`06-22-chat-reveal-pagination-regression`**: Fixed UI display logic but not the underlying window calculation
-3. **`06-22-06-22-chat-guarded-scroll-reveal`**: Restored auto-reveal with guards, but early-termination remained
+1. **`06-22-chat-top-scroll-reveal`**: Disabled auto-reveal to fix "can't reach top" symptom.
+2. **`06-22-chat-reveal-pagination-regression`**: Fixed UI total-vs-remaining count display.
+3. **`06-22-06-22-chat-guarded-scroll-reveal`**: Restored auto-reveal with re-entrancy guards.
 
-Each fix addressed trigger logic or state propagation without recognizing that `getRecentRenderableMessages` early collection stop prevented accurate hidden-count reporting. When `requestedVisibleCount` grew close to total, the function stopped traversing early, `hiddenRenderableCount` dropped to zero prematurely, and scroll-load halted.
+All three operated entirely inside the render window (trigger logic, reveal state math) and never
+reached the data-window boundary. The fix that actually resolved it
+(`06-22-06-22-chat-history-scroll-window-fix`) added the store→backend bridge plus scroll-anchored
+reveal-state migration.
 
-**Pattern**: Window functions that need to report "items remaining outside visible range" must complete full enumeration before windowing. Early-termination optimization only works when the UI does not depend on accurate remaining-count (e.g., infinite-scroll with no "X items left" display).
+**Pattern**: when a list shows a windowed tail of a larger backend dataset, "load more" UI must
+distinguish *render-window exhaustion* (page more in-memory items) from *data-window exhaustion*
+(fetch more from the source). Debugging only the render layer will keep reproducing the
+truncation. Always trace where the data actually stops before assuming the windowing math is
+wrong.
 
 ---
 

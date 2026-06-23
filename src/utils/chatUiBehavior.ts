@@ -749,11 +749,113 @@ export function shouldAutoRevealEarlierMessages({
     return Math.max(0, Math.floor(scrollTop)) <= Math.max(0, Math.floor(threshold));
 }
 
+interface LoadEarlierServerHistoryInput {
+    scrollTop: number;
+    collapsedCount: number;
+    isSearching: boolean;
+    hasEarlierServerHistory: boolean;
+    isLoadingEarlierServerHistory: boolean;
+    threshold?: number;
+}
+
+/**
+ * 当内存窗口里的折叠消息已全部展开（collapsedCount === 0），但磁盘上仍有更早的
+ * 历史（hasEarlierServerHistory）时，滚动到顶部应触发一次完整历史加载，而不是停下。
+ */
+export function shouldLoadEarlierServerHistory({
+    scrollTop,
+    collapsedCount,
+    isSearching,
+    hasEarlierServerHistory,
+    isLoadingEarlierServerHistory,
+    threshold = AUTO_REVEAL_SCROLL_THRESHOLD,
+}: LoadEarlierServerHistoryInput): boolean {
+    if (isSearching || isLoadingEarlierServerHistory || !hasEarlierServerHistory) {
+        return false;
+    }
+    if (collapsedCount > 0) {
+        return false;
+    }
+
+    return Math.max(0, Math.floor(scrollTop)) <= Math.max(0, Math.floor(threshold));
+}
+
 export function getEffectiveRevealedCount(
     state: TranscriptRevealState,
     transcriptKey: string,
 ): number {
     return state.transcriptKey === transcriptKey ? state.revealedCount : 0;
+}
+
+interface ServerExpansionRevealInput {
+    prevLastMessageId: string | null;
+    prevTranscriptKey: string | null;
+    prevMessagesLength: number;
+    prevVisibleRenderableCount: number;
+    nextLastMessageId: string | null;
+    nextTranscriptKey: string;
+    nextMessagesLength: number;
+    pageSize?: number;
+    visibleWindow?: number;
+}
+
+export interface ServerExpansionRevealResult {
+    isServerExpansion: boolean;
+    revealState: TranscriptRevealState | null;
+}
+
+/**
+ * 检测「服务端补全历史」式的前置扩展：会话未切换（最后一条消息 id 不变），
+ * 但消息数量增长且第一条消息 id 改变（更早的历史被前置插入）。
+ *
+ * 命中时返回迁移后的 reveal 状态：keyed 到新的 transcriptKey，并把之前可见的
+ * 全部消息保留可见，再额外多揭示一页（REVEAL_PAGE_SIZE）较早的消息，使用户
+ * 扩展后立刻能在原内容上方看到更早历史，而不是被甩回最近的窗口尾部。
+ *
+ * 未命中（首次挂载、会话切换、纯追加新消息）时返回 isServerExpansion = false，
+ * 由调用方走原有的「重置到尾部」逻辑。
+ */
+export function getRevealStateAfterServerExpansion({
+    prevLastMessageId,
+    prevTranscriptKey,
+    prevMessagesLength,
+    prevVisibleRenderableCount,
+    nextLastMessageId,
+    nextTranscriptKey,
+    nextMessagesLength,
+    pageSize = REVEAL_PAGE_SIZE,
+    visibleWindow = VISIBLE_MESSAGE_WINDOW,
+}: ServerExpansionRevealInput): ServerExpansionRevealResult {
+    const noExpansion: ServerExpansionRevealResult = {
+        isServerExpansion: false,
+        revealState: null,
+    };
+
+    if (prevMessagesLength <= 0 || !prevLastMessageId || !prevTranscriptKey) {
+        return noExpansion;
+    }
+    // 会话切换：最后一条消息 id 改变（或缺失），不属于前置扩展。
+    if (!nextLastMessageId || nextLastMessageId !== prevLastMessageId) {
+        return noExpansion;
+    }
+    // 第一条消息未变 / 数量未增长，不是真正的前置扩展。
+    if (nextTranscriptKey === prevTranscriptKey || nextMessagesLength <= prevMessagesLength) {
+        return noExpansion;
+    }
+
+    const safePageSize = Math.max(0, Math.floor(pageSize));
+    const safeWindow = Math.max(0, Math.floor(visibleWindow));
+    const safePrevVisible = Math.max(0, Math.floor(prevVisibleRenderableCount));
+    // 让扩展后的请求窗口 = 之前可见数量 + 一页，从而保留全部旧可见消息并多露出一页更早内容。
+    const revealedCount = Math.max(0, safePrevVisible + safePageSize - safeWindow);
+
+    return {
+        isServerExpansion: true,
+        revealState: {
+            transcriptKey: nextTranscriptKey,
+            revealedCount,
+        },
+    };
 }
 
 export function getClampedRevealState(

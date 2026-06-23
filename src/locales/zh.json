@@ -176,7 +176,9 @@
             "searchNoResults": "没有找到匹配消息",
             "searchFullHistoryLoading": "正在搜索完整历史中的更早匹配…",
             "searchFullHistoryError": "完整历史搜索失败，当前结果仅覆盖已加载窗口。",
-            "searchFullHistoryRetry": "重试"
+            "searchFullHistoryRetry": "重试",
+            "loadEarlierServerHistory": "加载此会话更早的历史",
+            "loadingEarlierServerHistory": "正在加载更早历史…"
         },
         "placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
         "richPlaceholder": "输入消息… @ 引用文件，# 调用子代理，! 插入预设，Enter 发送，Shift+Enter 换行",

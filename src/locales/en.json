@@ -187,7 +187,9 @@
             "searchNoResults": "No matching messages found",
             "searchFullHistoryLoading": "Searching complete history for older matches…",
             "searchFullHistoryError": "Complete history search failed. Current results only cover the loaded window.",
-            "searchFullHistoryRetry": "Retry"
+            "searchFullHistoryRetry": "Retry",
+            "loadEarlierServerHistory": "Load earlier history from this session",
+            "loadingEarlierServerHistory": "Loading earlier history…"
         },
         "placeholder": "Type a message. Enter to send, Shift+Enter for newline",
         "richPlaceholder": "Type a message… @ to reference files, # for subagents, ! for presets. Enter to send, Shift+Enter for newline",

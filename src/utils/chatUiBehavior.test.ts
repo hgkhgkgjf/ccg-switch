@@ -22,6 +22,7 @@ import {
     getNextRevealState,
     getPaneResizeHandleLabel,
     getPaneWidthsAfterResize,
+    getRevealStateAfterServerExpansion,
     getScrollTopAfterPrepend,
     getSdkMissingBannerText,
     highlightTranscriptToolAnchor,
@@ -29,6 +30,7 @@ import {
     shouldAutoRevealEarlierMessages,
     shouldBuildCompleteChatStatusSummary,
     shouldIgnoreChatSessionSelection,
+    shouldLoadEarlierServerHistory,
     shouldRequestFullHistoryForSearch,
     shouldShowDiffPaneReopenControl,
     TOOL_ANCHOR_JUMP_HIGHLIGHT_CLASS,
@@ -193,6 +195,62 @@ describe('chat UI behavior', () => {
         })).toBe(false);
     });
 
+    it('bridges scroll-to-top to a full-history load only when the in-window history is exhausted', () => {
+        // 内存窗口仍有折叠消息时，先本地展开，不触发服务端加载。
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 0,
+            collapsedCount: 12,
+            isSearching: false,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(false);
+        // 折叠消息已展开完且磁盘上还有更早历史，滚动到顶部触发加载。
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 0,
+            collapsedCount: 0,
+            isSearching: false,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(true);
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 48,
+            collapsedCount: 0,
+            isSearching: false,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(true);
+        // 超过阈值不触发。
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 49,
+            collapsedCount: 0,
+            isSearching: false,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(false);
+        // 没有更早历史 / 正在加载 / 搜索中都不触发。
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 0,
+            collapsedCount: 0,
+            isSearching: false,
+            hasEarlierServerHistory: false,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(false);
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 0,
+            collapsedCount: 0,
+            isSearching: false,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: true,
+        })).toBe(false);
+        expect(shouldLoadEarlierServerHistory({
+            scrollTop: 0,
+            collapsedCount: 0,
+            isSearching: true,
+            hasEarlierServerHistory: true,
+            isLoadingEarlierServerHistory: false,
+        })).toBe(false);
+    });
+
     it('disables history collapsing while searching so all matches stay visible', () => {
         expect(getCollapsedMessageWindow({
             filteredCount: 96,
@@ -212,6 +270,66 @@ describe('chat UI behavior', () => {
             previousScrollHeight: 1000,
             nextScrollHeight: 1600,
         })).toBe(620);
+    });
+
+    it('migrates reveal state when the server prepends the full transcript', () => {
+        // 之前窗口可见 45 条（15 默认窗口 + 30 已揭示），服务端补全完整历史后第一条 id 改变、
+        // 最后一条 id 不变、长度从 120 增长到 5000。迁移后应保留 45 条可见并多揭示一页（30）。
+        const result = getRevealStateAfterServerExpansion({
+            prevLastMessageId: 'history-...-4999',
+            prevTranscriptKey: 'history-...-4880',
+            prevMessagesLength: 120,
+            prevVisibleRenderableCount: 45,
+            nextLastMessageId: 'history-...-4999',
+            nextTranscriptKey: 'history-...-0',
+            nextMessagesLength: 5000,
+        });
+
+        expect(result.isServerExpansion).toBe(true);
+        // 45 之前可见 + 30 一页 - 15 默认窗口 = 60 揭示数（请求窗口 = 15 + 60 = 75 ≥ 之前 45 + 30）。
+        expect(result.revealState).toEqual({
+            transcriptKey: 'history-...-0',
+            revealedCount: 60,
+        });
+    });
+
+    it('treats a session switch as a reset rather than a server expansion', () => {
+        const result = getRevealStateAfterServerExpansion({
+            prevLastMessageId: 'session-a-last',
+            prevTranscriptKey: 'session-a-first',
+            prevMessagesLength: 120,
+            prevVisibleRenderableCount: 45,
+            nextLastMessageId: 'session-b-last',
+            nextTranscriptKey: 'session-b-first',
+            nextMessagesLength: 5000,
+        });
+
+        expect(result.isServerExpansion).toBe(false);
+        expect(result.revealState).toBeNull();
+    });
+
+    it('does not treat first mount or pure appends as a server expansion', () => {
+        // 首次挂载：没有上一帧快照。
+        expect(getRevealStateAfterServerExpansion({
+            prevLastMessageId: null,
+            prevTranscriptKey: null,
+            prevMessagesLength: 0,
+            prevVisibleRenderableCount: 0,
+            nextLastMessageId: 'history-...-119',
+            nextTranscriptKey: 'history-...-0',
+            nextMessagesLength: 120,
+        })).toEqual({isServerExpansion: false, revealState: null});
+
+        // 纯追加新消息：第一条 id 不变（不是前置扩展），最后一条 id 改变。
+        expect(getRevealStateAfterServerExpansion({
+            prevLastMessageId: 'history-...-118',
+            prevTranscriptKey: 'history-...-0',
+            prevMessagesLength: 119,
+            prevVisibleRenderableCount: 45,
+            nextLastMessageId: 'history-...-119',
+            nextTranscriptKey: 'history-...-0',
+            nextMessagesLength: 120,
+        })).toEqual({isServerExpansion: false, revealState: null});
     });
 
     it('marks a transcript tool anchor briefly after jumping to it', () => {

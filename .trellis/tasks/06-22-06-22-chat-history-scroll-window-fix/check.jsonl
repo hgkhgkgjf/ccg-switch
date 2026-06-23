@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify store action respects loadToken ownership and windowed/complete status contract; note the wrong early-termination section (commit 105c7b8) that must be corrected in Phase 3.3"}
