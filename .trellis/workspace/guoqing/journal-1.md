@@ -122,3 +122,37 @@ Restored missing Trellis workspace journal state and documented duplicate toolbl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 修复聊天历史滚动加载截断与助手消息聚类乱序
+
+**Date**: 2026-06-23
+**Task**: 修复聊天历史滚动加载截断与助手消息聚类乱序
+**Branch**: `cc-gui`
+
+### Summary
+
+两个聊天 bug 修复。(1) 滚动加载截断：根因是首屏只载入 120 条尾部窗口(windowed)，向上滚动只在内存内分页，无法触达更早的服务端历史。新增 expandActiveSessionHistory() 在窗口顶部触发完整历史加载，并迁移 reveal 状态+锚定滚动避免跳动。(2) 助手消息聚类乱序：根因是 live-merge 把所有文本拍进单个前置 text 块、store 忽略 [BLOCK_RESET]，并经 loadSession 提前返回固化到历史。Part A 让已结束会话从磁盘按源顺序重载；Part B 让 store 尊重 [BLOCK_RESET] 密封文本段，按到达顺序构建 raw.message.content。更新 state-management.md 两处契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `785adee` | (see git log) |
+| `be8a6e9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

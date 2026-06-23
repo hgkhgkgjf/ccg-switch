@@ -8,8 +8,8 @@
 
 @@@auto:current-status
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-06-22
+- **Total Sessions**: 7
+- **Last Active**: 2026-06-23
 @@@/auto:current-status
 
 ---
@@ -19,7 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~124 | Active |
+| `journal-1.md` | ~158 | Active |
 @@@/auto:active-documents
 
 ---
@@ -29,6 +29,7 @@
 @@@auto:session-history
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-06-23 | 修复聊天历史滚动加载截断与助手消息聚类乱序 | `785adee`, `be8a6e9` | `cc-gui` |
 | 6 | 2026-06-22 | 优化聊天界面：Dashboard悬浮窗、Diff换行对齐、图片附件预览 | `02d06ca` | `cc-gui` |
 | 5 | 2026-06-22 | Trellis Journal Consistency Repair | `9926b21` | `cc-gui` |
 | 4 | 2026-06-22 | Tool Call Visualization | `360c1c1`, `6c792c6`, `a33cdb8`, `ee57986`, `90246c4`, `98d835f`, `be49a16`, `34290a6`, `8f36c40`, `9d9ee7c` | `cc-gui` |
