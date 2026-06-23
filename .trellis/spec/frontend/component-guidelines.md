@@ -125,6 +125,13 @@ See `src/components/providers/ProviderCard.tsx` and
   `Search projects...`, `Projects`, `No projects`, `Sessions`, `No sessions`,
   `Refreshing sessions...`, and `Loading...` instead of raw
   `chat.sessionPanel.*` or `common.*` keys.
+  Session rows should also reuse the shared Chat provider brand icons for
+  supported providers instead of rendering a second text-only provider badge.
+  In the session list, `claude` and `codex` rows should use the same
+  `ProviderBrandIcon` glyphs as the composer/model selector so provider
+  identity stays visually consistent across the Chat UI. Keep readable
+  `title` / `aria-label` text for those icon badges, and preserve a text
+  fallback for unknown providers rather than forcing an unsupported icon.
   SDK dependency recovery UI follows this same rule. The SDK modal title,
   close action, panel heading, hint, refresh action, installed/not-installed
   state, install/uninstall action, and installing log placeholder must use a

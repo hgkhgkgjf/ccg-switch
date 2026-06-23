@@ -1,3 +1,8 @@
+## 迭代记录 2026-06-23 session provider icons
+
+- 本轮完成：把会话列表中的 `Claude` / `Codex` 文本 provider 标签替换为与聊天框模型切换区一致的共享 provider 图标。`ChatSessionSidebar.tsx` 新增 `SessionProviderBadge`，对 `claude/codex` 复用 `ProviderBrandIcon`，保留 `title` / `aria-label`，未知 provider 继续显示文本 fallback，不改会话缓存、选择或加载逻辑。
+- 本轮验证：RED：`npm test -- src/components/chat/chatSessionSidebarUtils.test.ts` 先失败 1 项，失败点为 `SessionProviderBadge` 未定义。GREEN 定向通过：同命令通过（1 file / 19 tests）。`npm run build` 通过；IDE `build_project` 通过，`problems: []`；`git diff --check -- src/components/chat/ChatSessionSidebar.tsx src/components/chat/chatSessionSidebarUtils.test.ts TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已清理。
+
 ## 迭代记录 2026-06-22 user image thumbnails
 
 - 本轮完成：优化用户消息上传图片展示。`ContentBlockRenderer` 在 `imageDisplay="user-thumbnail"` 模式下会把连续 `image` / `input_image` block 聚合为一个右对齐缩略图组；`App.css` 为用户缩略图组和缩略图画布设置固定尺寸、自动换行、主题适配背景，避免图片按原始尺寸撑满用户气泡；点击缩略图打开完整灯箱的既有逻辑保留。

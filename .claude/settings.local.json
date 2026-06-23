@@ -65,7 +65,8 @@
       "Bash(cd *)",
       "Bash(echo *)",
       "Read(//c/Users/Administrator/.codemoss/**)",
-      "Bash(pkill *)"
+      "Bash(pkill *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

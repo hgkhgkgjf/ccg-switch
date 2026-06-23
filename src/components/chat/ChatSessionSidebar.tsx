@@ -8,6 +8,7 @@ import {
     getCachedProjectSessions,
     getSessionProviderLabel,
     getVisibleProjectSessions,
+    isSupportedChatProvider,
     normalizeProjectPathForCache,
     rememberProjectSessions,
     sessionTitle,
@@ -16,6 +17,7 @@ import {
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
 } from './chatSessionSidebarUtils';
+import {ProviderBrandIcon} from './composer/ModelIcon';
 
 interface ProjectInfo {
     name: string;
@@ -30,6 +32,41 @@ interface ChatSessionSidebarProps {
     pendingSessionKey: string | null;
     onSessionSelect: (session: SessionMeta) => void;
     onNewSession: (cwd?: string | null) => void;
+}
+
+interface SessionProviderBadgeProps {
+    providerId: string;
+    providerLabel: string;
+    selected: boolean;
+}
+
+export function SessionProviderBadge({
+    providerId,
+    providerLabel,
+    selected,
+}: SessionProviderBadgeProps) {
+    const normalizedProviderId = providerId.trim().toLowerCase();
+    const supportedProviderId = normalizedProviderId === 'claude' || normalizedProviderId === 'codex'
+        ? normalizedProviderId
+        : null;
+
+    if (supportedProviderId && isSupportedChatProvider(supportedProviderId)) {
+        return (
+            <span
+                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded ${selected ? 'bg-primary/10' : 'bg-base-200/80'}`}
+                title={providerLabel}
+                aria-label={providerLabel}
+            >
+                <ProviderBrandIcon provider={supportedProviderId} size={14} colored />
+            </span>
+        );
+    }
+
+    return (
+        <span className={`rounded px-1.5 py-0.5 text-[10px] ${selected ? 'bg-primary/12 text-primary/80' : 'bg-base-200 text-base-content/50'}`}>
+            {providerLabel}
+        </span>
+    );
 }
 
 export default function ChatSessionSidebar({
@@ -430,13 +467,11 @@ export default function ChatSessionSidebar({
                                                         <span className="min-w-0 flex-1 truncate text-xs font-medium">
                                                             {sessionTitle(session)}
                                                         </span>
-                                                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${
-                                                            selected
-                                                                ? 'bg-primary/12 text-primary/80'
-                                                                : 'bg-base-200 text-base-content/50'
-                                                        }`}>
-                                                            {providerLabel}
-                                                        </span>
+                                                        <SessionProviderBadge
+                                                            providerId={session.providerId}
+                                                            providerLabel={providerLabel}
+                                                            selected={selected}
+                                                        />
                                                     </div>
                                                     <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
                                                         {isPending && (

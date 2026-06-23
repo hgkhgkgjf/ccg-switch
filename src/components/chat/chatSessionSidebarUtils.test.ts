@@ -4,7 +4,7 @@ import {createInstance} from 'i18next';
 import {I18nextProvider} from 'react-i18next';
 import {describe, expect, it} from 'vitest';
 import type {SessionMeta} from '../../types/session';
-import ChatSessionSidebar from './ChatSessionSidebar';
+import ChatSessionSidebar, {SessionProviderBadge} from './ChatSessionSidebar';
 import {
     filterProjectChatSessions,
     filterSupportedChatSessions,
@@ -99,6 +99,38 @@ describe('chatSessionSidebarUtils', () => {
         expect(html).not.toContain('chat.sessionPanel.sessions');
         expect(html).not.toContain('chat.sessionPanel.noSessions');
         expect(html).not.toContain('common.refresh');
+    });
+
+    it('renders Claude and Codex session providers with the shared provider icons', () => {
+        const claudeHtml = renderToStaticMarkup(
+            createElement(SessionProviderBadge, {
+                providerId: 'claude',
+                providerLabel: 'Claude',
+                selected: false,
+            }),
+        );
+        const codexHtml = renderToStaticMarkup(
+            createElement(SessionProviderBadge, {
+                providerId: 'codex',
+                providerLabel: 'Codex',
+                selected: true,
+            }),
+        );
+        const customHtml = renderToStaticMarkup(
+            createElement(SessionProviderBadge, {
+                providerId: 'internal_agent',
+                providerLabel: 'Internal Agent',
+                selected: false,
+            }),
+        );
+
+        expect(claudeHtml).toContain('data-chat-provider-icon="claude"');
+        expect(claudeHtml).toContain('data-chat-provider-icon-glyph="claude-lobehub"');
+        expect(claudeHtml).not.toContain('>Claude<');
+        expect(codexHtml).toContain('data-chat-provider-icon="codex"');
+        expect(codexHtml).toContain('data-chat-provider-icon-glyph="codex-openai"');
+        expect(codexHtml).not.toContain('>Codex<');
+        expect(customHtml).toContain('>Internal Agent<');
     });
 
     it('prefers title then summary then shortened session id', () => {
