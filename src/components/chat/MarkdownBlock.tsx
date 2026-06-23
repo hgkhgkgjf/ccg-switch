@@ -21,8 +21,9 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 
-// 导入样式
-import 'highlight.js/styles/github-dark.css';
+// 导入样式：以 github(浅色) 为基底，深色主题下由 App.css 的
+// [data-theme="dark"] .hljs 覆盖为 github-dark 调色板，使代码块跟随主题。
+import 'highlight.js/styles/github.css';
 
 // 注册语言
 const languages = [

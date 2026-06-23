@@ -1,25 +1,12 @@
 /* 工具块样式 */
 
-/* Fallback CSS 变量 - 当 DaisyUI 主题变量未加载时使用 */
-:root {
-  --fallback-b1: #ffffff;
-  --fallback-b2: #f3f4f6;
-  --fallback-b3: #e5e7eb;
-  --fallback-bc: #1f2937;
-  --fallback-n: #000000;
-  --fallback-er: #ef4444;
-  --fallback-su: #10b981;
-}
-
-[data-theme="dark"] {
-  --fallback-b1: #1f2937;
-  --fallback-b2: #374151;
-  --fallback-b3: #4b5563;
-  --fallback-bc: #f3f4f6;
-  --fallback-n: #000000;
-  --fallback-er: #f87171;
-  --fallback-su: #4ade80;
-}
+/*
+ * 注意：不要在此定义 DaisyUI 保留的 --fallback-b1/b2/b3/bc/n/er/su 变量。
+ * 这些是 DaisyUI 内部回退命名空间，形如 `var(--fallback-bc, oklch(var(--bc)/0.2))`，
+ * DaisyUI 故意留它们未定义以便回退到主题化 oklch 色调。一旦在 :root 全局定义为实色，
+ * 会劫持所有按钮悬停（btn-ghost:hover 等），使无色按钮在亮/暗主题下悬停变黑。
+ * 本项目自身的 var(--fallback-X, oklch(var(--X)/N)) 用法会正确回退到主题 oklch 值。
+ */
 
 /* 工具块容器 */
 .task-container {

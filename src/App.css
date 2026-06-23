@@ -204,9 +204,16 @@ a {
   padding: 1em;
   margin: 0.5em 0 1em 0;
   overflow-x: auto;
-  background-color: #0d1117;
+  /* 亮色主题：浅底 + github(light) 语法高亮；深色主题在下方覆盖。 */
+  background-color: #f6f8fa;
+  border: 1px solid rgba(128, 128, 128, 0.18);
   border-radius: 6px;
   position: relative;
+}
+
+[data-theme="dark"] .markdown-block pre {
+  background-color: #0d1117;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .markdown-block pre code {
@@ -265,10 +272,11 @@ a {
   top: 0.5em;
   right: 0.5em;
   padding: 0.4em;
-  background-color: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  /* 亮色主题：深色描边图标；深色主题在下方覆盖为浅色。 */
+  background-color: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(0, 0, 0, 0.55);
   cursor: pointer;
   opacity: 0;
   transition: all 0.2s;
@@ -282,15 +290,115 @@ a {
 }
 
 .markdown-block .copy-button:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.2);
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.markdown-block .copy-button.copied {
+  background-color: rgba(22, 163, 74, 0.15);
+  border-color: rgba(22, 163, 74, 0.35);
+  color: #16a34a;
+}
+
+[data-theme="dark"] .markdown-block .copy-button {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="dark"] .markdown-block .copy-button:hover {
   background-color: rgba(255, 255, 255, 0.2);
   border-color: rgba(255, 255, 255, 0.3);
   color: white;
 }
 
-.markdown-block .copy-button.copied {
+[data-theme="dark"] .markdown-block .copy-button.copied {
   background-color: rgba(0, 255, 0, 0.2);
   border-color: rgba(0, 255, 0, 0.3);
   color: #00ff00;
+}
+
+/*
+ * 代码块语法高亮主题跟随：基底由 MarkdownBlock.tsx 导入 github(浅色)。
+ * 深色主题下覆盖为 github-dark 调色板，使高亮 token 在深底上可读。
+ */
+[data-theme="dark"] .markdown-block .hljs {
+  color: #c9d1d9;
+  background: transparent;
+}
+[data-theme="dark"] .markdown-block .hljs-doctag,
+[data-theme="dark"] .markdown-block .hljs-keyword,
+[data-theme="dark"] .markdown-block .hljs-meta .hljs-keyword,
+[data-theme="dark"] .markdown-block .hljs-template-tag,
+[data-theme="dark"] .markdown-block .hljs-template-variable,
+[data-theme="dark"] .markdown-block .hljs-type,
+[data-theme="dark"] .markdown-block .hljs-variable.language_ {
+  color: #ff7b72;
+}
+[data-theme="dark"] .markdown-block .hljs-title,
+[data-theme="dark"] .markdown-block .hljs-title.class_,
+[data-theme="dark"] .markdown-block .hljs-title.class_.inherited__,
+[data-theme="dark"] .markdown-block .hljs-title.function_ {
+  color: #d2a8ff;
+}
+[data-theme="dark"] .markdown-block .hljs-attr,
+[data-theme="dark"] .markdown-block .hljs-attribute,
+[data-theme="dark"] .markdown-block .hljs-literal,
+[data-theme="dark"] .markdown-block .hljs-meta,
+[data-theme="dark"] .markdown-block .hljs-number,
+[data-theme="dark"] .markdown-block .hljs-operator,
+[data-theme="dark"] .markdown-block .hljs-variable,
+[data-theme="dark"] .markdown-block .hljs-selector-attr,
+[data-theme="dark"] .markdown-block .hljs-selector-class,
+[data-theme="dark"] .markdown-block .hljs-selector-id {
+  color: #79c0ff;
+}
+[data-theme="dark"] .markdown-block .hljs-regexp,
+[data-theme="dark"] .markdown-block .hljs-string,
+[data-theme="dark"] .markdown-block .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+[data-theme="dark"] .markdown-block .hljs-built_in,
+[data-theme="dark"] .markdown-block .hljs-symbol {
+  color: #ffa657;
+}
+[data-theme="dark"] .markdown-block .hljs-comment,
+[data-theme="dark"] .markdown-block .hljs-code,
+[data-theme="dark"] .markdown-block .hljs-formula {
+  color: #8b949e;
+}
+[data-theme="dark"] .markdown-block .hljs-name,
+[data-theme="dark"] .markdown-block .hljs-quote,
+[data-theme="dark"] .markdown-block .hljs-selector-tag,
+[data-theme="dark"] .markdown-block .hljs-selector-pseudo {
+  color: #7ee787;
+}
+[data-theme="dark"] .markdown-block .hljs-subst {
+  color: #c9d1d9;
+}
+[data-theme="dark"] .markdown-block .hljs-section {
+  color: #1f6feb;
+  font-weight: bold;
+}
+[data-theme="dark"] .markdown-block .hljs-bullet {
+  color: #f2cc60;
+}
+[data-theme="dark"] .markdown-block .hljs-emphasis {
+  color: #c9d1d9;
+  font-style: italic;
+}
+[data-theme="dark"] .markdown-block .hljs-strong {
+  color: #c9d1d9;
+  font-weight: bold;
+}
+[data-theme="dark"] .markdown-block .hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+[data-theme="dark"] .markdown-block .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
 }
 
 /* Chat message flow */
