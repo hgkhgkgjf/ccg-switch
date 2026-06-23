@@ -156,3 +156,36 @@ Restored missing Trellis workspace journal state and documented duplicate toolbl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Fix button hover + code block theme
+
+**Date**: 2026-06-23
+**Task**: Fix button hover + code block theme
+**Branch**: `cc-gui`
+
+### Summary
+
+修复无色按钮悬停变黑（CSS变量命名空间冲突）+ 代码块跟随亮/暗主题切换
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b478fbd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

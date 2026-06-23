@@ -8,7 +8,7 @@
 
 @@@auto:current-status
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-06-23
 @@@/auto:current-status
 
@@ -19,7 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~158 | Active |
+| `journal-1.md` | ~191 | Active |
 @@@/auto:active-documents
 
 ---
@@ -29,6 +29,7 @@
 @@@auto:session-history
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-06-23 | Fix button hover + code block theme | `b478fbd` | `cc-gui` |
 | 7 | 2026-06-23 | 修复聊天历史滚动加载截断与助手消息聚类乱序 | `785adee`, `be8a6e9` | `cc-gui` |
 | 6 | 2026-06-22 | 优化聊天界面：Dashboard悬浮窗、Diff换行对齐、图片附件预览 | `02d06ca` | `cc-gui` |
 | 5 | 2026-06-22 | Trellis Journal Consistency Repair | `9926b21` | `cc-gui` |
