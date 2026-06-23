@@ -541,32 +541,91 @@ describe('useChatStore session transitions', () => {
         });
     });
 
-    it('does not reload when selecting the already active history session', async () => {
+    it('reloads disk-ordered history when reopening a settled active session', async () => {
+        // 实时跑过后遗留在屏幕上的「聚类」转录（文本簇在前、工具块在后）。
+        const clusteredLiveMessages: ChatMessage[] = [
+            {id: 'live-user', role: 'user', content: 'do the work', createdAt: 100},
+            {
+                id: 'live-assistant',
+                role: 'assistant',
+                content: 'text1\ntext2',
+                raw: {
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {type: 'text', text: 'text1\ntext2'},
+                            {type: 'tool_use', id: 'tool-a', name: 'Read', input: {file_path: 'a.ts'}},
+                            {type: 'tool_use', id: 'tool-b', name: 'Read', input: {file_path: 'b.ts'}},
+                        ],
+                    },
+                },
+                createdAt: 101,
+            },
+        ];
+        // 磁盘上顺序正确（交错）的历史。
+        const diskHistory: UnifiedSessionMessage[] = [
+            {role: 'user', content: 'do the work', ts: '2026-06-17T08:00:00.000Z'},
+            {role: 'assistant', content: 'text1', ts: '2026-06-17T08:00:01.000Z'},
+            {role: 'assistant', content: 'text2', ts: '2026-06-17T08:00:02.000Z'},
+        ];
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_message_window') return buildTestHistoryWindow(diskHistory);
+            if (command === 'get_unified_session_messages') return diskHistory;
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
         useChatStore.setState({
             provider: 'codex',
             sessionId: loadedSession.sessionId,
             activeSession: loadedSession,
             currentCwd: loadedSession.projectDir,
-            messages: [
-                {
-                    id: 'history-existing',
-                    role: 'assistant',
-                    content: 'already loaded',
-                    createdAt: 100,
-                },
-            ],
+            activeRequestId: null,
+            messages: clusteredLiveMessages,
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith(
+            'get_unified_session_message_window',
+            expect.objectContaining({sourcePath: loadedSession.sourcePath}),
+        );
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'do the work',
+            'text1',
+            'text2',
+        ]);
+        expect(useChatStore.getState()).toMatchObject({
+            activeSession: loadedSession,
+            pendingSessionKey: null,
+        });
+    });
+
+    it('does not reload the active session while a turn is still streaming', async () => {
+        const streamingMessages: ChatMessage[] = [
+            {id: 'live-user', role: 'user', content: 'do the work', createdAt: 100},
+            {id: 'live-assistant', role: 'assistant', content: 'partial', streaming: true, createdAt: 101},
+        ];
+
+        useChatStore.setState({
+            provider: 'codex',
+            sessionId: loadedSession.sessionId,
+            activeSession: loadedSession,
+            currentCwd: loadedSession.projectDir,
+            activeRequestId: 'request-streaming',
+            messages: streamingMessages,
         });
 
         await useChatStore.getState().loadSession(loadedSession);
 
         expect(tauriMocks.invoke).not.toHaveBeenCalled();
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'do the work',
+            'partial',
+        ]);
         expect(useChatStore.getState()).toMatchObject({
             activeSession: loadedSession,
-            pendingSessionKey: null,
+            activeRequestId: 'request-streaming',
         });
-        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
-            'already loaded',
-        ]);
     });
 
     it('reuses cached history for the same session metadata', async () => {
@@ -1857,14 +1916,19 @@ describe('useChatStore session transitions', () => {
             streaming: false,
         });
         const blocks = getRenderableContentBlocks(assistantMessage.raw);
-        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use']);
+        // 源顺序：text(已说) → tool_use → text(工具后继续说)，不再聚类为单条文本块。
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use', 'text']);
         expect(blocks[0]).toMatchObject({
             type: 'text',
-            text: 'I will inspect the file.\nIt contains the raw block render path.',
+            text: 'I will inspect the file.\n',
         });
         expect(blocks[1]).toMatchObject({
             type: 'tool_use',
             id: 'tool-read-live',
+        });
+        expect(blocks[2]).toMatchObject({
+            type: 'text',
+            text: 'It contains the raw block render path.',
         });
     });
 
@@ -1934,10 +1998,65 @@ describe('useChatStore session transitions', () => {
 
         const assistantMessage = useChatStore.getState().messages[1];
         const blocks = getRenderableContentBlocks(assistantMessage.raw);
-        expect(blocks).toHaveLength(2);
-        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use']);
-        expect(blocks[0]).toMatchObject({type: 'text', text: fullText});
+        // 源顺序保留为 text → tool_use → text；重复的 text raw 快照被去重，
+        // 不产生第 4 个重复文本块。
+        expect(blocks).toHaveLength(3);
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use', 'text']);
+        expect(blocks[0]).toMatchObject({type: 'text', text: 'I will inspect the file.\n'});
         expect(blocks[1]).toMatchObject({type: 'tool_use', id: 'tool-read-snapshot'});
+        expect(blocks[2]).toMatchObject({type: 'text', text: 'It contains the raw block render path.'});
+        expect(assistantMessage.content).toBe(fullText);
+    });
+
+    it('preserves arrival order across BLOCK_RESET for a text -> tool -> text -> tool live turn', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'chat_start_daemon') return Promise.resolve(undefined);
+            if (command === 'chat_send') return Promise.resolve('request-interleave');
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().init();
+        await useChatStore.getState().send('Do several talk + tool cycles');
+
+        const stream = (text: string) => listeners['chat://stream']?.({
+            payload: {requestId: 'request-interleave', kind: 'line', text},
+        });
+        const toolMessage = (id: string) => listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-interleave',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    message: {
+                        content: [
+                            {type: 'tool_use', id, name: 'Read', input: {file_path: `${id}.ts`}},
+                        ],
+                    },
+                } satisfies MessageRaw),
+            },
+        });
+
+        // text1 -> [BLOCK_RESET] -> tool1 -> text2 -> tool2
+        stream('[CONTENT_DELTA] "First I will look."');
+        stream('[BLOCK_RESET]');
+        toolMessage('tool-1');
+        stream('[CONTENT_DELTA] "Now I continue."');
+        toolMessage('tool-2');
+        listeners['chat://done']?.({
+            payload: {requestId: 'request-interleave', success: true, error: null},
+        });
+
+        const assistantMessage = useChatStore.getState().messages[1];
+        const blocks = getRenderableContentBlocks(assistantMessage.raw);
+        expect(blocks.map((block) => block.type)).toEqual(['text', 'tool_use', 'text', 'tool_use']);
+        expect(blocks[0]).toMatchObject({type: 'text', text: 'First I will look.'});
+        expect(blocks[1]).toMatchObject({type: 'tool_use', id: 'tool-1'});
+        expect(blocks[2]).toMatchObject({type: 'text', text: 'Now I continue.'});
+        expect(blocks[3]).toMatchObject({type: 'tool_use', id: 'tool-2'});
     });
 
     it('does not bind a retired request to the next pending turn', async () => {

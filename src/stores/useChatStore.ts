@@ -49,6 +49,12 @@ const DEFAULT_PERMISSION_SESSION_ID = 'default';
 const CHAT_DAEMON_READY_TIMEOUT_MS = 15_000;
 const stoppedRequestNotifications = new Set<string>();
 const retiredRequestIds = new Set<string>();
+/**
+ * 已被 [BLOCK_RESET] 或工具消息「封口」的流式 assistant 消息 id 集合。
+ * 一旦封口，下一段 [CONTENT_DELTA] 文本必须在 raw.message.content 末尾开启
+ * 一个新的 text block，而不是续写上一段文本块，从而保留 text→tool→text 的源顺序。
+ */
+const sealedStreamingTextSegments = new Set<string>();
 let daemonReadyTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function clearDaemonReadyTimeout(): void {
@@ -344,34 +350,54 @@ function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function syncAssistantRawWithStreamingContent(raw: MessageRaw | undefined, content: string): MessageRaw | undefined {
-    if (!raw || raw.type !== 'assistant' || !content.trim()) return raw;
+function isTextBlock(block: ContentBlock): block is Extract<ContentBlock, { type: 'text' }> {
+    return block.type === 'text';
+}
 
-    let syncedText = false;
-    const contentBlocks = raw.message.content.reduce<ContentBlock[]>((blocks, block) => {
-        if (block.type !== 'text') {
-            blocks.push(block);
-            return blocks;
-        }
-        if (syncedText) return blocks;
-        syncedText = true;
-        blocks.push(block.text === content ? block : {...block, text: content});
-        return blocks;
-    }, []);
+/**
+ * 把流式文本增量按「源顺序」并入 assistant 的 raw.message.content。
+ *
+ * - 若末尾块是一个仍处于「开启」状态的 text block，则续写该块（同一段连续文本）。
+ * - 若末尾块不是开启中的 text block（被 [BLOCK_RESET] 封口、或被后到的工具块
+ *   占据），则在数组末尾开启一个新的 text block，使其落在它真实到达的位置
+ *   （通常紧跟在前一个工具块之后），从而保留 text→tool→text 的交错顺序。
+ *
+ * raw.message.content 是渲染顺序的唯一真相；扁平的 message.content 字符串仅用于
+ * 复制/预览与无 raw 时的回退，不再决定渲染顺序。
+ */
+function appendStreamingTextToRaw(
+    messageId: string,
+    raw: MessageRaw | undefined,
+    delta: string,
+): MessageRaw {
+    const base: MessageRaw = raw && raw.type === 'assistant'
+        ? raw
+        : {type: 'assistant', message: {content: []}};
+    const blocks = [...base.message.content];
+    const lastBlock = blocks[blocks.length - 1];
+    const sealed = sealedStreamingTextSegments.has(messageId);
+
+    if (!sealed && lastBlock && isTextBlock(lastBlock)) {
+        // 续写当前开启中的文本段。
+        blocks[blocks.length - 1] = {...lastBlock, text: lastBlock.text + delta};
+    } else {
+        // 开启一个新的文本段（封口后或紧跟工具块之后），落在末尾的真实到达位置。
+        blocks.push({type: 'text', text: delta});
+        sealedStreamingTextSegments.delete(messageId);
+    }
 
     return {
-        ...raw,
+        ...base,
+        type: 'assistant',
         message: {
-            ...raw.message,
-            content: syncedText
-                ? contentBlocks
-                : [{type: 'text', text: content}, ...contentBlocks],
+            ...base.message,
+            content: blocks,
         },
     };
 }
 
 /**
- * 把文本增量追加到最后一条流式 assistant 消息。
+ * 把文本增量按源顺序追加到最后一条流式 assistant 消息。
  * 不依赖 requestId 映射：daemon 响应极快，按 streaming 状态定位最稳。
  */
 function appendToStreamingAssistant(
@@ -386,13 +412,37 @@ function appendToStreamingAssistant(
                 messages[i] = {
                     ...messages[i],
                     content,
-                    raw: syncAssistantRawWithStreamingContent(messages[i].raw, content),
+                    raw: appendStreamingTextToRaw(messages[i].id, messages[i].raw, delta),
                 };
                 break;
             }
         }
         return { messages };
     });
+}
+
+/**
+ * 在 [BLOCK_RESET] 到达时封口当前流式 assistant 消息的开启中文本段，
+ * 使下一段 [CONTENT_DELTA] 文本开启一个新的 text block。
+ */
+function sealStreamingTextSegment(get: () => ChatState): void {
+    const messages = get().messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'assistant' && messages[i].streaming) {
+            sealedStreamingTextSegments.add(messages[i].id);
+            while (sealedStreamingTextSegments.size > RETIRED_REQUEST_OWNERSHIP_LIMIT) {
+                const oldest = sealedStreamingTextSegments.values().next().value;
+                if (!oldest) break;
+                sealedStreamingTextSegments.delete(oldest);
+            }
+            return;
+        }
+    }
+}
+
+function clearStreamingTextSegment(messageId: string | null | undefined): void {
+    if (!messageId) return;
+    sealedStreamingTextSegments.delete(messageId);
 }
 
 function hasStreamingAssistant(messages: ChatMessage[]): boolean {
@@ -800,8 +850,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return;
             }
 
+            // [BLOCK_RESET]：daemon 在每次 message_start（每轮 tool_use 循环迭代）
+            // 发出，标记一个内容块边界。封口当前流式 assistant 的开启中文本段，
+            // 使下一段 [CONTENT_DELTA] 文本开启新的 text block，保留交错源顺序。
+            if (text.startsWith('[BLOCK_RESET]')) {
+                sealStreamingTextSegment(get);
+                return;
+            }
+
             // 其余标签行（[DEBUG]/[LIFECYCLE]/[MESSAGE]/[MESSAGE_START]/
-            // [STREAM_START]/[STREAM_END]/[BLOCK_RESET] 等）忽略，
+            // [STREAM_START]/[STREAM_END] 等）忽略，
             // 不渲染为消息内容。[MESSAGE] 由 chat://message 事件单独处理。
         });
 
@@ -820,17 +878,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             set((state) => ({
                 activeRequestId: null,
-                messages: state.messages.map((m) =>
-                    m.role === 'assistant' && m.streaming
-                        ? {
-                              ...m,
-                              streaming: false,
-                              error: success ? m.error : error || '执行失败',
-                              // 记录本轮耗时（从消息创建到流式结束）
-                              durationMs: Date.now() - m.createdAt,
-                          }
-                        : m,
-                ),
+                messages: state.messages.map((m) => {
+                    if (m.role === 'assistant' && m.streaming) {
+                        clearStreamingTextSegment(m.id);
+                        return {
+                            ...m,
+                            streaming: false,
+                            error: success ? m.error : error || '执行失败',
+                            // 记录本轮耗时（从消息创建到流式结束）
+                            durationMs: Date.now() - m.createdAt,
+                        };
+                    }
+                    return m;
+                }),
             }));
         });
 
@@ -1148,11 +1208,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isCurrentSession = currentState.activeSession
             ? getSessionSelectionKey(currentState.activeSession) === pendingSessionKey
             : false;
-        if (
-            isCurrentSession
-            && !currentState.activeRequestId
-            && !currentState.pendingSessionKey
-        ) {
+        // 只有当前会话仍有进行中的回合时才跳过重载，避免打断正在进行的流式输出。
+        // 其余情况（包括重开「刚实时跑过、已结束」的当前会话）都走正常加载路径：
+        // 缓存命中提供磁盘顺序的完整历史，窗口路径从磁盘重读 ≤120 条尾窗，
+        // 二者都通过 getLoadedSessionState 用磁盘/缓存的源顺序重建 messages，
+        // 修复实时合并遗留的「文本簇 + 工具簇」聚类转录。
+        if (isCurrentSession && hasActiveChatTurn(currentState)) {
             return;
         }
 
@@ -1510,16 +1571,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         retireRequestOwnership(activeRequestId);
         set((state) => ({
             activeRequestId: null,
-            messages: state.messages.map((message) => (
-                message.role === 'assistant' && message.streaming
-                    ? {
+            messages: state.messages.map((message) => {
+                if (message.role === 'assistant' && message.streaming) {
+                    clearStreamingTextSegment(message.id);
+                    return {
                         ...message,
                         streaming: false,
                         error: message.error ?? STOPPED_OUTPUT_ERROR,
                         durationMs: Date.now() - message.createdAt,
-                    }
-                    : message
-            )),
+                    };
+                }
+                return message;
+            }),
         }));
     },
 

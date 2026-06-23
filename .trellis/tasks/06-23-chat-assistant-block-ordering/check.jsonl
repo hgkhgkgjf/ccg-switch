@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify the updated Chat Message Raw Event Merging contract: arrival-order preservation, BLOCK_RESET sealing, dedup + visibility still hold"}

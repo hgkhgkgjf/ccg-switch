@@ -739,18 +739,35 @@ function findToolResult(
 
 - `chat://stream` updates the visible assistant `content` text; `chat://message`
   updates the structured `raw` payload.
+- `raw.message.content` is the ARRIVAL/SOURCE-ORDER source of truth for assistant
+  rendering. `MessageItem` renders raw blocks in array order, so the store must
+  build that array in the order events actually arrive: a `text → tool → text →
+  tool` turn must produce `[text, tool_use, text, tool_use]`, NOT a clustered
+  `[text(+text), tool_use, tool_use]`. The flat `message.content` string is a
+  concatenation of streamed text segments used only for copy/preview and as the
+  no-raw fallback; it must NOT be used to reconstruct render order by reseating
+  text to the front of `raw.message.content`.
+- Streamed `[CONTENT_DELTA]` text extends the current trailing OPEN text block in
+  `raw.message.content`. If the trailing block is not an open text segment
+  (because a `[BLOCK_RESET]` sealed it, or a later tool block now occupies the
+  tail), the next delta opens a NEW text block appended at the end so it lands in
+  its real arrival position after the preceding tool block.
+- `[BLOCK_RESET]` (emitted by the daemon at each `message_start` / tool-loop
+  iteration, before that iteration's deltas) seals the current open text/thinking
+  segment. The store must honor it instead of ignoring it; the next delta starts
+  a new text block. Graceful degradation: even without `[BLOCK_RESET]`, a tool
+  `chat://message` that appends a tool block also seals the open text segment, so
+  later text starts a new block and interleave is preserved.
 - Assistant `raw` patches the current streaming assistant message first, then
   the latest assistant message. It must not erase streamed `content`.
 - Assistant `raw` payloads are incremental structured events. When multiple
   assistant raw events arrive in one turn, merge their content blocks into the
-  current assistant message instead of replacing the previous `raw`. If the
-  assistant already has streamed `content` but no raw text block yet, seed the
-  merged raw with that streamed text so a later `tool_use` block does not hide
-  the visible answer text in `MessageItem`.
-- After assistant `raw` exists, later `chat://stream` content deltas must also
-  keep the assistant raw text block in sync with the full streamed `content`.
-  `MessageItem` renders raw blocks before `message.content`, so updating only
-  the hidden `content` field makes later text deltas disappear from the UI.
+  current assistant message in arrival order instead of replacing the previous
+  `raw` or clustering text ahead of tools. If the assistant already has streamed
+  `content` but no raw text block yet (a synthetic/legacy case), seed the merged
+  raw with that streamed text so a later `tool_use` block does not hide the
+  visible answer text in `MessageItem`. In the normal live flow the streamed
+  text is already a positioned text block, so no front-seeding occurs.
 - Assistant text `raw` deltas or snapshots that are already represented by the
   full streamed `content` must be deduped instead of appended behind tool
   blocks. Otherwise a provider that emits both stream text and assistant text
@@ -781,10 +798,12 @@ function findToolResult(
 |-----------|-------------------|
 | `chat://message` payload cannot be parsed | Log and ignore; keep existing messages unchanged. |
 | Assistant raw arrives before any assistant message exists | Append an assistant message derived from raw text blocks. |
-| Assistant streamed text is followed by a tool raw event | Keep the streamed text as a raw text block and append the tool block. |
-| Assistant raw exists and more stream text arrives | Update the raw text block to the full streamed content so the transcript keeps rendering the later text. |
-| Assistant text raw delta/snapshot repeats text already in streamed content | Skip that text raw block; keep one full raw text block plus the non-text blocks. |
-| Assistant receives multiple raw events in one turn | Preserve prior raw blocks and append only new blocks, deduping repeated snapshots. |
+| Assistant streamed text is followed by a tool raw event | Keep the streamed text as a raw text block and append the tool block after it (arrival order). |
+| `[BLOCK_RESET]` arrives mid-turn | Seal the open text/thinking segment so the next `[CONTENT_DELTA]` opens a new trailing text block. |
+| Streamed text arrives after a tool block (sealed by reset or the tool message) | Open a NEW trailing text block; do not reseat text ahead of the tool block. |
+| `text → tool → text → tool` arrives in one live turn | `raw.message.content` is `[text, tool_use, text, tool_use]`, not clustered. |
+| Assistant text raw delta/snapshot repeats text already in streamed content | Skip that text raw block; do not create a duplicate visible text block. |
+| Assistant receives multiple raw events in one turn | Preserve prior raw blocks and append only new blocks in arrival order, deduping repeated snapshots. |
 | User text raw matches an existing prompt | Patch `raw`; keep original visible `content`. |
 | User raw contains `tool_result` | Append or update the internal `[tool_result]` message. |
 | Duplicate `tool_result` for the same `tool_use_id` arrives | Update the existing internal result message instead of appending duplicates. |
@@ -796,10 +815,13 @@ function findToolResult(
 
 ### 5. Good/Base/Bad Cases
 
-- Good: prompt message stays visible, assistant tool block renders completed or
-  failed state from a later internal `tool_result` message.
+- Good: prompt message stays visible; an interleaved assistant turn renders
+  `text → tool → text → tool` in true arrival order, and each tool block renders
+  completed or failed state from a later internal `tool_result` message.
 - Base: plain text conversations without tools still render from streamed
   `content` and optionally attach raw text blocks.
+- Bad: clustering an interleaved turn into "all text first, all tools after" by
+  reseating streamed text to the front of `raw.message.content`.
 - Bad: replacing the last user message by role when a `tool_result` arrives;
   this corrupts the transcript by turning the user's prompt into tool output.
 
@@ -817,9 +839,15 @@ function findToolResult(
 - Unit test: streamed assistant text remains renderable when the first raw
   assistant event is a tool block.
 - Store test: full live turn sequence keeps later streamed text visible after
-  assistant tool raw blocks have already arrived.
+  assistant tool raw blocks have already arrived, positioned AFTER the tool block
+  (arrival order), not clustered ahead of it.
+- Store test: a `text → [BLOCK_RESET] → tool → text → tool` live turn produces
+  `[text, tool_use, text, tool_use]` in `raw.message.content`.
 - Store test: assistant text raw deltas/snapshots after raw sync do not create
   duplicate visible text blocks.
+- Store test: reopening a settled active session rebuilds a disk-ordered (source
+  order) transcript instead of leaving the live-merged messages on screen; a
+  still-streaming active session is not reloaded.
 - Unit test: empty assistant messages are not renderable, while streaming/error
   assistant messages remain renderable.
 - Build check: `npm run build` must pass because strict TypeScript catches unused
@@ -830,15 +858,21 @@ function findToolResult(
 #### Wrong
 
 ```ts
-const lastUserIndex = findLastIndex(messages, (m) => m.role === raw.type);
-messages[lastUserIndex] = { ...messages[lastUserIndex], raw };
+// Reseats streamed text to the front, clustering an interleaved turn.
+content: syncedText ? contentBlocks : [{type: 'text', text: content}, ...contentBlocks];
 ```
 
 #### Correct
 
 ```ts
-const messages = mergeRawChatMessage(state.messages, raw);
-const result = findToolResult(messages, toolUse.id, assistantMessageIndex);
+// Extend the open trailing text block, or open a new one when sealed by a
+// [BLOCK_RESET] or a preceding tool block, so blocks stay in arrival order.
+const sealed = sealedStreamingTextSegments.has(messageId);
+if (!sealed && isTextBlock(lastBlock)) {
+    blocks[blocks.length - 1] = {...lastBlock, text: lastBlock.text + delta};
+} else {
+    blocks.push({type: 'text', text: delta});
+}
 ```
 
 ---

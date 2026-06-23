@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Chat Message Raw Event Merging contract (text visibility, dedup, tool-result lookup) + Large History First-Paint / Session Transition Abort Boundary that loadSession must keep honoring"}
+{"file": ".trellis/spec/backend/cross-layer-protocol.md", "reason": "daemon stream protocol: [CONTENT_DELTA] / [BLOCK_RESET] / chat://message tagging semantics the live interleave fix depends on"}
