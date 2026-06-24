@@ -40,6 +40,25 @@ export function deriveContextWindow(modelId) {
 }
 
 /**
+ * Build the JSON payload for a [USAGE] IPC line.
+ * @param {object} usage  Token usage from accumulated stream state or an assistant message.
+ * @param {number} [maxTokens]  Optional context-window upper bound.
+ * @returns {object} JSON-serializable [USAGE] payload.
+ */
+export function buildUsagePayload(usage, maxTokens) {
+  const payload = {
+    input_tokens: usage?.input_tokens || 0,
+    output_tokens: usage?.output_tokens || 0,
+    cache_creation_input_tokens: usage?.cache_creation_input_tokens || 0,
+    cache_read_input_tokens: usage?.cache_read_input_tokens || 0
+  };
+  if (typeof maxTokens === 'number' && Number.isFinite(maxTokens) && maxTokens > 0) {
+    payload.max_tokens = maxTokens;
+  }
+  return payload;
+}
+
+/**
  * Emit [USAGE] tag from accumulated usage data during streaming.
  * NOTE: Uses process.stdout.write for consistent buffering with other IPC messages.
  * @param {object} accumulated  Accumulated token usage.
@@ -49,14 +68,6 @@ export function deriveContextWindow(modelId) {
  */
 export function emitAccumulatedUsage(accumulated, maxTokens) {
   if (!accumulated) return;
-  const payload = {
-    input_tokens: accumulated.input_tokens || 0,
-    output_tokens: accumulated.output_tokens || 0,
-    cache_creation_input_tokens: accumulated.cache_creation_input_tokens || 0,
-    cache_read_input_tokens: accumulated.cache_read_input_tokens || 0
-  };
-  if (typeof maxTokens === 'number' && Number.isFinite(maxTokens) && maxTokens > 0) {
-    payload.max_tokens = maxTokens;
-  }
+  const payload = buildUsagePayload(accumulated, maxTokens);
   process.stdout.write('[USAGE] ' + JSON.stringify(payload) + '\n');
 }

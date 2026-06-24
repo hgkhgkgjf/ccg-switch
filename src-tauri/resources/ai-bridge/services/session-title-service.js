@@ -4,12 +4,12 @@
  * Follows CLI's generate_session_title flow but runs independently in ai-bridge.
  */
 
-import { appendFile, mkdir, access, open as fsOpen, stat as fsStat, readFile } from 'fs/promises';
-import { join, basename } from 'path';
-import { setupApiKey, loadClaudeSettings, getCliUserAgent } from '../config/api-config.js';
-import { ensureAnthropicSdk, ensureBedrockSdk } from './claude/message-utils.js';
-import { resolveModelFromSettings } from '../utils/model-utils.js';
-import { getClaudeDir, getCodemossDir } from '../utils/path-utils.js';
+import {access, appendFile, mkdir, open as fsOpen, readFile, stat as fsStat} from 'fs/promises';
+import {basename, join} from 'path';
+import {getCliUserAgent, loadClaudeSettings, setupApiKey} from '../config/api-config.js';
+import {ensureAnthropicSdk, ensureBedrockSdk} from './claude/message-utils.js';
+import {resolveModelFromSettings} from '../utils/model-utils.js';
+import {getClaudeDir, getCodemossDir} from '../utils/path-utils.js';
 
 const DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_CONVERSATION_TEXT = 1000;
@@ -170,7 +170,9 @@ function getSessionFilePath(sessionId, cwd) {
  */
 function resolveHaikuModel() {
   const settings = loadClaudeSettings();
-  return resolveModelFromSettings(DEFAULT_HAIKU_MODEL, settings?.env) || DEFAULT_HAIKU_MODEL;
+  return resolveModelFromSettings(DEFAULT_HAIKU_MODEL, settings?.env, {
+    allowFamilyDefaultMapping: true,
+  }) || DEFAULT_HAIKU_MODEL;
 }
 
 /**

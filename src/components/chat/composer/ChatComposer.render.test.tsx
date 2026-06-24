@@ -1,9 +1,12 @@
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {ChatComposer} from './ChatComposer';
 import {CompletionMenu} from './CompletionMenu';
 
 const loadAllProviders = vi.fn();
+let mockedContextTokens = 0;
+let mockedContextMaxTokens: number | null = null;
+let mockedLongContextEnabled = true;
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
@@ -22,11 +25,14 @@ vi.mock('../../../stores/useChatStore', () => ({
         model: 'claude-sonnet-provider-20260601',
         reasoningEffort: 'high',
         draft: '',
-        contextTokens: 0,
+        contextTokens: mockedContextTokens,
+        contextMaxTokens: mockedContextMaxTokens,
+        longContextEnabled: mockedLongContextEnabled,
         activeRequestId: null,
         setProvider: vi.fn(),
         setPermissionMode: vi.fn(),
         setModel: vi.fn(),
+        setLongContextEnabled: vi.fn(),
         setReasoningEffort: vi.fn(),
         setDraft: vi.fn(),
         send: vi.fn(),
@@ -70,6 +76,12 @@ vi.mock('./useCompletions', () => ({
 }));
 
 describe('ChatComposer render integration', () => {
+    beforeEach(() => {
+        mockedContextTokens = 0;
+        mockedContextMaxTokens = null;
+        mockedLongContextEnabled = true;
+    });
+
     it('passes provider-loaded model options into the bottom model selector', () => {
         const html = renderToStaticMarkup(
             <ChatComposer
@@ -94,6 +106,55 @@ describe('ChatComposer render integration', () => {
 
         expect(html).toContain('title="Refresh models"');
         expect(html).not.toContain('chat.modelsRefresh');
+    });
+
+    it('uses sidecar-provided context max tokens for the usage indicator', () => {
+        mockedContextTokens = 125_000;
+        mockedContextMaxTokens = 1_000_000;
+
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:\\repo"
+            />,
+        );
+
+        expect(html).toContain('12.5% · 125k / 1000k chat.context');
+    });
+
+    it('uses the default enabled 1M context toggle for Claude fallback context window', () => {
+        mockedContextTokens = 125_000;
+        mockedContextMaxTokens = null;
+        mockedLongContextEnabled = true;
+
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:\\repo"
+            />,
+        );
+
+        expect(html).toContain('12.5% · 125k / 1000k chat.context');
+        expect(html).toContain('chat-long-context-toggle');
+        expect(html).toMatch(/role="switch"(?=[^>]*aria-checked="true")/);
+    });
+
+    it('keeps sidecar-provided context max tokens authoritative over the 1M toggle fallback', () => {
+        mockedContextTokens = 50_000;
+        mockedContextMaxTokens = 200_000;
+        mockedLongContextEnabled = true;
+
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:\\repo"
+            />,
+        );
+
+        expect(html).toContain('25.0% · 50k / 200k chat.context');
     });
 
     it('keeps composer input surface labels readable when translations return keys', () => {

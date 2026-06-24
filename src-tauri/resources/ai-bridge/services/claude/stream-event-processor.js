@@ -1,21 +1,10 @@
-import {deriveContextWindow, emitAccumulatedUsage, mergeUsage} from '../../utils/usage-utils.js';
+import {buildUsagePayload, deriveContextWindow, emitAccumulatedUsage, mergeUsage} from '../../utils/usage-utils.js';
 import {truncateErrorContent, truncateToolResultBlock} from './message-output-filter.js';
 import {normalizeStreamDelta, resetTurnBlockState, resolveSnapshotDelta} from './stream-delta-normalizer.js';
 
-export function emitUsageTag(msg) {
+export function emitUsageTag(msg, maxTokens) {
   if (msg.type === 'assistant' && msg.message?.usage) {
-    const {
-      input_tokens = 0,
-      output_tokens = 0,
-      cache_creation_input_tokens = 0,
-      cache_read_input_tokens = 0
-    } = msg.message.usage;
-    console.log('[USAGE]', JSON.stringify({
-      input_tokens,
-      output_tokens,
-      cache_creation_input_tokens,
-      cache_read_input_tokens
-    }));
+    console.log('[USAGE]', JSON.stringify(buildUsagePayload(msg.message.usage, maxTokens)));
   }
 }
 

@@ -9,6 +9,7 @@ import {
 import {findToolResult, getRenderableContentBlocks} from '../utils/chatMessageFlow';
 import {CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY} from '../utils/chatDaemonStatus';
 import {buildChatStatusSummary} from '../utils/chatStatusSummary';
+import {CHAT_MODEL_SELECTION_KEY_PREFIX} from '../utils/chatModels';
 import {clearChatSessionHistoryCache, useChatStore} from './useChatStore';
 
 const tauriMocks = vi.hoisted(() => ({
@@ -20,6 +21,24 @@ const notificationMocks = vi.hoisted(() => ({
     notifyChatTurnStopped: vi.fn(),
     prepareChatTurnStoppedNotificationPermission: vi.fn(),
 }));
+
+const localStorageEntries = new Map<string, string>();
+const localStorageMock: Storage = {
+    get length() {
+        return localStorageEntries.size;
+    },
+    clear: vi.fn(() => {
+        localStorageEntries.clear();
+    }),
+    getItem: vi.fn((key: string) => localStorageEntries.get(key) ?? null),
+    key: vi.fn((index: number) => Array.from(localStorageEntries.keys())[index] ?? null),
+    removeItem: vi.fn((key: string) => {
+        localStorageEntries.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+        localStorageEntries.set(key, value);
+    }),
+};
 
 vi.mock('@tauri-apps/api/core', () => ({
     invoke: tauriMocks.invoke,
@@ -82,7 +101,9 @@ function resetStore() {
         model: 'claude-opus-4-8',
         reasoningEffort: 'high',
         draft: '',
+        longContextEnabled: true,
         contextTokens: 0,
+        contextMaxTokens: null,
         daemonReady: false,
         daemonStatus: null,
         daemonReconnecting: false,
@@ -128,6 +149,13 @@ describe('useChatStore session transitions', () => {
         tauriMocks.listen.mockClear();
         notificationMocks.notifyChatTurnStopped.mockClear();
         notificationMocks.prepareChatTurnStoppedNotificationPermission.mockClear();
+        vi.stubGlobal('localStorage', localStorageMock);
+        localStorageEntries.clear();
+        vi.mocked(localStorageMock.getItem).mockClear();
+        vi.mocked(localStorageMock.setItem).mockClear();
+        vi.mocked(localStorageMock.removeItem).mockClear();
+        vi.mocked(localStorageMock.clear).mockClear();
+        vi.mocked(localStorageMock.key).mockClear();
         clearChatSessionHistoryCache();
         resetStore();
     });
@@ -1859,6 +1887,59 @@ describe('useChatStore session transitions', () => {
         expect(notificationMocks.notifyChatTurnStopped).toHaveBeenCalledTimes(1);
     });
 
+    it('stores usage max_tokens from stream events and preserves it for legacy usage payloads', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockResolvedValue(undefined);
+
+        await useChatStore.getState().init();
+
+        useChatStore.setState({
+            provider: 'claude',
+            activeRequestId: 'request-usage',
+            messages: [
+                {id: 'user-usage', role: 'user', content: 'usage prompt', createdAt: 100},
+                {id: 'assistant-usage', role: 'assistant', content: '', streaming: true, createdAt: 101},
+            ],
+        });
+
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-usage',
+                kind: 'line',
+                text: '[USAGE] {"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":25,"cache_read_input_tokens":10,"max_tokens":1000000}',
+            },
+        });
+
+        expect(useChatStore.getState()).toMatchObject({
+            contextTokens: 185,
+            contextMaxTokens: 1_000_000,
+        });
+        expect(useChatStore.getState().messages[1].usage).toMatchObject({
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 25,
+            cache_read_input_tokens: 10,
+            max_tokens: 1_000_000,
+        });
+
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-usage',
+                kind: 'line',
+                text: '[USAGE] {"input_tokens":120,"output_tokens":60,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}',
+            },
+        });
+
+        expect(useChatStore.getState()).toMatchObject({
+            contextTokens: 180,
+            contextMaxTokens: 1_000_000,
+        });
+    });
+
     it('keeps later streamed assistant text visible after raw tool blocks arrive', async () => {
         const listeners: Record<string, (event: { payload: unknown }) => void> = {};
         tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
@@ -2651,6 +2732,106 @@ describe('useChatStore session transitions', () => {
                 sessionId: undefined,
             }),
         });
+    });
+
+    it('sends Claude requests with a [1m] suffix when long context is enabled', async () => {
+        useChatStore.setState({
+            provider: 'claude',
+            model: 'claude-opus-4-8',
+            longContextEnabled: true,
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+        tauriMocks.invoke.mockResolvedValue('request-1');
+
+        await useChatStore.getState().send('use the large context window');
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_send', {
+            provider: 'claude',
+            command: 'send',
+            params: expect.objectContaining({
+                message: 'use the large context window',
+                model: 'claude-opus-4-8[1m]',
+            }),
+        });
+    });
+
+    it('sends the base Claude model when long context is disabled', async () => {
+        useChatStore.setState({
+            provider: 'claude',
+            model: 'claude-opus-4-8',
+            longContextEnabled: true,
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+        tauriMocks.invoke.mockResolvedValue('request-1');
+
+        useChatStore.getState().setLongContextEnabled(false);
+        await useChatStore.getState().send('use the standard context window');
+
+        expect(useChatStore.getState().longContextEnabled).toBe(false);
+        expect(localStorage.getItem('ccg-chat-long-context')).toBe('false');
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_send', {
+            provider: 'claude',
+            command: 'send',
+            params: expect.objectContaining({
+                message: 'use the standard context window',
+                model: 'claude-opus-4-8',
+            }),
+        });
+    });
+
+    it('does not append [1m] for Claude Haiku even when long context is enabled', async () => {
+        useChatStore.setState({
+            provider: 'claude',
+            model: 'claude-haiku-4-5',
+            longContextEnabled: true,
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+        tauriMocks.invoke.mockResolvedValue('request-1');
+
+        await useChatStore.getState().send('quick answer');
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_send', {
+            provider: 'claude',
+            command: 'send',
+            params: expect.objectContaining({
+                message: 'quick answer',
+                model: 'claude-haiku-4-5',
+            }),
+        });
+    });
+
+    it('does not apply the Claude 1M suffix to Codex requests', async () => {
+        useChatStore.setState({
+            provider: 'codex',
+            model: 'gpt-5-codex',
+            longContextEnabled: true,
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+        tauriMocks.invoke.mockResolvedValue('request-1');
+
+        await useChatStore.getState().send('codex turn');
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_send', {
+            provider: 'codex',
+            command: 'send',
+            params: expect.objectContaining({
+                message: 'codex turn',
+                model: 'gpt-5-codex',
+            }),
+        });
+    });
+
+    it('stores selected Claude models without the transient [1m] suffix', () => {
+        useChatStore.setState({
+            provider: 'claude',
+            model: 'claude-opus-4-7',
+            longContextEnabled: true,
+        });
+
+        useChatStore.getState().setModel('claude-opus-4-8[1m]');
+
+        expect(useChatStore.getState().model).toBe('claude-opus-4-8');
+        expect(localStorage.getItem(CHAT_MODEL_SELECTION_KEY_PREFIX + 'claude')).toBe('claude-opus-4-8');
     });
 
     it('carries visible Claude history into the first Codex turn after provider switch', async () => {

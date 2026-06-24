@@ -6410,3 +6410,28 @@
 - 功能点 4：完善 Trellis 规划产物。验证方式：更新 `prd.md`，新增 `design.md` 和 `implement.md`，覆盖需求、跨层合同、版本安全、UI 行为、TDD 步骤和验证命令。
 - 功能点 5：暂存本任务规划文件。验证方式：只 `git add` `.trellis/tasks/06-24-sdk-dependency-version-management/*` 与 `TODO_LIST.md`，不暂存 `src/` 或其它 Trellis 任务的用户改动。
 - 功能点 6：提交方案给用户确认。验证方式：输出问题分析、修改思路、影响范围、风险点和验证方式；未确认前不执行 `task.py start`，不修改业务代码。
+
+## 本轮 PLAN 2026-06-24 chat usage window and model selection contract
+
+- 目标：修复 Chat 上下文窗口和模型选择的跨层契约问题。最终权威 `[USAGE]` 事件必须携带与 streaming accumulated usage 相同的 `max_tokens`，避免 UI 被最终 usage 覆盖回 200K；Chat 下拉框明确选择的具体 Claude 模型版本（如 `claude-opus-4-8` / `claude-opus-4-8[1m]`）不得被 active provider 的 `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-7` 改写。
+- 功能点 1：Trellis 建档与计划。验证方式：创建 `.trellis/tasks/06-24-chat-usage-and-model-selection-contract`，补齐 `prd.md` / `design.md` / `implement.md`，`task.py validate` 通过，用户确认后 `task.py start`。
+- 功能点 2：最终 `[USAGE]` 透传 `max_tokens`。验证方式：`services/claude/message-utils.js::emitUsageTag` 与 `services/claude/stream-event-processor.js::emitUsageTag` 增加可选 `maxTokens`，调用方 `message-sender.js` / `persistent-query-service.js` 传入 `deriveContextWindow(modelId)`；旧调用不传时 payload 形状保持兼容。
+- 功能点 3：模型解析明确选择优先。验证方式：调整 `utils/model-utils.js::resolveModelFromSettings`，保留全局 `ANTHROPIC_MODEL` override，但明确的 `claude-*` 具体模型版本不再被 `ANTHROPIC_DEFAULT_*_MODEL` family 默认覆盖；`[1m]` 后缀仍由请求模型控制。
+- 功能点 4：补回归测试。验证方式：更新 `model-utils.test.mjs`、`stream-event-processor.test.js`、`useChatStore.test.ts`、`ChatComposer.render.test.tsx`，覆盖 explicit Claude model priority、最终 usage `max_tokens`、旧 payload 兼容和 1M 显示链路。
+- 功能点 5：同步 Trellis spec。验证方式：更新 `.trellis/spec/backend/cross-layer-protocol.md`，记录 `[USAGE] max_tokens` 与 Chat 模型选择优先级合同。
+- 功能点 6：质量验证。验证方式：运行 `node --test src-tauri/resources/ai-bridge/utils/model-utils.test.mjs`、`node --test src-tauri/resources/ai-bridge/services/claude/stream-event-processor.test.js`、前端相关 Vitest、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`，并报告任何既有失败或环境限制。
+
+## 迭代记录 2026-06-24 chat usage window and model selection contract
+
+- 本轮完成：创建并启动 Trellis 任务 `.trellis/tasks/06-24-chat-usage-and-model-selection-contract`；补齐 Chat usage/context-window 与模型选择跨层合同。`usage-utils.js` 新增 `buildUsagePayload()` 并复用到 accumulated/final usage；`message-utils.js` 与 `stream-event-processor.js` 的最终 `emitUsageTag()` 支持可选 `max_tokens`，旧调用不传时保持旧 payload 形状；`message-sender.js` 与 `persistent-query-service.js` 在最终 assistant usage 中传入 `deriveContextWindow(modelId)`。`resolveModelFromSettings()` 默认改为“全局 `ANTHROPIC_MODEL` override > 请求模型”，不再让 `ANTHROPIC_DEFAULT_*_MODEL` 覆盖 Chat 下拉明确选择；非 Chat 的标题生成路径显式传入 `allowFamilyDefaultMapping: true` 保留 Haiku family default 行为；`[1m]` 后缀仍由请求模型控制。前端测试覆盖 `[USAGE] max_tokens` 写入 `contextMaxTokens`、旧 payload 兼容和 ChatComposer 1M 显示；后端 Trellis spec 已记录最终 `[USAGE]` 与 accumulated `[USAGE]` 的 `max_tokens` 合同，以及 Chat 明确模型选择优先级。
+- 本轮验证：`node --test src-tauri/resources/ai-bridge/utils/model-utils.test.mjs` 通过（17 tests）；`node --test src-tauri/resources/ai-bridge/services/claude/stream-event-processor.test.js` 通过（30 tests，stdout 有既有 `[BLOCK_RESET]` / `[USAGE]` 测试日志）；`npm test -- src/stores/useChatStore.test.ts src/components/chat/composer/ChatComposer.render.test.tsx` 通过（2 files / 68 tests，仅既有 Browserslist/caniuse-lite 过期提示）；`npm run build` 通过（`tsc && vite build`，仅既有 Browserslist/caniuse-lite 过期提示）；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`python ./.trellis/scripts/task.py validate 06-24-chat-usage-and-model-selection-contract` 通过；`git diff --check` 通过，仅 Windows LF/CRLF 提示。构建生成的 `dist` 已清理，`out` 不存在，确认结果为 `{"dist":false,"out":false}`。
+- 未验证项：未启动真实 Tauri dev / daemon 做手工 smoke；sidecar JavaScript 变更需要重启 Tauri dev 或 daemon 后才会生效，Vite HMR 不会覆盖 Node sidecar。
+## 本轮 PLAN 2026-06-24 chat 1M context toggle
+
+- 目标：参考 cc-gui，在 Chat 模型选择附近增加“1M 上下文”开关，由用户决定 Claude 请求是否携带 `[1m]` 后缀；默认开启。Store 持久化基础模型 id，发送请求时按开关临时派生有效模型，sidecar 继续通过既有 `[1m]` suffix 和 `[USAGE].max_tokens` 合同识别上下文窗口。
+- 功能点 1：补 RED 测试。验证方式：扩展 `src/components/chat/composer/ButtonArea.test.tsx`、`src/components/chat/composer/ChatComposer.render.test.tsx`、`src/stores/useChatStore.test.ts`，覆盖默认开启、Claude 发送加 `[1m]`、关闭后不加、Haiku 不加、Codex 不显示开关、模型持久化去 suffix、sidecar `contextMaxTokens` 仍优先。
+- 功能点 2：实现共享 1M 模型工具函数。验证方式：`src/components/chat/composer/constants.ts` 增加 strip/apply/support helper，`contextWindowFor()` 支持 `[1m]`，推理档位判断使用基础模型避免 suffix 破坏现有集合匹配。
+- 功能点 3：实现 Store 状态和发送链路。验证方式：`useChatStore.ts` 新增 `longContextEnabled` / `setLongContextEnabled`，默认 `true` 并持久化；`setModel()` 存基础模型；`send()` 在 Claude provider 下按开关和模型能力临时拼 `[1m]`。
+- 功能点 4：实现 UI 开关。验证方式：`ButtonArea.tsx` 在模型选择器旁渲染紧凑 toggle；Claude 支持模型显示 checked/可切换，Haiku disabled 且 unchecked，Codex 不渲染；`ChatComposer.tsx` 传入 store 状态并用有效模型计算 fallback context window。
+- 功能点 5：i18n 与 Trellis 规范同步。验证方式：更新 `src/locales/en.json` / `src/locales/zh.json` 与 `.trellis/spec/backend/cross-layer-protocol.md`、`.trellis/spec/frontend/component-guidelines.md`，记录“基础模型持久化 + 请求时 suffix + 默认开启 + Haiku 禁用”的合同。
+- 功能点 6：质量验证。验证方式：运行定向 Vitest / Node sidecar 测试、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`python ./.trellis/scripts/task.py validate 06-24-chat-usage-and-model-selection-contract`、`git diff --check`，并清理构建生成目录。

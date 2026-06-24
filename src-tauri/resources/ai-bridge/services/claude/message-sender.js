@@ -236,7 +236,7 @@ function processStreamMessage(msg, state, logPrefix) {
   // The assistant message's usage field contains the correct cumulative total.
   // In streaming mode, this overwrites any intermediate [USAGE] values sent during streaming.
   // The Java backend (ClaudeMessageHandler.handleAssistantMessage) relies on this for correct totals.
-  emitUsageTag(msg);
+  emitUsageTag(msg, deriveContextWindow(state.modelId));
 
   // Output tool_result blocks from user messages
   if (msg.type === 'user') {

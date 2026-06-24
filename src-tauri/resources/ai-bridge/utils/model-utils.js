@@ -29,26 +29,29 @@ export function mapModelIdToSdkName(modelId) {
 }
 
 /**
- * Resolve the actual model name for API calls from user's settings.json.
- * When the user configures a model mapping in their provider config (e.g. sonnet -> "MiniMax-M2.5"),
- * those values are written to ~/.claude/settings.json as ANTHROPIC_DEFAULT_*_MODEL env vars.
- * This function checks those settings and returns the mapped model name if configured.
+ * Resolve the actual model name for API calls from the current Chat request.
+ * The Chat dropdown sends a concrete model id (built-in Claude version or a
+ * custom provider model). Provider family defaults in settings.json are used to
+ * populate/select options, but must not rewrite this explicit request.
  *
- * Priority: ANTHROPIC_MODEL (global override) > ANTHROPIC_DEFAULT_*_MODEL > original modelId
+ * Priority by default: ANTHROPIC_MODEL (global override) > requested modelId.
+ * Non-chat callers that intentionally need legacy family defaults can pass
+ * `{ allowFamilyDefaultMapping: true }`.
  *
  * IMPORTANT: The `[1m]` suffix is controlled by the input modelId from the
  * webview, not by stale settings.env mappings.
  * The 1M context window is selected by the Claude Code SDK based on whether the
  * model name ends with `[1m]` (it reads `process.env.ANTHROPIC_DEFAULT_*_MODEL`).
- * If the request enables 1M, preserve or append the suffix on the mapped model.
- * If the request disables 1M, strip any suffix from the mapped value so an old
+ * If the request enables 1M, preserve or append the suffix on the resolved model.
+ * If the request disables 1M, strip any suffix from the resolved value so an old
  * settings.json env value cannot force the 1M context window back on.
  *
  * @param {string} modelId - Internal model ID from frontend (e.g. 'claude-sonnet-4-6' or 'claude-sonnet-4-6[1m]')
  * @param {object} userEnv - The env object from settings.json (settings.env)
+ * @param {{ allowFamilyDefaultMapping?: boolean }} [options] - Opt-in legacy family-default mapping.
  * @returns {string} The resolved model name for API calls, with the `[1m]` suffix preserved
  */
-export function resolveModelFromSettings(modelId, userEnv) {
+export function resolveModelFromSettings(modelId, userEnv, options = {}) {
   if (!modelId || !userEnv) return modelId;
 
   const lowerModel = modelId.toLowerCase();
@@ -65,31 +68,29 @@ export function resolveModelFromSettings(modelId, userEnv) {
     return applySuffix(String(userEnv.ANTHROPIC_MODEL).trim());
   }
 
-  // Check model-specific env vars based on the internal model ID's type
-  if (lowerModel.includes('opus')) {
-    const mapped = userEnv.ANTHROPIC_DEFAULT_OPUS_MODEL;
-    if (mapped && String(mapped).trim()) {
-      return applySuffix(String(mapped).trim());
-    }
-  } else if (lowerModel.includes('haiku')) {
-    const mapped = userEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL;
-    if (mapped && String(mapped).trim()) {
-      return applySuffix(String(mapped).trim());
-    }
-  } else if (lowerModel.includes('sonnet')) {
-    // Only apply sonnet mapping when the model ID actually contains 'sonnet'.
-    // Non-Anthropic model names (e.g. 'qwen3.5-plus', 'deepseek-v3') should NOT be
-    // remapped to the sonnet setting, as they are already the intended model name.
-    const mapped = userEnv.ANTHROPIC_DEFAULT_SONNET_MODEL;
-    if (mapped && String(mapped).trim()) {
-      return applySuffix(String(mapped).trim());
+  if (options.allowFamilyDefaultMapping) {
+    if (lowerModel.includes('opus')) {
+      const mapped = userEnv.ANTHROPIC_DEFAULT_OPUS_MODEL;
+      if (mapped && String(mapped).trim()) {
+        return applySuffix(String(mapped).trim());
+      }
+    } else if (lowerModel.includes('haiku')) {
+      const mapped = userEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+      if (mapped && String(mapped).trim()) {
+        return applySuffix(String(mapped).trim());
+      }
+    } else if (lowerModel.includes('sonnet')) {
+      const mapped = userEnv.ANTHROPIC_DEFAULT_SONNET_MODEL;
+      if (mapped && String(mapped).trim()) {
+        return applySuffix(String(mapped).trim());
+      }
     }
   }
-  // For non-Anthropic model IDs that don't contain 'opus'/'haiku'/'sonnet',
-  // skip mapping and use the original model ID as-is.
 
-  // No mapping configured, use original model ID
-  return modelId;
+  // The request owns concrete model selection. Settings family defaults may
+  // have supplied the dropdown option, but they are not allowed to replace the
+  // selected value during send.
+  return applySuffix(modelId);
 }
 
 /**

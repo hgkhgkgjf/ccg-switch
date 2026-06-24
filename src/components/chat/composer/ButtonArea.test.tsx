@@ -315,6 +315,94 @@ describe('ButtonArea', () => {
         expect(html).toContain('data-chat-model-icon="codex-codex"');
     });
 
+    it('renders a Claude 1M context toggle next to the model selector', () => {
+        const html = renderToStaticMarkup(
+            <ButtonArea
+                provider="claude"
+                permissionMode="default"
+                model="claude-opus-4-8"
+                reasoningEffort="high"
+                longContextEnabled
+                isLoading={false}
+                isSubmitting={false}
+                isEnhancing={false}
+                canSubmit
+                hasPromptText
+                onLongContextChange={() => undefined}
+                onProviderChange={() => undefined}
+                onModeChange={() => undefined}
+                onModelChange={() => undefined}
+                onReasoningChange={() => undefined}
+                onEnhance={() => undefined}
+                onSubmit={() => undefined}
+                onStop={() => undefined}
+            />,
+        );
+
+        expect(html).toContain('chat-long-context-toggle');
+        expect(html).toContain('1M context');
+        expect(html).toMatch(/role="switch"(?=[^>]*aria-checked="true")/);
+        expect(html).toContain('title="Use 1M context window"');
+        expect(html).not.toContain('chat.longContext.label');
+    });
+
+    it('disables and unchecks the 1M context toggle for Haiku models', () => {
+        const html = renderToStaticMarkup(
+            <ButtonArea
+                provider="claude"
+                permissionMode="default"
+                model="claude-haiku-4-5"
+                reasoningEffort="high"
+                longContextEnabled
+                isLoading={false}
+                isSubmitting={false}
+                isEnhancing={false}
+                canSubmit
+                hasPromptText
+                onLongContextChange={() => undefined}
+                onProviderChange={() => undefined}
+                onModeChange={() => undefined}
+                onModelChange={() => undefined}
+                onReasoningChange={() => undefined}
+                onEnhance={() => undefined}
+                onSubmit={() => undefined}
+                onStop={() => undefined}
+            />,
+        );
+
+        expect(html).toContain('chat-long-context-toggle');
+        expect(html).toMatch(/role="switch"(?=[^>]*aria-checked="false")(?=[^>]*disabled)/);
+        expect(html).toContain('title="1M context is not available for this model"');
+    });
+
+    it('does not render the 1M context toggle for Codex models', () => {
+        const html = renderToStaticMarkup(
+            <ButtonArea
+                provider="codex"
+                permissionMode="default"
+                model="gpt-5.2-codex"
+                reasoningEffort="high"
+                longContextEnabled
+                isLoading={false}
+                isSubmitting={false}
+                isEnhancing={false}
+                canSubmit
+                hasPromptText
+                onLongContextChange={() => undefined}
+                onProviderChange={() => undefined}
+                onModeChange={() => undefined}
+                onModelChange={() => undefined}
+                onReasoningChange={() => undefined}
+                onEnhance={() => undefined}
+                onSubmit={() => undefined}
+                onStop={() => undefined}
+            />,
+        );
+
+        expect(html).not.toContain('chat-long-context-toggle');
+        expect(html).not.toContain('1M context');
+    });
+
     it('surfaces model refresh loading and error states in the model menu footer', () => {
         const loadingHtml = renderToStaticMarkup(
             <ButtonArea

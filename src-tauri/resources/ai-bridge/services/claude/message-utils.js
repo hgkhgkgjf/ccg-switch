@@ -3,11 +3,12 @@
  * SDK initialization, retry logic, session file helpers, content truncation, and error payloads.
  */
 
-import { isClaudeSdkAvailable, loadAnthropicSdk, loadBedrockSdk, loadClaudeSdk } from '../../utils/sdk-loader.js';
-import { existsSync } from 'fs';
-import { join } from 'path';
-import { getClaudeDir } from '../../utils/path-utils.js';
-import { loadClaudeSettings } from '../../config/api-config.js';
+import {isClaudeSdkAvailable, loadAnthropicSdk, loadBedrockSdk, loadClaudeSdk} from '../../utils/sdk-loader.js';
+import {existsSync} from 'fs';
+import {join} from 'path';
+import {getClaudeDir} from '../../utils/path-utils.js';
+import {loadClaudeSettings} from '../../config/api-config.js';
+import {buildUsagePayload} from '../../utils/usage-utils.js';
 
 // SDK cache (module-internal, accessed via ensure* functions)
 let claudeSdk = null;
@@ -167,17 +168,13 @@ export function truncateErrorContent(content, maxLen = 1000) {
  * Emit [USAGE] tag for Java-side token tracking.
  * NOTE: Uses process.stdout.write for consistent buffering with other IPC messages.
  * The Java backend parses stdout lines starting with "[USAGE]" to extract token metrics.
+ * @param {object} msg  SDK message.
+ * @param {number} [maxTokens]  Optional context-window upper bound.
  */
-export function emitUsageTag(msg) {
+export function emitUsageTag(msg, maxTokens) {
   if (msg.type === 'assistant' && msg.message?.usage) {
-    const {
-      input_tokens = 0, output_tokens = 0,
-      cache_creation_input_tokens = 0, cache_read_input_tokens = 0
-    } = msg.message.usage;
     // Intentional stdout IPC — parsed by Java backend (see ClaudeMessageHandler.parseUsageTag)
-    process.stdout.write('[USAGE] ' + JSON.stringify({
-      input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
-    }) + '\n');
+    process.stdout.write('[USAGE] ' + JSON.stringify(buildUsagePayload(msg.message.usage, maxTokens)) + '\n');
   }
 }
 

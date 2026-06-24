@@ -270,6 +270,65 @@ export interface ChatMessageEvent {
 - Full `npm test`, `npm run build`, and `cargo test --manifest-path
   src-tauri/Cargo.toml` should pass when the protocol changes.
 
+### Chat Sidecar Usage And Model Selection
+
+The Node ai-bridge emits usage over the same `chat://stream` line protocol as
+content deltas:
+
+```text
+[USAGE] {"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":10,"max_tokens":1000000}
+```
+
+TypeScript payload:
+
+```ts
+export interface TokenUsage {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+    max_tokens?: number;
+}
+```
+
+**Usage contract**:
+- `max_tokens` is optional for backward compatibility with older sidecar output.
+- When present, `max_tokens` must be a finite positive number.
+- Streaming accumulated `[USAGE]` events and the final authoritative assistant
+  `[USAGE]` event for the same request must derive `max_tokens` from the same
+  request model id.
+- The final assistant message usage remains authoritative for token counts, but
+  it must include `max_tokens` when the sidecar knows the context window. Do not
+  let a final usage event without `max_tokens` erase a previously reported
+  1M/200K window in the frontend store.
+- The current Claude context-window rule is request-owned: a model id ending in
+  `[1m]` means `1_000_000`; any other Claude model id means `200_000`.
+
+**Model selection contract**:
+- `useChatStore.send()` sends the concrete Chat dropdown selection as
+  `chat_send.params.model`.
+- Provider default fields such as `defaultOpusModel` and settings env values
+  such as `ANTHROPIC_DEFAULT_OPUS_MODEL` may supply model-list/default choices,
+  but they must not override a concrete model id the user selected in Chat.
+- `resolveModelFromSettings(modelId, env)` must preserve explicit selections
+  such as `claude-opus-4-8`, `claude-opus-4-8[1m]`, and custom provider model
+  ids. It may normalize the request-owned `[1m]` suffix.
+- `ANTHROPIC_MODEL` is the only settings env field that remains a global model
+  override. If it is set, apply the same request-owned `[1m]` suffix
+  normalization to the override value.
+
+**Tests required**:
+- Node unit test: explicit `claude-opus-4-8` is not rewritten to a provider
+  family default such as `claude-opus-4-7`.
+- Node unit test: explicit `claude-opus-4-8[1m]` preserves both the version and
+  suffix.
+- Node unit test: accumulated and final `[USAGE]` payloads include matching
+  `max_tokens`.
+- Frontend store test: `[USAGE]` with `max_tokens` writes `contextMaxTokens`,
+  and a later legacy usage payload without `max_tokens` does not clear it.
+- Composer render test: `contextMaxTokens = 1_000_000` renders the usage
+  indicator against `1000k`.
+
 ## Scenario: Chat Daemon Stdout-Close Recovery
 
 ### 1. Scope / Trigger

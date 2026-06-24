@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  mapModelIdToSdkName,
-  resolveModelFromSettings,
-  setModelEnvironmentVariables,
-  modelSupportsVision,
+    mapModelIdToSdkName,
+    modelSupportsVision,
+    resolveModelFromSettings,
+    setModelEnvironmentVariables,
 } from './model-utils.js';
 
 // --- mapModelIdToSdkName ------------------------------------------------
@@ -28,15 +28,15 @@ test('resolveModelFromSettings returns original when no settings env provided', 
   assert.equal(resolveModelFromSettings('claude-sonnet-4-6', {}), 'claude-sonnet-4-6');
 });
 
-test('resolveModelFromSettings applies model-specific settings mapping', () => {
+test('resolveModelFromSettings keeps explicit Claude model selections over family defaults', () => {
   const env = {
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.7-opus',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-7',
     ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-4.7',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7-flash',
   };
-  assert.equal(resolveModelFromSettings('claude-opus-4-7', env), 'glm-4.7-opus');
-  assert.equal(resolveModelFromSettings('claude-sonnet-4-6', env), 'glm-4.7');
-  assert.equal(resolveModelFromSettings('claude-haiku-4-5', env), 'glm-4.7-flash');
+  assert.equal(resolveModelFromSettings('claude-opus-4-8', env), 'claude-opus-4-8');
+  assert.equal(resolveModelFromSettings('claude-sonnet-4-6', env), 'claude-sonnet-4-6');
+  assert.equal(resolveModelFromSettings('claude-haiku-4-5', env), 'claude-haiku-4-5');
 });
 
 test('resolveModelFromSettings honors global ANTHROPIC_MODEL override', () => {
@@ -68,38 +68,42 @@ test('resolveModelFromSettings does NOT remap non-Anthropic model IDs', () => {
 
 // --- [1m] suffix follows the webview request state ------------------------
 //
-// Bug: when a user opens the 1M context toggle in the UI, the frontend sends
-//   `claude-sonnet-4-6[1m]` to the backend. If `settings.json` contains a
-//   provider mapping like `ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.7` (no [1m]),
-//   the old resolver returned `'glm-4.7'`, silently dropping the suffix.
-//   The Claude SDK then read the env var without [1m] and did NOT enable the
-//   1M context window even though the toggle was on.
-// Fix: make the request modelId the source of truth. Preserve/append [1m] when
-// the toggle is on, and strip stale mapping suffixes when the toggle is off.
+// The Chat request modelId is the source of truth. Provider family defaults may
+// have supplied model-list options, but they must not rewrite the user's
+// selected id. Preserve [1m] when the toggle is on, and strip a stale suffix from
+// the selected request model when the toggle is off.
 
-test('resolveModelFromSettings preserves [1m] suffix when mapping value lacks it', () => {
+test('resolveModelFromSettings preserves [1m] on explicit Claude selection despite family defaults', () => {
   const env = { ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-4.7' };
   assert.equal(
     resolveModelFromSettings('claude-sonnet-4-6[1m]', env),
-    'glm-4.7[1m]',
-    'request asked for 1M, mapping must keep the [1m] suffix so the SDK enables 1M context'
+    'claude-sonnet-4-6[1m]',
+    'request asked for 1M, selected model must keep the [1m] suffix so the SDK enables 1M context'
   );
 });
 
-test('resolveModelFromSettings does not double-append [1m] when mapping already has it', () => {
+test('resolveModelFromSettings keeps explicit Opus version with [1m] despite older provider default', () => {
+  const env = { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-7' };
+  assert.equal(
+    resolveModelFromSettings('claude-opus-4-8[1m]', env),
+    'claude-opus-4-8[1m]'
+  );
+});
+
+test('resolveModelFromSettings preserves selected custom provider model id and [1m]', () => {
   const env = { ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-pro[1m]' };
   assert.equal(
-    resolveModelFromSettings('claude-sonnet-4-6[1m]', env),
-    'deepseek-v4-pro[1m]'
+    resolveModelFromSettings('MiniMax-M2.5[1m]', env),
+    'MiniMax-M2.5[1m]'
   );
 });
 
-test('resolveModelFromSettings strips stale [1m] suffix when 1M toggle is OFF', () => {
+test('resolveModelFromSettings ignores stale family-default [1m] suffix when 1M toggle is OFF', () => {
   const env = { ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-4.7[1M]' };
   assert.equal(
-    resolveModelFromSettings('claude-sonnet-4-6', env),
-    'glm-4.7',
-    'request did not ask for 1M, stale settings mapping suffix must not force it on'
+    resolveModelFromSettings('MiniMax-M2.5', env),
+    'MiniMax-M2.5',
+    'request did not ask for 1M, stale settings family default suffix must not force it on'
   );
 });
 
@@ -109,9 +113,47 @@ test('resolveModelFromSettings preserves [1m] across ANTHROPIC_MODEL global over
   assert.equal(resolveModelFromSettings('claude-sonnet-4-6', env), 'override-model');
 });
 
-test('resolveModelFromSettings preserves [1m] for opus mapping', () => {
+test('resolveModelFromSettings preserves explicit opus [1m] without applying opus mapping', () => {
   const env = { ANTHROPIC_DEFAULT_OPUS_MODEL: 'mimo-v2.5-pro' };
-  assert.equal(resolveModelFromSettings('claude-opus-4-7[1m]', env), 'mimo-v2.5-pro[1m]');
+  assert.equal(resolveModelFromSettings('claude-opus-4-7[1m]', env), 'claude-opus-4-7[1m]');
+});
+
+test('resolveModelFromSettings can opt into legacy family default mapping for non-chat callers', () => {
+  const env = {
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7-flash',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-7',
+  };
+  assert.equal(
+    resolveModelFromSettings('claude-haiku-4-5', env, {
+      allowFamilyDefaultMapping: true,
+    }),
+    'glm-4.7-flash'
+  );
+  assert.equal(
+    resolveModelFromSettings('claude-opus-4-8', env, {
+      allowFamilyDefaultMapping: true,
+    }),
+    'claude-opus-4-7'
+  );
+});
+
+test('resolveModelFromSettings opt-in family mapping still follows request-owned [1m] state', () => {
+  const env = {
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7-flash[1m]',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-4.7',
+  };
+  assert.equal(
+    resolveModelFromSettings('claude-haiku-4-5', env, {
+      allowFamilyDefaultMapping: true,
+    }),
+    'glm-4.7-flash'
+  );
+  assert.equal(
+    resolveModelFromSettings('claude-sonnet-4-6[1m]', env, {
+      allowFamilyDefaultMapping: true,
+    }),
+    'glm-4.7[1m]'
+  );
 });
 
 // --- setModelEnvironmentVariables ---------------------------------------

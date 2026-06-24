@@ -4,61 +4,57 @@
  */
 
 import {
-  isCustomBaseUrl,
-  loadClaudeSettings,
-  setupApiKey,
-  buildCliEnv,
-  buildWebviewControlledSettingsOverride,
+    buildCliEnv,
+    buildWebviewControlledSettingsOverride,
+    isCustomBaseUrl,
+    loadClaudeSettings,
+    setupApiKey,
 } from '../../config/api-config.js';
-import { selectWorkingDirectory } from '../../utils/path-utils.js';
+import {selectWorkingDirectory} from '../../utils/path-utils.js';
+import {mapModelIdToSdkName, resolveModelFromSettings, setModelEnvironmentVariables} from '../../utils/model-utils.js';
+import {deriveContextWindow} from '../../utils/usage-utils.js';
+import {canUseTool} from '../../permission-handler.js';
+import {buildContentBlocks, loadAttachments} from './attachment-service.js';
+import {buildIDEContextPrompt} from '../system-prompts.js';
+import {buildQuickFixPrompt} from '../quickfix-prompts.js';
+import {registerActiveQueryResult, removeSession} from './message-service.js';
+import {normalizePermissionMode} from './permission-mode.js';
+import {redactSecrets, truncateString} from './message-output-filter.js';
 import {
-  mapModelIdToSdkName,
-  resolveModelFromSettings,
-  setModelEnvironmentVariables
-} from '../../utils/model-utils.js';
-import { canUseTool } from '../../permission-handler.js';
-import { buildContentBlocks, loadAttachments } from './attachment-service.js';
-import { buildIDEContextPrompt } from '../system-prompts.js';
-import { buildQuickFixPrompt } from '../quickfix-prompts.js';
-import { registerActiveQueryResult, removeSession } from './message-service.js';
-import { normalizePermissionMode } from './permission-mode.js';
-import { redactSecrets, truncateString } from './message-output-filter.js';
-import {
-  beginRuntimeTurn,
-  cleanupStaleAnonymousRuntimes,
-  cleanupStaleSessionRuntimes,
-  disposeRuntime,
-  registerRuntimeSession,
-  acquireRuntime,
-  applyDynamicControls,
-  buildRuntimeSignature,
-  endRuntimeTurn,
-  resetCachedQueryFn,
-  setCachedQueryFn,
-  touchRuntime,
+    acquireRuntime,
+    beginRuntimeTurn,
+    buildRuntimeSignature,
+    cleanupStaleAnonymousRuntimes,
+    cleanupStaleSessionRuntimes,
+    disposeRuntime,
+    endRuntimeTurn,
+    registerRuntimeSession,
+    resetCachedQueryFn,
+    setCachedQueryFn,
+    touchRuntime,
 } from './runtime-lifecycle.js';
 import {
-  SESSION_CLEANUP_INTERVAL_MS,
-  clearActiveTurnRuntime,
-  clearActiveTurnRuntimeIf,
-  getActiveTurnRuntime,
-  getAllRuntimes,
-  getRuntimeForSession,
-  getSnapshot,
-  resetRegistryState,
-  setActiveTurnRuntime,
+    clearActiveTurnRuntime,
+    clearActiveTurnRuntimeIf,
+    getActiveTurnRuntime,
+    getAllRuntimes,
+    getRuntimeForSession,
+    getSnapshot,
+    resetRegistryState,
+    SESSION_CLEANUP_INTERVAL_MS,
+    setActiveTurnRuntime,
 } from './runtime-registry.js';
-import { loadMcpServersConfigAsRecord } from './mcp-status/config-loader.js';
+import {loadMcpServersConfigAsRecord} from './mcp-status/config-loader.js';
 import {
-  createTurnState,
-  emitUsageTag,
-  processMessageContent,
-  processStreamEvent,
-  processToolResultMessages,
-  shouldOutputMessage,
+    createTurnState,
+    emitUsageTag,
+    processMessageContent,
+    processStreamEvent,
+    processToolResultMessages,
+    shouldOutputMessage,
 } from './stream-event-processor.js';
-import { generateSessionTitle } from '../session-title-service.js';
-import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
+import {generateSessionTitle} from '../session-title-service.js';
+import {getClaudeCliPathOverride} from '../../utils/claude-cli-path.js';
 
 const SUPPORTED_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -305,7 +301,7 @@ async function executeTurn(runtime, requestContext, turnMeta) {
       // The assistant message's usage field contains the correct cumulative total.
       // In streaming mode, this overwrites any intermediate [USAGE] values sent during streaming.
       // The Java backend (ClaudeMessageHandler.handleAssistantMessage) relies on this for correct totals.
-      emitUsageTag(msg);
+      emitUsageTag(msg, deriveContextWindow(turnState.modelId));
       processToolResultMessages(msg);
 
       if (msg?.type === 'system' && msg.session_id) {

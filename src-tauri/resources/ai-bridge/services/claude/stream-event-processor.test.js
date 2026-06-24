@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createTurnState,
-  processMessageContent,
-  processStreamEvent,
-  shouldOutputMessage,
+    createTurnState,
+    emitUsageTag,
+    processMessageContent,
+    processStreamEvent,
+    shouldOutputMessage,
 } from './stream-event-processor.js';
 
-function makeTurnState(streamingEnabled = true) {
+function makeTurnState(streamingEnabled = true, modelId = null) {
   return createTurnState(
-    { streamingEnabled, requestedSessionId: 'sess-test' },
+    { streamingEnabled, requestedSessionId: 'sess-test', modelId },
     null
   );
 }
@@ -32,6 +33,13 @@ function captureStdout(fn) {
 
 function tagLines(captured, tag) {
   return captured.filter((line) => line.startsWith(tag));
+}
+
+function usagePayloads(captured) {
+  return tagLines(captured, '[USAGE]').map((line) => {
+    const payload = line.replace(/^\[USAGE\]\s*/, '').trim();
+    return JSON.parse(payload);
+  });
 }
 
 test('shouldOutputMessage: streaming assistant without tool_use returns false', () => {
@@ -877,6 +885,95 @@ test('REGRESSION (eb1786): message_start reset preserves cross-turn usage accumu
 
   assert.equal(state.accumulatedUsage?.output_tokens, 20, 'prior-turn output_tokens must survive the reset');
   assert.equal(state.accumulatedUsage?.input_tokens, 8, 'input_tokens follows mergeUsage latest-value semantics');
+});
+
+test('USAGE: streaming accumulated and final assistant payloads include matching max_tokens', () => {
+  const state = makeTurnState(true, 'claude-opus-4-8[1m]');
+
+  const captured = captureStdout(() => {
+    processStreamEvent(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: {
+            usage: {
+              input_tokens: 100,
+              cache_creation_input_tokens: 10,
+              cache_read_input_tokens: 20,
+            },
+          },
+        },
+      },
+      state,
+    );
+    processStreamEvent(
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_delta',
+          usage: { output_tokens: 30 },
+        },
+      },
+      state,
+    );
+    emitUsageTag(
+      {
+        type: 'assistant',
+        message: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 30,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 20,
+          },
+        },
+      },
+      1_000_000,
+    );
+  });
+
+  assert.deepEqual(usagePayloads(captured), [
+    {
+      input_tokens: 100,
+      output_tokens: 30,
+      cache_creation_input_tokens: 10,
+      cache_read_input_tokens: 20,
+      max_tokens: 1_000_000,
+    },
+    {
+      input_tokens: 100,
+      output_tokens: 30,
+      cache_creation_input_tokens: 10,
+      cache_read_input_tokens: 20,
+      max_tokens: 1_000_000,
+    },
+  ]);
+});
+
+test('USAGE: final assistant payload keeps old shape when max_tokens is omitted', () => {
+  const captured = captureStdout(() => {
+    emitUsageTag({
+      type: 'assistant',
+      message: {
+        usage: {
+          input_tokens: 1,
+          output_tokens: 2,
+          cache_creation_input_tokens: 3,
+          cache_read_input_tokens: 4,
+        },
+      },
+    });
+  });
+
+  assert.deepEqual(usagePayloads(captured), [
+    {
+      input_tokens: 1,
+      output_tokens: 2,
+      cache_creation_input_tokens: 3,
+      cache_read_input_tokens: 4,
+    },
+  ]);
 });
 
 // =========================================================================
