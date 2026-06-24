@@ -8,8 +8,8 @@
 
 @@@auto:current-status
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-06-24
+- **Total Sessions**: 12
+- **Last Active**: 2026-06-25
 @@@/auto:current-status
 
 ---
@@ -19,7 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~298 | Active |
+| `journal-1.md` | ~331 | Active |
 @@@/auto:active-documents
 
 ---
@@ -29,6 +29,7 @@
 @@@auto:session-history
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-06-25 | Provider brand icon dropdown fix | `0a85ede` | `cc-gui` |
 | 11 | 2026-06-24 | Chat tab startup and recent-session polish | `0a85ede` | `cc-gui` |
 | 10 | 2026-06-24 | Chat usage and 1M context contract | `a772c15`, `cb5a194` | `cc-gui` |
 | 9 | 2026-06-23 | @文件引用 chip 标签 + Toast 玻璃拟态样式 | `8beee23` | `cc-gui` |

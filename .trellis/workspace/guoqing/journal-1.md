@@ -296,3 +296,36 @@ Finished the chat tab startup/recent-session polish task, including StatusPanel 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Provider brand icon dropdown fix
+
+**Date**: 2026-06-25
+**Task**: Provider brand icon dropdown fix
+**Branch**: `cc-gui`
+
+### Summary
+
+Aligned provider brand icons and fixed the provider filter dropdown so selecting an option closes it immediately; verified targeted tests and frontend build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0a85ede` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
