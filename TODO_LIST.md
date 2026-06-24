@@ -1,3 +1,12 @@
+## 本轮 PLAN 2026-06-24 Chat provider live switching and multi-session management
+
+- 目标：规划并实现 Chat 多服务商实时生效、多会话不中断、顶部会话 tab、最近聊天按项目分组管理。第一阶段先完成 Trellis 方案，不改业务代码；确认后再进入实现。
+- 功能点 1：需求与证据调研。验证方式：读取 Trellis context、前端/后端规范、历史任务 `06-16-session-history-management` 与归档任务 `06-24-chat-usage-and-model-selection-contract`，并用 CodeGraph/源码确认 `useChatStore`、`ChatPage`、`ChatSessionSidebar`、`ChatManager`、`DaemonClient`、`daemon.js` 的现状。
+- 功能点 2：PRD。验证方式：更新 `.trellis/tasks/06-24-chat-provider-live-switching-multi-session-management/prd.md`，明确运行时 provider 与后台 Provider 配置两层含义、需求、验收标准、非目标和待确认问题。
+- 功能点 3：技术设计。验证方式：新增 `design.md`，定义 snapshot/request ownership、session switching、provider/model switching、provider-config refresh、recent sessions 和 top tabs 的边界与风险。
+- 功能点 4：执行计划。验证方式：新增 `implement.md`，列出 RED 测试、store 重构、后端 refresh、recent sessions、tab UI、spec 更新和验证命令。
+- 功能点 5：方案确认。验证方式：向用户输出问题分析、修改思路、影响范围、风险点、验证方式，并等待确认后才能 `task.py start` 和改代码。
+
 ## 本轮 PLAN 2026-06-24 SDK dependency panel UI refinement
 
 - 目标：在保留 SDK 版本安装 / 更新 / 切换 / 卸载能力的前提下，按用户截图重做 SDK 依赖弹窗排版：每个 SDK 一张深色紧凑卡片，标题行显示名称、当前版本 chip、最新版本 chip 和轻量更新提示，目标版本 select 独占一行，按钮行与底部版本元信息对齐。
