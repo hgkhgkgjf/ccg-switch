@@ -8,8 +8,8 @@
 
 @@@auto:current-status
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
-- **Last Active**: 2026-06-23
+- **Total Sessions**: 10
+- **Last Active**: 2026-06-24
 @@@/auto:current-status
 
 ---
@@ -19,7 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~224 | Active |
+| `journal-1.md` | ~258 | Active |
 @@@/auto:active-documents
 
 ---
@@ -29,6 +29,7 @@
 @@@auto:session-history
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-06-24 | Chat usage and 1M context contract | `a772c15`, `cb5a194` | `cc-gui` |
 | 9 | 2026-06-23 | @文件引用 chip 标签 + Toast 玻璃拟态样式 | `8beee23` | `cc-gui` |
 | 8 | 2026-06-23 | Fix button hover + code block theme | `b478fbd` | `cc-gui` |
 | 7 | 2026-06-23 | 修复聊天历史滚动加载截断与助手消息聚类乱序 | `785adee`, `be8a6e9` | `cc-gui` |

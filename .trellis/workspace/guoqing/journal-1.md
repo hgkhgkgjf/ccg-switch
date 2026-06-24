@@ -222,3 +222,37 @@ Restored missing Trellis workspace journal state and documented duplicate toolbl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Chat usage and 1M context contract
+
+**Date**: 2026-06-24
+**Task**: Chat usage and 1M context contract
+**Branch**: `cc-gui`
+
+### Summary
+
+Completed chat usage max_tokens/model-selection contract and added a default-enabled Claude 1M context toggle that stores base models, appends [1m] only at send time, disables Haiku, hides for Codex, and documents the cross-layer/UI contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a772c15` | (see git log) |
+| `cb5a194` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
