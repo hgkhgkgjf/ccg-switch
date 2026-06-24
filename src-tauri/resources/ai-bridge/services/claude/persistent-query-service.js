@@ -4,11 +4,11 @@
  */
 
 import {
-  buildCliEnv,
-  buildWebviewControlledSettingsOverride,
-  isCustomBaseUrl,
-  loadClaudeSettings,
-  setupApiKey,
+    buildCliEnv,
+    buildWebviewControlledSettingsOverride,
+    isCustomBaseUrl,
+    loadClaudeSettings,
+    setupApiKey,
 } from '../../config/api-config.js';
 import {selectWorkingDirectory} from '../../utils/path-utils.js';
 import {mapModelIdToSdkName, resolveModelFromSettings, setModelEnvironmentVariables} from '../../utils/model-utils.js';
@@ -21,37 +21,37 @@ import {registerActiveQueryResult, removeSession} from './message-service.js';
 import {normalizePermissionMode} from './permission-mode.js';
 import {redactSecrets, truncateString} from './message-output-filter.js';
 import {
-  acquireRuntime,
-  beginRuntimeTurn,
-  buildRuntimeSignature,
-  cleanupStaleAnonymousRuntimes,
-  cleanupStaleSessionRuntimes,
-  disposeRuntime,
-  endRuntimeTurn,
-  registerRuntimeSession,
-  resetCachedQueryFn,
-  setCachedQueryFn,
-  touchRuntime,
+    acquireRuntime,
+    beginRuntimeTurn,
+    buildRuntimeSignature,
+    cleanupStaleAnonymousRuntimes,
+    cleanupStaleSessionRuntimes,
+    disposeRuntime,
+    endRuntimeTurn,
+    registerRuntimeSession,
+    resetCachedQueryFn,
+    setCachedQueryFn,
+    touchRuntime,
 } from './runtime-lifecycle.js';
 import {
-  clearActiveTurnRuntime,
-  clearActiveTurnRuntimeIf,
-  getActiveTurnRuntime,
-  getAllRuntimes,
-  getRuntimeForSession,
-  getSnapshot,
-  resetRegistryState,
-  SESSION_CLEANUP_INTERVAL_MS,
-  setActiveTurnRuntime,
+    clearActiveTurnRuntime,
+    clearActiveTurnRuntimeIf,
+    getActiveTurnRuntime,
+    getAllRuntimes,
+    getRuntimeForSession,
+    getSnapshot,
+    resetRegistryState,
+    SESSION_CLEANUP_INTERVAL_MS,
+    setActiveTurnRuntime,
 } from './runtime-registry.js';
 import {loadMcpServersConfigAsRecord} from './mcp-status/config-loader.js';
 import {
-  createTurnState,
-  emitUsageTag,
-  processMessageContent,
-  processStreamEvent,
-  processToolResultMessages,
-  shouldOutputMessage,
+    createTurnState,
+    emitUsageTag,
+    processMessageContent,
+    processStreamEvent,
+    processToolResultMessages,
+    shouldOutputMessage,
 } from './stream-event-processor.js';
 import {generateSessionTitle} from '../session-title-service.js';
 import {getClaudeCliPathOverride} from '../../utils/claude-cli-path.js';

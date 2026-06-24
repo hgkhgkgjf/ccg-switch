@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createTurnState,
-  emitUsageTag,
-  processMessageContent,
-  processStreamEvent,
-  shouldOutputMessage,
+    createTurnState,
+    emitUsageTag,
+    processMessageContent,
+    processStreamEvent,
+    shouldOutputMessage,
 } from './stream-event-processor.js';
 
 function makeTurnState(streamingEnabled = true, modelId = null) {
