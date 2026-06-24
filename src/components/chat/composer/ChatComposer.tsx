@@ -19,7 +19,7 @@ import {ButtonArea} from './ButtonArea';
 import {CompletionMenu} from './CompletionMenu';
 import {PromptEnhancerDialog} from './PromptEnhancerDialog';
 import {useCompletions} from './useCompletions';
-import {type ChatProviderId, contextWindowFor} from './constants';
+import {apply1MContextSuffix, type ChatProviderId, contextWindowFor} from './constants';
 import {
     buildChatModelList,
     ensureChatModelInList,
@@ -186,11 +186,13 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         draft,
         contextTokens,
         contextMaxTokens,
+        longContextEnabled,
         activeRequestId,
         activeSession,
         setProvider,
         setPermissionMode,
         setModel,
+        setLongContextEnabled,
         setReasoningEffort,
         setDraft,
         send,
@@ -259,7 +261,10 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         () => getChatModelRefreshSource(providerId, providers),
         [providerId, providers],
     );
-    const fallbackMaxTokens = contextWindowFor(model);
+    const effectiveModelForContext = providerId === 'claude'
+        ? apply1MContextSuffix(model, longContextEnabled)
+        : model;
+    const fallbackMaxTokens = contextWindowFor(effectiveModelForContext);
     const maxTokens = contextMaxTokens && contextMaxTokens > 0 ? contextMaxTokens : fallbackMaxTokens;
     const percentage = maxTokens > 0 ? (contextTokens / maxTokens) * 100 : 0;
 
@@ -798,6 +803,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                     modelsCanRefresh={Boolean(modelRefreshSource)}
                     modelsRefreshing={modelsRefreshing}
                     modelsRefreshError={modelsRefreshError}
+                    longContextEnabled={longContextEnabled}
                     reasoningEffort={reasoningEffort}
                     isLoading={isStreaming}
                     isSubmitting={isSending}
@@ -812,6 +818,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                     onProviderChange={(p) => setProvider(p)}
                     onModeChange={setPermissionMode}
                     onModelChange={setModel}
+                    onLongContextChange={setLongContextEnabled}
                     onRefreshModels={handleRefreshModels}
                     onReasoningChange={setReasoningEffort}
                     onEnhance={handleEnhance}

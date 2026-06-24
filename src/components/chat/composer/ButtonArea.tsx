@@ -23,6 +23,7 @@ import {
     AVAILABLE_PROVIDERS,
     type ChatProviderId,
     type ModelInfo,
+    modelSupports1MContext,
     modelsForProvider,
     type PermissionMode,
     type ReasoningEffort,
@@ -61,6 +62,7 @@ interface ButtonAreaProps {
     modelsCanRefresh?: boolean;
     modelsRefreshing?: boolean;
     modelsRefreshError?: string | null;
+    longContextEnabled?: boolean;
     reasoningEffort: ReasoningEffort;
     isLoading: boolean;
     isSubmitting: boolean;
@@ -70,6 +72,7 @@ interface ButtonAreaProps {
     onProviderChange: (p: ChatProviderId) => void;
     onModeChange: (m: PermissionMode) => void;
     onModelChange: (id: string) => void;
+    onLongContextChange?: (enabled: boolean) => void;
     onRefreshModels?: () => void;
     onReasoningChange: (e: ReasoningEffort) => void;
     onEnhance: () => void;
@@ -91,6 +94,7 @@ export function ButtonArea({
     modelsCanRefresh = false,
     modelsRefreshing = false,
     modelsRefreshError = null,
+    longContextEnabled = true,
     reasoningEffort,
     isLoading,
     isSubmitting,
@@ -100,6 +104,7 @@ export function ButtonArea({
     onProviderChange,
     onModeChange,
     onModelChange,
+    onLongContextChange,
     onRefreshModels,
     onReasoningChange,
     onEnhance,
@@ -111,6 +116,7 @@ export function ButtonArea({
     const modeLabel = getChatComposerToolbarLabel({control: 'mode', translate: t});
     const modelLabel = getChatComposerToolbarLabel({control: 'model', translate: t});
     const reasoningLabel = getChatComposerToolbarLabel({control: 'reasoning', translate: t});
+    const longContextLabel = getChatComposerToolbarLabel({control: 'long-context', translate: t});
     const modelsRefreshLabel = getChatComposerToolbarLabel({control: 'models-refresh', translate: t});
     const modelsRefreshingLabel = getChatComposerToolbarLabel({control: 'models-refreshing', translate: t});
     const modelsLoadingLabel = getChatComposerToolbarLabel({control: 'models-loading', translate: t});
@@ -181,6 +187,15 @@ export function ButtonArea({
     const CurrentModeIcon = currentMode ? MODE_ICONS[currentMode.icon] : MessageSquare;
     const currentModel = models.find((m) => m.id === model);
     const controlsDisabled = isLoading || isSubmitting;
+    const supportsLongContext = modelSupports1MContext(model);
+    const showLongContextToggle = provider === 'claude';
+    const displayLongContextEnabled = supportsLongContext && longContextEnabled;
+    const longContextTitle = supportsLongContext
+        ? getChatComposerToolbarLabel({
+            control: displayLongContextEnabled ? 'long-context-enabled' : 'long-context-disabled',
+            translate: t,
+        })
+        : getChatComposerToolbarLabel({control: 'long-context-unavailable', translate: t});
     const modelStatusError = modelsRefreshError ?? modelsError;
     const modelStatusFooter = (modelsLoading || modelsRefreshing || modelStatusError) ? (
         <div
@@ -236,6 +251,27 @@ export function ButtonArea({
                     footer={modelStatusFooter}
                     disabled={controlsDisabled}
                 />
+                {showLongContextToggle && (
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={displayLongContextEnabled}
+                        className={`chat-long-context-toggle flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 text-[11px] font-medium transition-colors ${
+                            displayLongContextEnabled
+                                ? 'border-primary/35 bg-primary/10 text-primary'
+                                : 'border-base-300 bg-base-200 text-base-content/55'
+                        } disabled:cursor-not-allowed disabled:opacity-45`}
+                        title={longContextTitle}
+                        aria-label={longContextLabel}
+                        disabled={controlsDisabled || !supportsLongContext}
+                        onClick={() => onLongContextChange?.(!longContextEnabled)}
+                    >
+                        <span className={`h-2.5 w-2.5 rounded-full ${
+                            displayLongContextEnabled ? 'bg-primary' : 'bg-base-content/35'
+                        }`} />
+                        <span>{longContextLabel}</span>
+                    </button>
+                )}
                 {showModelRefresh && (
                     <button
                         type="button"

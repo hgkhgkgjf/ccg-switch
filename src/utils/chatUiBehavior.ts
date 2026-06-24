@@ -153,6 +153,10 @@ export type ChatComposerToolbarControl =
     | 'mode'
     | 'model'
     | 'reasoning'
+    | 'long-context'
+    | 'long-context-enabled'
+    | 'long-context-disabled'
+    | 'long-context-unavailable'
     | 'models-refresh'
     | 'models-refreshing'
     | 'models-loading'
@@ -294,6 +298,22 @@ const CHAT_COMPOSER_TOOLBAR_LABELS: Record<ChatComposerToolbarControl, { key: st
     reasoning: {
         key: 'chat.reasoningLabel',
         fallback: 'Reasoning effort',
+    },
+    'long-context': {
+        key: 'chat.longContext.label',
+        fallback: '1M context',
+    },
+    'long-context-enabled': {
+        key: 'chat.longContext.enabledTitle',
+        fallback: 'Use 1M context window',
+    },
+    'long-context-disabled': {
+        key: 'chat.longContext.disabledTitle',
+        fallback: 'Use standard 200K context window',
+    },
+    'long-context-unavailable': {
+        key: 'chat.longContext.unavailableTitle',
+        fallback: '1M context is not available for this model',
     },
     'models-refresh': {
         key: 'chat.modelsRefresh',

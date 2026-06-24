@@ -207,6 +207,12 @@
         "modelsRefreshEmpty": "接口未返回模型，已使用已配置模型",
         "modelsRefreshSaveError": "已获取模型但无法保存",
         "reasoningLabel": "推理强度",
+        "longContext": {
+            "label": "1M 上下文",
+            "enabledTitle": "使用 1M 上下文窗口",
+            "disabledTitle": "使用标准 200K 上下文窗口",
+            "unavailableTitle": "当前模型不支持 1M 上下文"
+        },
         "enhancePrompt": "润色提示词",
         "modes": {
             "default": {

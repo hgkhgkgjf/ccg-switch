@@ -638,6 +638,15 @@ See `src/components/providers/ProviderCard.tsx` and
   `selector-dropdown-icon-box` with trigger/option/check variants. Model-family
   glyphs have different intrinsic bounds and otherwise drift out of alignment in
   the compact toolbar.
+  The Claude 1M context control follows this compact selector-row pattern:
+  render a small switch next to the model selector, not a large explanatory
+  panel. Its label and `title` / `aria-label` must use the shared readable
+  fallback boundary (`1M context`, `Use 1M context window`, `Use standard 200K
+  context window`, `1M context is not available for this model`) so users never
+  see raw `chat.longContext.*` keys. The switch defaults to checked for
+  supported Claude models, renders disabled and unchecked for Haiku, and is not
+  shown for Codex. Store only the base model id in model selection state; append
+  `[1m]` only when sending a Claude request with the toggle enabled.
 - Chat provider selectors should follow cc-gui's compact provider icon pattern.
   The provider switch trigger should be icon-only with a tooltip, while dropdown
   options keep the provider label plus the same provider-specific icon. Claude

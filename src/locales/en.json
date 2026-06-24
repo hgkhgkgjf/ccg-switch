@@ -218,6 +218,12 @@
         "modelsRefreshEmpty": "No models returned; using configured models",
         "modelsRefreshSaveError": "Fetched models could not be saved",
         "reasoningLabel": "Reasoning effort",
+        "longContext": {
+            "label": "1M context",
+            "enabledTitle": "Use 1M context window",
+            "disabledTitle": "Use standard 200K context window",
+            "unavailableTitle": "1M context is not available for this model"
+        },
         "enhancePrompt": "Enhance prompt",
         "modes": {
             "default": {

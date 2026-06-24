@@ -24,7 +24,11 @@ import {
 } from '../types/session';
 import {AskUserQuestionRequest, PlanApprovalRequest, ToolPermissionRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
-import {reasoningLevelsFor,} from '../components/chat/composer/constants';
+import {
+    apply1MContextSuffix,
+    reasoningLevelsFor,
+    strip1MContextSuffix,
+} from '../components/chat/composer/constants';
 import {isProtocolContextText, mergeRawChatMessage, TOOL_RESULT_CONTENT} from '../utils/chatMessageFlow';
 import {
     type ChatTurnStopOutcome,
@@ -36,6 +40,7 @@ import {CHAT_MODEL_SELECTION_KEY_PREFIX, getDefaultChatModelId,} from '../utils/
 
 const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
 const REASONING_KEY = 'ccg-chat-reasoning';
+const LONG_CONTEXT_KEY = 'ccg-chat-long-context';
 const HANDOFF_CONTEXT_MAX_MESSAGES = 24;
 const HANDOFF_CONTEXT_MAX_CHARS = 12_000;
 const ATTACHMENT_ONLY_MESSAGE = 'Please analyze the attached image(s).';
@@ -135,7 +140,7 @@ function loadDraft(provider: ChatProviderId): string {
 function defaultModel(provider: ChatProviderId): string {
     try {
         const saved = localStorage.getItem(CHAT_MODEL_SELECTION_KEY_PREFIX + provider);
-        if (saved) return saved;
+        if (saved) return strip1MContextSuffix(saved);
     } catch {
         // ignore
     }
@@ -150,6 +155,17 @@ function loadReasoning(): ReasoningEffort {
         // ignore
     }
     return 'high';
+}
+
+function loadLongContextEnabled(): boolean {
+    try {
+        const saved = localStorage.getItem(LONG_CONTEXT_KEY);
+        if (saved === 'false') return false;
+        if (saved === 'true') return true;
+    } catch {
+        // ignore
+    }
+    return true;
 }
 
 function imageBlockFromAttachment(attachment: ChatAttachment): ImageBlock | null {
@@ -271,6 +287,8 @@ interface ChatState {
     reasoningEffort: ReasoningEffort;
     /** 输入框草稿（按 provider 维度持久化，跨页面保留） */
     draft: string;
+    /** Claude 1M 上下文开关，发送时临时映射为模型 `[1m]` suffix。 */
+    longContextEnabled: boolean;
     /** 累计上下文 token 数（用于用量环估算） */
     contextTokens: number;
     /** 上下文窗口上限（由 sidecar [USAGE] 推送，缺省时回退静态表） */
@@ -320,6 +338,7 @@ interface ChatState {
     setProvider: (p: ChatProvider) => void;
     setPermissionMode: (m: PermissionMode) => void;
     setModel: (id: string) => void;
+    setLongContextEnabled: (enabled: boolean) => void;
     setReasoningEffort: (e: ReasoningEffort) => void;
     setDraft: (text: string) => void;
     send: (text: string, opts?: {
@@ -748,6 +767,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     model: defaultModel('claude'),
     reasoningEffort: loadReasoning(),
     draft: loadDraft('claude'),
+    longContextEnabled: loadLongContextEnabled(),
     contextTokens: 0,
     contextMaxTokens: null,
     daemonReady: false,
@@ -1061,19 +1081,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     setModel: (id) => {
         if (hasActiveChatTurn(get())) return;
+        const baseModel = strip1MContextSuffix(id);
         try {
-            localStorage.setItem(CHAT_MODEL_SELECTION_KEY_PREFIX + get().provider, id);
+            localStorage.setItem(CHAT_MODEL_SELECTION_KEY_PREFIX + get().provider, baseModel);
         } catch {
             // ignore
         }
         // 切模型后校正推理档位（避免停留在新模型不支持的档）。
-        const levels = reasoningLevelsFor(get().provider as ChatProviderId, id);
+        const levels = reasoningLevelsFor(get().provider as ChatProviderId, baseModel);
         set((state) => ({
-            model: id,
+            model: baseModel,
             reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
                 ? state.reasoningEffort
                 : (levels[levels.length - 1]?.id ?? 'high'),
         }));
+    },
+
+    setLongContextEnabled: (enabled) => {
+        if (hasActiveChatTurn(get())) return;
+        try {
+            localStorage.setItem(LONG_CONTEXT_KEY, String(enabled));
+        } catch {
+            // ignore
+        }
+        set({longContextEnabled: enabled});
     },
 
     setReasoningEffort: (e) => {
@@ -1148,13 +1179,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // ignore
         }
 
-        const { provider, sessionId, permissionMode, model, reasoningEffort, currentCwd } = get();
+        const {
+            provider,
+            sessionId,
+            permissionMode,
+            model,
+            longContextEnabled,
+            reasoningEffort,
+            currentCwd,
+        } = get();
+        const requestedModel = opts?.model ?? model;
+        const effectiveModel = provider === 'claude'
+            ? apply1MContextSuffix(requestedModel, longContextEnabled)
+            : requestedModel;
         const params: Record<string, unknown> = {
             message: outboundMessage,
             sessionId: provider === 'claude' ? (sessionId ?? undefined) : undefined,
             threadId: provider === 'codex' ? (sessionId ?? undefined) : undefined,
             cwd: opts?.cwd ?? currentCwd ?? undefined,
-            model: opts?.model ?? model,
+            model: effectiveModel,
             permissionMode,
             reasoningEffort,
             streaming: true,

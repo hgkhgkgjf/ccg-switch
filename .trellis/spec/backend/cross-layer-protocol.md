@@ -305,8 +305,20 @@ export interface TokenUsage {
   `[1m]` means `1_000_000`; any other Claude model id means `200_000`.
 
 **Model selection contract**:
-- `useChatStore.send()` sends the concrete Chat dropdown selection as
-  `chat_send.params.model`.
+- The Chat UI stores the base dropdown model id, for example
+  `claude-opus-4-8`; it must not persist the transient `[1m]` suffix in the
+  model-selection key.
+- `useChatStore.send()` sends the effective request model as
+  `chat_send.params.model`. For Claude, the effective model is derived from the
+  base model plus the user-controlled 1M context toggle.
+- The 1M context toggle defaults to enabled. When enabled and the selected
+  Claude model supports long context, append `[1m]` only for the outbound
+  request. When disabled, send the base model without `[1m]`.
+- Haiku models do not support 1M context. The UI must render the toggle disabled
+  and unchecked for Haiku, and the store must not append `[1m]` even if the
+  persisted toggle state is enabled.
+- Codex does not expose the Claude 1M context toggle and must never receive a
+  Claude `[1m]` suffix.
 - Provider default fields such as `defaultOpusModel` and settings env values
   such as `ANTHROPIC_DEFAULT_OPUS_MODEL` may supply model-list/default choices,
   but they must not override a concrete model id the user selected in Chat.
@@ -328,6 +340,11 @@ export interface TokenUsage {
   and a later legacy usage payload without `max_tokens` does not clear it.
 - Composer render test: `contextMaxTokens = 1_000_000` renders the usage
   indicator against `1000k`.
+- Frontend store test: default-enabled Claude long context sends
+  `claude-opus-4-8[1m]`; disabling the toggle sends `claude-opus-4-8`; Haiku
+  and Codex never receive `[1m]`.
+- Frontend render test: the Claude model selector area shows a readable 1M
+  context switch, disables it for Haiku, and hides it for Codex.
 
 ## Scenario: Chat Daemon Stdout-Close Recovery
 

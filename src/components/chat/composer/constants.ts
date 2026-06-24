@@ -92,12 +92,31 @@ export const MAX_EFFORT_CLAUDE_MODELS = new Set([
     'claude-sonnet-4-6',
 ]);
 
+export const ONE_M_CONTEXT_SUFFIX = '[1m]';
+const ONE_M_CONTEXT_SUFFIX_RE = /\[1m]$/i;
+
+export function strip1MContextSuffix(modelId: string | undefined | null): string {
+    return modelId ? modelId.replace(ONE_M_CONTEXT_SUFFIX_RE, '') : '';
+}
+
+export function modelSupports1MContext(modelId: string | undefined | null): boolean {
+    const baseModel = strip1MContextSuffix(modelId).toLowerCase();
+    return Boolean(baseModel) && !baseModel.includes('haiku');
+}
+
+export function apply1MContextSuffix(modelId: string, enabled: boolean): string {
+    const baseModel = strip1MContextSuffix(modelId);
+    if (!enabled || !modelSupports1MContext(baseModel)) return baseModel;
+    return `${baseModel}${ONE_M_CONTEXT_SUFFIX}`;
+}
+
 export function modelsForProvider(provider: ChatProviderId): ModelInfo[] {
     return provider === 'codex' ? CODEX_MODELS : CLAUDE_MODELS;
 }
 
 /** 各模型的上下文窗口上限（用于 token 用量环估算）。Claude 默认 200k。 */
 export function contextWindowFor(modelId: string): number {
+    if (ONE_M_CONTEXT_SUFFIX_RE.test(modelId)) return 1_000_000;
     if (modelId.startsWith('gpt-')) return 400_000;
     return 200_000;
 }
@@ -107,13 +126,14 @@ export function reasoningLevelsFor(
     provider: ChatProviderId,
     modelId: string,
 ): ReasoningInfo[] {
+    const baseModel = strip1MContextSuffix(modelId);
     return REASONING_LEVELS.filter((level) => {
         if (provider !== 'claude') {
             // Codex：low/medium/high/xhigh，无 max
             return level.id !== 'max';
         }
-        if (level.id === 'xhigh') return XHIGH_EFFORT_CLAUDE_MODELS.has(modelId);
-        if (level.id === 'max') return MAX_EFFORT_CLAUDE_MODELS.has(modelId);
+        if (level.id === 'xhigh') return XHIGH_EFFORT_CLAUDE_MODELS.has(baseModel);
+        if (level.id === 'max') return MAX_EFFORT_CLAUDE_MODELS.has(baseModel);
         return true;
     });
 }
@@ -121,5 +141,5 @@ export function reasoningLevelsFor(
 /** 当前模型是否暴露推理强度选择器。 */
 export function reasoningVisibleFor(provider: ChatProviderId, modelId: string): boolean {
     if (provider !== 'claude') return true;
-    return EFFORT_SUPPORTED_CLAUDE_MODELS.has(modelId);
+    return EFFORT_SUPPORTED_CLAUDE_MODELS.has(strip1MContextSuffix(modelId));
 }
