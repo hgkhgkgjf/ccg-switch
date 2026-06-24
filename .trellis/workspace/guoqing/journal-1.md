@@ -256,3 +256,43 @@ Completed chat usage max_tokens/model-selection contract and added a default-ena
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Chat tab startup and recent-session polish
+
+**Date**: 2026-06-24
+**Task**: Chat tab startup and recent-session polish
+**Branch**: `cc-gui`
+
+### Summary
+
+Finished the chat tab startup/recent-session polish task, including StatusPanel edit preview repair, startup empty-tab prevention, bounded tab widths, seven-day recent-chat filtering, Trellis task archival, and validation.
+
+### Main Changes
+
+- Created and archived the Trellis task for chat tab startup and recent-session polish.
+- Fixed StatusPanel edit-tree hover diff preview fallback so visible recent edits can reuse matching all-edit preview lines and only bind aria-describedby when preview content exists.
+- Preserved real draft/session/request tabs while dropping the startup empty currentCwd-only draft when opening a historical session.
+- Tuned chat session tabs to use bounded default/max widths, single-row overflow clipping, and compression only under pressure.
+- Limited Recent chats grouping to sessions active within the last seven days.
+- Synchronized frontend component/state guidelines and TODO records.
+- Verified with StatusPanel targeted tests, full Vitest suite, frontend production build, Rust cargo check, Trellis context validation, and git diff whitespace checks.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0a85ede` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
