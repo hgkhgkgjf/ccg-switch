@@ -8,7 +8,7 @@
 
 @@@auto:current-status
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
+- **Total Sessions**: 13
 - **Last Active**: 2026-06-25
 @@@/auto:current-status
 
@@ -19,7 +19,7 @@
 @@@auto:active-documents
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~331 | Active |
+| `journal-1.md` | ~365 | Active |
 @@@/auto:active-documents
 
 ---
@@ -29,6 +29,7 @@
 @@@auto:session-history
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-06-25 | Chat completion dropdown and context window | `91b1655`, `cb5a194` | `cc-gui` |
 | 12 | 2026-06-25 | Provider brand icon dropdown fix | `0a85ede` | `cc-gui` |
 | 11 | 2026-06-24 | Chat tab startup and recent-session polish | `0a85ede` | `cc-gui` |
 | 10 | 2026-06-24 | Chat usage and 1M context contract | `a772c15`, `cb5a194` | `cc-gui` |

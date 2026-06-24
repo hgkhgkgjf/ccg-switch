@@ -329,3 +329,37 @@ Aligned provider brand icons and fixed the provider filter dropdown so selecting
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Chat completion dropdown and context window
+
+**Date**: 2026-06-25
+**Task**: Chat completion dropdown and context window
+**Branch**: `cc-gui`
+
+### Summary
+
+Archived the Chat completion dropdown UI and context-window task after validating the completion menu tests, chat store usage max-token tests, sidecar stream usage tests, and frontend build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91b1655` | (see git log) |
+| `cb5a194` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
