@@ -132,6 +132,43 @@ See `src/components/providers/ProviderCard.tsx` and
   identity stays visually consistent across the Chat UI. Keep readable
   `title` / `aria-label` text for those icon badges, and preserve a text
   fallback for unknown providers rather than forcing an unsupported icon.
+  Recent chat management belongs in the existing session sidebar, not a second
+  independent navigation surface. Build recent groups from the dashboard
+  project list plus cached/prefetched `list_sessions(projectPath)` results,
+  group by project directory, filter unsupported providers, sort each group by
+  `lastActiveAt` descending, and cap each group so the sidebar remains
+  scannable. Recent rows must reuse `shouldIgnoreSessionClick`,
+  `getSessionSelectionKey`, `sessionTitle`, `formatShortDate`, and the shared
+  provider badge so clicking a recent row has the same pending/active behavior
+  as clicking the normal session list. Recent chats must be exposed through a
+  compact sidebar mode switch instead of being stacked above the normal project
+  and session panes. The `Project sessions` mode owns project search, project
+  selection, and the selected project's session list; the `Recent chats` mode
+  owns only grouped recent sessions. Recent chats should include only sessions
+  active within the last seven days; older sessions stay available through the
+  normal project/session browser but must be omitted from the recent view.
+  Recent project group headers must be real buttons with `aria-expanded`, and
+  collapsing a group must hide its sessions without affecting cached session
+  data or normal session selection behavior.
+  Open conversation tabs are snapshots, not a full history list. Render them as
+  a compact browser-like strip at the top of the conversation pane below the
+  global header and above transcript search. Tabs should show provider icon,
+  title, project folder when space allows, active state, running/loading/error
+  state, and an icon-only close button with readable `title` / `aria-label`.
+  Closing the current tab should focus the most recently updated remaining tab;
+  if no tab remains, the chat view returns to an empty draft. Do not add a
+  background-tab Stop button until the backend supports targeted request abort.
+  The tab strip must stay one fixed-height row even when many conversations are
+  open: give each tab a comfortable default width with a maximum width, let it
+  shrink only after the strip runs out of space, hide overflow instead of
+  showing horizontal scroll chrome, keep status as small busy/error dots rather
+  than width-consuming text, and move project/status detail into tooltips when
+  width is constrained. Do not preserve the startup empty draft as a tab merely
+  because a workspace cwd is known; save a draft tab only when it contains user
+  text, messages, a native session, or an active request. Tab context menus may
+  close other tabs or all tabs, but bulk close actions only close the UI
+  snapshots; they must not abort background requests until targeted backend
+  abort exists.
   SDK dependency recovery UI follows this same rule. The SDK modal title,
   close action, panel heading, hint, refresh action, installed/not-installed
   state, install/uninstall action, and installing log placeholder must use a

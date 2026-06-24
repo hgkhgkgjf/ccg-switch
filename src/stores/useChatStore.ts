@@ -24,11 +24,7 @@ import {
 } from '../types/session';
 import {AskUserQuestionRequest, PlanApprovalRequest, ToolPermissionRequest,} from '../types/permission';
 import type {ChatProviderId, PermissionMode, ReasoningEffort,} from '../components/chat/composer/constants';
-import {
-    apply1MContextSuffix,
-    reasoningLevelsFor,
-    strip1MContextSuffix,
-} from '../components/chat/composer/constants';
+import {apply1MContextSuffix, reasoningLevelsFor, strip1MContextSuffix,} from '../components/chat/composer/constants';
 import {isProtocolContextText, mergeRawChatMessage, TOOL_RESULT_CONTENT} from '../utils/chatMessageFlow';
 import {
     type ChatTurnStopOutcome,
@@ -37,6 +33,7 @@ import {
 } from '../utils/desktopNotification';
 import {CHAT_DAEMON_READY_TIMEOUT_ERROR_KEY} from '../utils/chatDaemonStatus';
 import {CHAT_MODEL_SELECTION_KEY_PREFIX, getDefaultChatModelId,} from '../utils/chatModels';
+import {getNextTabAfterClose} from '../utils/chatUiBehavior';
 
 const DRAFT_KEY_PREFIX = 'ccg-chat-draft:';
 const REASONING_KEY = 'ccg-chat-reasoning';
@@ -54,6 +51,8 @@ const DEFAULT_PERMISSION_SESSION_ID = 'default';
 const CHAT_DAEMON_READY_TIMEOUT_MS = 15_000;
 const stoppedRequestNotifications = new Set<string>();
 const retiredRequestIds = new Set<string>();
+const requestTabKeys = new Map<string, string>();
+const pendingSendOwners = new Map<string, {tabKey: string; assistantMessageId: string}>();
 /**
  * 已被 [BLOCK_RESET] 或工具消息「封口」的流式 assistant 消息 id 集合。
  * 一旦封口，下一段 [CONTENT_DELTA] 文本必须在 raw.message.content 末尾开启
@@ -245,11 +244,21 @@ function notifyStoppedRequestOnce(
 
 function retireRequestOwnership(requestId: string | null | undefined): void {
     if (!requestId) return;
+    requestTabKeys.delete(requestId);
     retiredRequestIds.add(requestId);
     while (retiredRequestIds.size > RETIRED_REQUEST_OWNERSHIP_LIMIT) {
         const oldest = retiredRequestIds.values().next().value;
         if (!oldest) break;
         retiredRequestIds.delete(oldest);
+    }
+}
+
+function retirePendingSendsForTab(tabKey: string | null | undefined): void {
+    if (!tabKey) return;
+    for (const [messageId, owner] of pendingSendOwners) {
+        if (owner.tabKey === tabKey) {
+            pendingSendOwners.delete(messageId);
+        }
     }
 }
 
@@ -269,6 +278,32 @@ function getLastAssistantTextPreview(messages: ChatMessage[]): string | null {
     }
 
     return null;
+}
+
+type ChatTabStatus = 'idle' | 'loading' | 'running' | 'queued' | 'error';
+
+export interface ChatSessionTab {
+    key: string;
+    messages: ChatMessage[];
+    provider: ChatProvider;
+    permissionMode: PermissionMode;
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    draft: string;
+    longContextEnabled: boolean;
+    contextTokens: number;
+    contextMaxTokens: number | null;
+    activeRequestId: string | null;
+    sessionId: string | null;
+    currentCwd: string | null;
+    activeSession: SessionMeta | null;
+    pendingSessionKey: string | null;
+    lastSessionLoadMetrics: ChatSessionLoadMetrics | null;
+    handoffContextProvider: ChatProvider | null;
+    status: ChatTabStatus;
+    error: string | null;
+    createdAt: number;
+    updatedAt: number;
 }
 
 interface ChatState {
@@ -330,6 +365,12 @@ interface ChatState {
     toolPermissionResponseInFlightRequestId: string | null;
     /** 被用户拒绝的工具调用 ID 集合 */
     deniedToolIds: Set<string>;
+    /** 已打开的聊天 tab。顶层 transcript 字段始终是 activeTab 的投影。 */
+    openTabs: ChatSessionTab[];
+    /** 当前可见 tab key。 */
+    activeTabKey: string | null;
+    /** Provider 表配置变更后，下一次空闲/发送前需要重启 daemon 读取新配置。 */
+    providerConfigDirty: boolean;
 
     init: () => Promise<void>;
     reconnectDaemon: () => Promise<void>;
@@ -350,6 +391,11 @@ interface ChatState {
     loadSession: (session: SessionMeta) => Promise<void>;
     loadActiveSessionFullHistory: () => Promise<ChatMessage[] | null>;
     expandActiveSessionHistory: () => Promise<void>;
+    focusTab: (key: string) => void;
+    closeTab: (key: string) => void;
+    closeOtherTabs: (key: string) => void;
+    closeAllTabs: () => void;
+    markProviderConfigDirty: () => Promise<void>;
     startNewSession: (cwd?: string | null) => Promise<void>;
     abort: () => Promise<void>;
     clear: () => Promise<void>;
@@ -369,6 +415,233 @@ function nowMs(): number {
 
 function newId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createDraftTabKey(): string {
+    return `draft:${newId()}`;
+}
+
+function createTabFromState(
+    key: string,
+    state: ChatState,
+    overrides: Partial<ChatSessionTab> = {},
+): ChatSessionTab {
+    const now = overrides.updatedAt ?? overrides.createdAt ?? 0;
+    return {
+        key,
+        messages: state.messages,
+        provider: state.provider,
+        permissionMode: state.permissionMode,
+        model: state.model,
+        reasoningEffort: state.reasoningEffort,
+        draft: state.draft,
+        longContextEnabled: state.longContextEnabled,
+        contextTokens: state.contextTokens,
+        contextMaxTokens: state.contextMaxTokens,
+        activeRequestId: state.activeRequestId,
+        sessionId: state.sessionId,
+        currentCwd: state.currentCwd,
+        activeSession: state.activeSession,
+        pendingSessionKey: state.pendingSessionKey,
+        lastSessionLoadMetrics: state.lastSessionLoadMetrics,
+        handoffContextProvider: state.handoffContextProvider,
+        status: hasActiveChatTurn(state) ? 'running' : 'idle',
+        error: state.error,
+        createdAt: now,
+        updatedAt: now,
+        ...overrides,
+    };
+}
+
+function createEmptyTabFromState(
+    state: ChatState,
+    cwd?: string | null,
+    timestamp = nowMs(),
+    key = createDraftTabKey(),
+): ChatSessionTab {
+    return {
+        key,
+        messages: [],
+        provider: state.provider,
+        permissionMode: state.permissionMode,
+        model: state.model,
+        reasoningEffort: state.reasoningEffort,
+        draft: '',
+        longContextEnabled: state.longContextEnabled,
+        contextTokens: 0,
+        contextMaxTokens: null,
+        activeRequestId: null,
+        sessionId: null,
+        currentCwd: cwd ?? state.currentCwd,
+        activeSession: null,
+        pendingSessionKey: null,
+        lastSessionLoadMetrics: null,
+        handoffContextProvider: null,
+        status: 'idle',
+        error: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    };
+}
+
+function projectTabToState(tab: ChatSessionTab): Partial<ChatState> {
+    return {
+        messages: tab.messages,
+        provider: tab.provider,
+        permissionMode: tab.permissionMode,
+        model: tab.model,
+        reasoningEffort: tab.reasoningEffort,
+        draft: tab.draft,
+        longContextEnabled: tab.longContextEnabled,
+        contextTokens: tab.contextTokens,
+        contextMaxTokens: tab.contextMaxTokens,
+        activeRequestId: tab.activeRequestId,
+        sessionId: tab.sessionId,
+        currentCwd: tab.currentCwd,
+        activeSession: tab.activeSession,
+        pendingSessionKey: tab.pendingSessionKey,
+        lastSessionLoadMetrics: tab.lastSessionLoadMetrics,
+        handoffContextProvider: tab.handoffContextProvider,
+        error: tab.error,
+    };
+}
+
+function upsertTab(tabs: ChatSessionTab[], tab: ChatSessionTab): ChatSessionTab[] {
+    const index = tabs.findIndex((item) => item.key === tab.key);
+    if (index < 0) return [...tabs, tab];
+    const next = [...tabs];
+    next[index] = tab;
+    return next;
+}
+
+function removeTab(tabs: ChatSessionTab[], key: string): ChatSessionTab[] {
+    return tabs.filter((tab) => tab.key !== key);
+}
+
+function getActiveTabKey(state: ChatState): string {
+    return state.activeTabKey ?? createDraftTabKey();
+}
+
+function currentTopLevelTab(state: ChatState): ChatSessionTab {
+    const key = getActiveTabKey(state);
+    const existing = state.openTabs.find((tab) => tab.key === key);
+    return createTabFromState(key, state, existing ? {
+        createdAt: existing.createdAt,
+    } : {});
+}
+
+function saveActiveProjection(state: ChatState): ChatSessionTab[] {
+    return upsertTab(state.openTabs, currentTopLevelTab(state));
+}
+
+function requestTargetTabKey(state: ChatState, requestId: string | null | undefined): string | null {
+    if (!requestId) return null;
+    return requestTabKeys.get(requestId)
+        ?? state.openTabs.find((tab) => tab.activeRequestId === requestId)?.key
+        ?? (state.activeRequestId === requestId ? state.activeTabKey : null);
+}
+
+function requestTargetTab(state: ChatState, requestId: string | null | undefined): ChatSessionTab | null {
+    const targetKey = requestTargetTabKey(state, requestId);
+    if (!targetKey) return null;
+    if (state.activeTabKey === targetKey) return currentTopLevelTab(state);
+    return state.openTabs.find((tab) => tab.key === targetKey) ?? null;
+}
+
+function updateRequestTabState(
+    state: ChatState,
+    requestId: string,
+    updater: (tab: ChatSessionTab) => ChatSessionTab,
+): Partial<ChatState> {
+    const targetKey = requestTargetTabKey(state, requestId);
+    if (!targetKey && state.activeRequestId === requestId) {
+        const legacy = createTabFromState(createDraftTabKey(), state);
+        const updated = updater(legacy);
+        return projectTabToState(updated);
+    }
+    if (!targetKey) return {};
+
+    const tabs = saveActiveProjection(state);
+    const target = tabs.find((tab) => tab.key === targetKey);
+    if (!target) return {};
+
+    const updated = {
+        ...updater(target),
+        updatedAt: nowMs(),
+    };
+    const openTabs = upsertTab(tabs, updated);
+    if (state.activeTabKey !== targetKey) {
+        return {openTabs};
+    }
+
+    return {
+        openTabs,
+        ...projectTabToState(updated),
+    };
+}
+
+function updateTabStateByKey(
+    state: ChatState,
+    tabKey: string,
+    updater: (tab: ChatSessionTab) => ChatSessionTab,
+): Partial<ChatState> {
+    const tabs = saveActiveProjection(state);
+    const target = tabs.find((tab) => tab.key === tabKey);
+    if (!target) return {};
+
+    const updated = {
+        ...updater(target),
+        updatedAt: nowMs(),
+    };
+    const openTabs = upsertTab(tabs, updated);
+    if (state.activeTabKey !== tabKey) {
+        return {openTabs};
+    }
+
+    return {
+        openTabs,
+        ...projectTabToState(updated),
+    };
+}
+
+function applyActiveTabProjection(
+    state: ChatState,
+    partial: Partial<ChatState>,
+    tabOverrides: Partial<ChatSessionTab> = {},
+): Partial<ChatState> {
+    const activeKey = state.activeTabKey;
+    if (!activeKey) return partial;
+
+    const nextState = {
+        ...state,
+        ...partial,
+    } as ChatState;
+    const existing = state.openTabs.find((tab) => tab.key === activeKey);
+    const tab = createTabFromState(activeKey, nextState, {
+        createdAt: existing?.createdAt ?? nowMs(),
+        status: hasActiveChatTurn(nextState) ? 'running' : 'idle',
+        ...tabOverrides,
+    });
+
+    return {
+        ...partial,
+        openTabs: upsertTab(saveActiveProjection(state), tab),
+    };
+}
+
+function saveProjectionBeforeSwitch(state: ChatState): ChatSessionTab[] {
+    if (state.activeTabKey) return saveActiveProjection(state);
+    if (
+        state.messages.length > 0
+        || state.activeRequestId
+        || state.sessionId
+        || state.activeSession
+        || state.draft.trim().length > 0
+    ) {
+        const key = createDraftTabKey();
+        return upsertTab(state.openTabs, createTabFromState(key, state));
+    }
+    return state.openTabs;
 }
 
 function isTextBlock(block: ContentBlock): block is Extract<ContentBlock, { type: 'text' }> {
@@ -418,31 +691,6 @@ function appendStreamingTextToRaw(
 }
 
 /**
- * 把文本增量按源顺序追加到最后一条流式 assistant 消息。
- * 不依赖 requestId 映射：daemon 响应极快，按 streaming 状态定位最稳。
- */
-function appendToStreamingAssistant(
-    set: (fn: (state: ChatState) => Partial<ChatState>) => void,
-    delta: string,
-): void {
-    set((state) => {
-        const messages = [...state.messages];
-        for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].streaming) {
-                const content = messages[i].content + delta;
-                messages[i] = {
-                    ...messages[i],
-                    content,
-                    raw: appendStreamingTextToRaw(messages[i].id, messages[i].raw, delta),
-                };
-                break;
-            }
-        }
-        return { messages };
-    });
-}
-
-/**
  * 在 [BLOCK_RESET] 到达时封口当前流式 assistant 消息的开启中文本段，
  * 使下一段 [CONTENT_DELTA] 文本开启一个新的 text block。
  */
@@ -474,6 +722,67 @@ function hasActiveChatTurn(state: ChatState): boolean {
     return Boolean(state.activeRequestId) || hasStreamingAssistant(state.messages);
 }
 
+function hasActiveTabTurn(tab: ChatSessionTab): boolean {
+    return Boolean(tab.activeRequestId) || hasStreamingAssistant(tab.messages);
+}
+
+function hasAnyActiveChatTurn(state: ChatState): boolean {
+    if (hasActiveChatTurn(state)) return true;
+    return state.openTabs.some((tab) => tab.key !== state.activeTabKey && hasActiveTabTurn(tab));
+}
+
+function appendToStreamingAssistantMessages(
+    messages: ChatMessage[],
+    delta: string,
+): ChatMessage[] {
+    const nextMessages = [...messages];
+    for (let i = nextMessages.length - 1; i >= 0; i--) {
+        if (nextMessages[i].role === 'assistant' && nextMessages[i].streaming) {
+            const content = nextMessages[i].content + delta;
+            nextMessages[i] = {
+                ...nextMessages[i],
+                content,
+                raw: appendStreamingTextToRaw(nextMessages[i].id, nextMessages[i].raw, delta),
+            };
+            break;
+        }
+    }
+    return nextMessages;
+}
+
+function addUsageToStreamingAssistantMessages(
+    messages: ChatMessage[],
+    usage: TokenUsage,
+): ChatMessage[] {
+    const nextMessages = [...messages];
+    for (let i = nextMessages.length - 1; i >= 0; i--) {
+        if (nextMessages[i].role === 'assistant' && nextMessages[i].streaming) {
+            nextMessages[i] = { ...nextMessages[i], usage };
+            break;
+        }
+    }
+    return nextMessages;
+}
+
+function finishStreamingAssistantMessages(
+    messages: ChatMessage[],
+    success: boolean,
+    error?: string | null,
+): ChatMessage[] {
+    return messages.map((m) => {
+        if (m.role === 'assistant' && m.streaming) {
+            clearStreamingTextSegment(m.id);
+            return {
+                ...m,
+                streaming: false,
+                error: success ? m.error : error || '执行失败',
+                durationMs: Date.now() - m.createdAt,
+            };
+        }
+        return m;
+    });
+}
+
 function stopStreamingAssistantMessages(
     messages: ChatMessage[],
     error = STOPPED_OUTPUT_ERROR,
@@ -492,8 +801,9 @@ function stopStreamingAssistantMessages(
 
 function shouldAcceptRequestEvent(state: ChatState, requestId: string | null | undefined): boolean {
     if (!requestId) return false;
-    if (state.activeRequestId) return state.activeRequestId === requestId;
     if (retiredRequestIds.has(requestId)) return false;
+    if (requestTargetTab(state, requestId)) return true;
+    if (state.activeRequestId) return state.activeRequestId === requestId;
     return hasStreamingAssistant(state.messages);
 }
 
@@ -502,8 +812,28 @@ function bindPendingRequestIfNeeded(
     state: ChatState,
     requestId: string,
 ): void {
-    if (!state.activeRequestId && hasStreamingAssistant(state.messages)) {
-        set({activeRequestId: requestId});
+    if (retiredRequestIds.has(requestId)) return;
+    if (requestTabKeys.has(requestId)) return;
+
+    const activeKey = state.activeTabKey;
+    if (activeKey && !state.activeRequestId && hasStreamingAssistant(state.messages)) {
+        requestTabKeys.set(requestId, activeKey);
+        set(updateTabStateByKey(state, activeKey, (tab) => ({
+            ...tab,
+            activeRequestId: requestId,
+            status: 'running',
+        })));
+        return;
+    }
+
+    const pendingTab = state.openTabs.find((tab) => !tab.activeRequestId && hasStreamingAssistant(tab.messages));
+    if (pendingTab) {
+        requestTabKeys.set(requestId, pendingTab.key);
+        set(updateTabStateByKey(state, pendingTab.key, (tab) => ({
+            ...tab,
+            activeRequestId: requestId,
+            status: 'running',
+        })));
     }
 }
 
@@ -649,6 +979,11 @@ function finishSessionLoadMetrics(
 
 export function clearChatSessionHistoryCache(): void {
     sessionHistoryCache.clear();
+    requestTabKeys.clear();
+    pendingSendOwners.clear();
+    retiredRequestIds.clear();
+    stoppedRequestNotifications.clear();
+    sealedStreamingTextSegments.clear();
 }
 
 function getLoadedSessionState(
@@ -792,6 +1127,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     pendingToolPermissionQueue: [],
     toolPermissionResponseInFlightRequestId: null,
     deniedToolIds: new Set(),
+    openTabs: [],
+    activeTabKey: null,
+    providerConfigDirty: false,
 
     init: async () => {
         if (get().initialized) return;
@@ -823,7 +1161,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (text.startsWith('[SESSION_ID]') || text.startsWith('[THREAD_ID]')) {
                 const marker = text.startsWith('[THREAD_ID]') ? '[THREAD_ID]' : '[SESSION_ID]';
                 const sid = text.slice(marker.length).trim();
-                if (sid) set({ sessionId: sid, handoffContextProvider: null });
+                if (sid) {
+                    set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                        ...tab,
+                        sessionId: sid,
+                        handoffContextProvider: null,
+                    })));
+                }
                 return;
             }
 
@@ -836,14 +1180,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 } catch {
                     // 非 JSON，按原文处理
                 }
-                appendToStreamingAssistant(set, delta);
+                set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                    ...tab,
+                    messages: appendToStreamingAssistantMessages(tab.messages, delta),
+                    status: 'running',
+                })));
                 return;
             }
 
             // [CONTENT]：非流式模式的完整文本块（直接追加）。
             if (text.startsWith('[CONTENT]')) {
                 const content = text.slice('[CONTENT]'.length).trim();
-                appendToStreamingAssistant(set, content);
+                set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                    ...tab,
+                    messages: appendToStreamingAssistantMessages(tab.messages, content),
+                    status: 'running',
+                })));
                 return;
             }
 
@@ -852,14 +1204,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 const payload = text.slice('[USAGE]'.length).trim();
                 try {
                     const usage = JSON.parse(payload) as TokenUsage;
-                    set((state) => {
-                        const messages = [...state.messages];
-                        for (let i = messages.length - 1; i >= 0; i--) {
-                            if (messages[i].role === 'assistant' && messages[i].streaming) {
-                                messages[i] = { ...messages[i], usage };
-                                break;
-                            }
-                        }
+                    set((state) => updateRequestTabState(state, requestId, (tab) => {
                         // 上下文 token ≈ 本轮输入(含缓存) + 输出，作为用量环的估算值。
                         const contextTokens =
                             (usage.input_tokens || 0) +
@@ -872,9 +1217,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             && Number.isFinite(usage.max_tokens)
                             && usage.max_tokens > 0
                             ? usage.max_tokens
-                            : state.contextMaxTokens;
-                        return { messages, contextTokens, contextMaxTokens: nextMax };
-                    });
+                            : tab.contextMaxTokens;
+                        return {
+                            ...tab,
+                            messages: addUsageToStreamingAssistantMessages(tab.messages, usage),
+                            contextTokens,
+                            contextMaxTokens: nextMax,
+                        };
+                    }));
                 } catch {
                     // 忽略解析失败
                 }
@@ -899,29 +1249,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const stateBeforeDone = get();
             if (!shouldAcceptRequestEvent(stateBeforeDone, requestId)) return;
             bindPendingRequestIfNeeded(set, stateBeforeDone, requestId);
+            const targetBeforeDone = requestTargetTab(get(), requestId) ?? stateBeforeDone;
             notifyStoppedRequestOnce(
                 requestId,
                 success ? 'success' : 'error',
-                stateBeforeDone.provider,
-                success ? getLastAssistantTextPreview(stateBeforeDone.messages) : error,
+                targetBeforeDone.provider,
+                success ? getLastAssistantTextPreview(targetBeforeDone.messages) : error,
             );
             retireRequestOwnership(requestId);
 
             set((state) => ({
-                activeRequestId: null,
-                messages: state.messages.map((m) => {
-                    if (m.role === 'assistant' && m.streaming) {
-                        clearStreamingTextSegment(m.id);
-                        return {
-                            ...m,
-                            streaming: false,
-                            error: success ? m.error : error || '执行失败',
-                            // 记录本轮耗时（从消息创建到流式结束）
-                            durationMs: Date.now() - m.createdAt,
-                        };
-                    }
-                    return m;
-                }),
+                ...updateRequestTabState(state, requestId, (tab) => ({
+                    ...tab,
+                    activeRequestId: null,
+                    status: success ? 'idle' : 'error',
+                    error: success ? tab.error : error || '执行失败',
+                    messages: finishStreamingAssistantMessages(tab.messages, success, error),
+                })),
             }));
         });
 
@@ -993,11 +1337,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 const raw = JSON.parse(event.payload.json) as MessageRaw;
 
                 set((state) => {
-                    const messages = mergeRawChatMessage(state.messages, raw, {
-                        createId: newId,
-                        now: Date.now,
+                    return updateRequestTabState(state, requestId, (tab) => {
+                        const messages = mergeRawChatMessage(tab.messages, raw, {
+                            createId: newId,
+                            now: Date.now,
+                        });
+                        return {
+                            ...tab,
+                            messages,
+                        };
                     });
-                    return { messages };
                 });
             } catch (e) {
                 console.error('[useChatStore] Failed to parse MESSAGE:', e);
@@ -1046,12 +1395,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     setProvider: (p) => {
-        if (hasActiveChatTurn(get())) return;
         const currentProvider = get().provider;
         latestSessionLoadToken += 1;
         // 如果 provider 没有变化，不重新加载草稿
         if (currentProvider === p) {
-            set({ provider: p, pendingSessionKey: null, lastSessionLoadMetrics: null });
+            set((state) => applyActiveTabProjection(state, {
+                provider: p,
+                pendingSessionKey: null,
+                lastSessionLoadMetrics: null,
+            }));
             return;
         }
 
@@ -1060,27 +1412,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const model = defaultModel(provider);
         const levels = reasoningLevelsFor(provider, model);
         set((state) => ({
-            provider: p,
-            model,
-            draft: loadDraft(provider),
-            sessionId: null,
-            activeSession: null,
-            pendingSessionKey: null,
-            lastSessionLoadMetrics: null,
-            handoffContextProvider: state.messages.some(hasHandoffContent) ? currentProvider : null,
-            reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
-                ? state.reasoningEffort
-                : (levels[levels.length - 1]?.id ?? 'high'),
+            ...applyActiveTabProjection(state, {
+                provider: p,
+                model,
+                draft: loadDraft(provider),
+                sessionId: null,
+                activeSession: null,
+                pendingSessionKey: null,
+                lastSessionLoadMetrics: null,
+                handoffContextProvider: state.messages.some(hasHandoffContent) ? currentProvider : null,
+                reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
+                    ? state.reasoningEffort
+                    : (levels[levels.length - 1]?.id ?? 'high'),
+            }),
         }));
     },
 
     setPermissionMode: (m) => {
-        if (hasActiveChatTurn(get())) return;
-        set({ permissionMode: m });
+        set((state) => applyActiveTabProjection(state, {permissionMode: m}));
     },
 
     setModel: (id) => {
-        if (hasActiveChatTurn(get())) return;
         const baseModel = strip1MContextSuffix(id);
         try {
             localStorage.setItem(CHAT_MODEL_SELECTION_KEY_PREFIX + get().provider, baseModel);
@@ -1090,31 +1442,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 切模型后校正推理档位（避免停留在新模型不支持的档）。
         const levels = reasoningLevelsFor(get().provider as ChatProviderId, baseModel);
         set((state) => ({
-            model: baseModel,
-            reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
-                ? state.reasoningEffort
-                : (levels[levels.length - 1]?.id ?? 'high'),
+            ...applyActiveTabProjection(state, {
+                model: baseModel,
+                reasoningEffort: levels.some((l) => l.id === state.reasoningEffort)
+                    ? state.reasoningEffort
+                    : (levels[levels.length - 1]?.id ?? 'high'),
+            }),
         }));
     },
 
     setLongContextEnabled: (enabled) => {
-        if (hasActiveChatTurn(get())) return;
         try {
             localStorage.setItem(LONG_CONTEXT_KEY, String(enabled));
         } catch {
             // ignore
         }
-        set({longContextEnabled: enabled});
+        set((state) => applyActiveTabProjection(state, {longContextEnabled: enabled}));
     },
 
     setReasoningEffort: (e) => {
-        if (hasActiveChatTurn(get())) return;
         try {
             localStorage.setItem(REASONING_KEY, e);
         } catch {
             // ignore
         }
-        set({ reasoningEffort: e });
+        set((state) => applyActiveTabProjection(state, {reasoningEffort: e}));
     },
 
     setDraft: (text) => {
@@ -1123,7 +1475,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         } catch {
             // ignore
         }
-        set({ draft: text });
+        set((state) => applyActiveTabProjection(state, {draft: text}));
     },
 
     send: async (text, opts) => {
@@ -1134,19 +1486,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const hasAttachments = attachments.length > 0;
         if (!trimmed && !hasAttachments) return false;
         latestSessionLoadToken += 1;
-        const chatTurnToken = ++latestChatTurnToken;
         prepareChatTurnStoppedNotificationPermission();
 
         const messageText = trimmed || ATTACHMENT_ONLY_MESSAGE;
         const stateBeforeSend = get();
-        const outboundMessage = stateBeforeSend.handoffContextProvider
-            && stateBeforeSend.handoffContextProvider !== stateBeforeSend.provider
-            && !stateBeforeSend.sessionId
+        const tabKey = stateBeforeSend.pendingSessionKey
+            ? createDraftTabKey()
+            : (stateBeforeSend.activeTabKey ?? createDraftTabKey());
+        const sendState = stateBeforeSend.pendingSessionKey
+            ? {
+                ...stateBeforeSend,
+                messages: [],
+                sessionId: null,
+                activeSession: null,
+                pendingSessionKey: null,
+                lastSessionLoadMetrics: null,
+                contextTokens: 0,
+                contextMaxTokens: null,
+                handoffContextProvider: null,
+            }
+            : stateBeforeSend;
+        const outboundMessage = sendState.handoffContextProvider
+            && sendState.handoffContextProvider !== sendState.provider
+            && !sendState.sessionId
             ? buildProviderHandoffMessage(
                 messageText,
-                stateBeforeSend.messages,
-                stateBeforeSend.handoffContextProvider,
-                stateBeforeSend.provider,
+                sendState.messages,
+                sendState.handoffContextProvider,
+                sendState.provider,
             )
             : messageText;
         const displayText = opts?.displayText?.trim() || messageText;
@@ -1166,15 +1533,58 @@ export const useChatStore = create<ChatState>((set, get) => ({
             createdAt: Date.now(),
         };
         set((state) => ({
-            messages: [...state.messages, userMsg, assistantMsg],
+            ...applyActiveTabProjection(
+                {
+                    ...state,
+                    activeTabKey: tabKey,
+                    provider: sendState.provider,
+                    permissionMode: sendState.permissionMode,
+                    model: sendState.model,
+                    reasoningEffort: sendState.reasoningEffort,
+                    draft: sendState.draft,
+                    longContextEnabled: sendState.longContextEnabled,
+                    messages: sendState.messages,
+                    sessionId: sendState.sessionId,
+                    activeSession: sendState.activeSession,
+                    pendingSessionKey: sendState.pendingSessionKey,
+                    lastSessionLoadMetrics: sendState.lastSessionLoadMetrics,
+                    contextTokens: sendState.contextTokens,
+                    contextMaxTokens: sendState.contextMaxTokens,
+                    handoffContextProvider: sendState.handoffContextProvider,
+                },
+                {
+                    messages: [...sendState.messages, userMsg, assistantMsg],
+                    error: null,
+                    draft: '',
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: null,
+                    activeTabKey: tabKey,
+                },
+                {status: 'running'},
+            ),
+            activeTabKey: tabKey,
+            messages: [...sendState.messages, userMsg, assistantMsg],
+            provider: sendState.provider,
+            permissionMode: sendState.permissionMode,
+            model: sendState.model,
+            reasoningEffort: sendState.reasoningEffort,
+            longContextEnabled: sendState.longContextEnabled,
+            sessionId: sendState.sessionId,
+            currentCwd: sendState.currentCwd,
+            activeSession: sendState.activeSession,
+            activeRequestId: sendState.activeRequestId,
+            contextTokens: sendState.contextTokens,
+            contextMaxTokens: sendState.contextMaxTokens,
+            handoffContextProvider: sendState.handoffContextProvider,
             error: null,
             draft: '',
             pendingSessionKey: null,
             lastSessionLoadMetrics: null,
         }));
+        pendingSendOwners.set(assistantMsg.id, {tabKey, assistantMessageId: assistantMsg.id});
         // 发送即清空持久化草稿。
         try {
-            localStorage.removeItem(DRAFT_KEY_PREFIX + get().provider);
+            localStorage.removeItem(DRAFT_KEY_PREFIX + stateBeforeSend.provider);
         } catch {
             // ignore
         }
@@ -1187,7 +1597,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             longContextEnabled,
             reasoningEffort,
             currentCwd,
-        } = get();
+        } = sendState;
         const requestedModel = opts?.model ?? model;
         const effectiveModel = provider === 'claude'
             ? apply1MContextSuffix(requestedModel, longContextEnabled)
@@ -1214,35 +1624,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         try {
+            if (get().providerConfigDirty) {
+                await invoke('chat_restart_daemon');
+                set({
+                    providerConfigDirty: false,
+                    daemonReady: false,
+                    daemonStatus: 'starting',
+                    daemonReconnecting: false,
+                    error: null,
+                });
+                scheduleDaemonReadyTimeout(get, set);
+            }
             const requestId = await invoke<string>('chat_send', {
                 provider,
                 command: provider === 'claude' && hasAttachments ? 'sendWithAttachments' : 'send',
                 params,
             });
-            if (chatTurnToken !== latestChatTurnToken) {
+            const owner = pendingSendOwners.get(assistantMsg.id);
+            pendingSendOwners.delete(assistantMsg.id);
+            const ownerTab = owner
+                ? get().openTabs.find((tab) => tab.key === owner.tabKey)
+                : null;
+            if (!owner || !ownerTab?.messages.some((message) => (
+                message.id === owner.assistantMessageId && message.role === 'assistant' && message.streaming
+            ))) {
                 retireRequestOwnership(requestId);
                 return true;
             }
-            set({ activeRequestId: requestId });
+            requestTabKeys.set(requestId, tabKey);
+            set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                ...tab,
+                activeRequestId: requestId,
+                status: 'running',
+                error: null,
+            })));
             return true;
         } catch (e) {
-            if (chatTurnToken !== latestChatTurnToken) {
-                return true;
-            }
+            pendingSendOwners.delete(assistantMsg.id);
             notifyStoppedRequestOnce(
                 `send-error:${assistantMsg.id}`,
                 'error',
                 provider,
                 String(e),
             );
-            set((state) => ({
+            set((state) => updateTabStateByKey(state, tabKey, (tab) => ({
+                ...tab,
                 error: String(e),
-                messages: state.messages.map((m) =>
+                status: 'error',
+                messages: tab.messages.map((m) =>
                     m.id === assistantMsg.id
                         ? { ...m, streaming: false, error: String(e) }
                         : m,
                 ),
-            }));
+            })));
             return false;
         }
     },
@@ -1271,20 +1705,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
         }
 
+        const tabKey = `session:${pendingSessionKey}`;
         const loadToken = ++latestSessionLoadToken;
         const startedAt = nowMs();
         const baseMetrics = createSessionLoadMetrics(session, startedAt);
-        let abortedActiveTurn = false;
-        let abortError: string | null = null;
-        set({
+        set((state) => ({
+            openTabs: upsertTab(
+                saveProjectionBeforeSwitch(state),
+                {
+                    ...createEmptyTabFromState(state, session.projectDir, startedAt, tabKey),
+                    key: tabKey,
+                    provider,
+                    model: defaultModel(provider),
+                    draft: loadDraft(provider),
+                    sessionId: session.sessionId,
+                    currentCwd: session.projectDir,
+                    activeSession: session,
+                    pendingSessionKey,
+                    lastSessionLoadMetrics: baseMetrics,
+                    status: 'loading',
+                    updatedAt: startedAt,
+                },
+            ),
+            activeTabKey: tabKey,
+            messages: [],
+            provider,
+            model: defaultModel(provider),
+            draft: loadDraft(provider),
+            sessionId: session.sessionId,
+            currentCwd: session.projectDir,
+            activeSession: session,
+            activeRequestId: null,
             pendingSessionKey,
             error: null,
             lastSessionLoadMetrics: baseMetrics,
-        });
+            handoffContextProvider: null,
+            contextTokens: 0,
+            contextMaxTokens: null,
+        }));
 
         try {
-            abortedActiveTurn = hasActiveChatTurn(get());
-            abortError = await abortActiveRequestIfNeeded(get, set);
             const cachedHistory = getCachedSessionHistory(session);
             if (cachedHistory) {
                 if (loadToken !== latestSessionLoadToken) {
@@ -1304,9 +1764,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     'complete',
                 );
                 set((state) => ({
-                    ...getLoadedSessionState(session, provider, displayHistory, state),
+                    ...updateTabStateByKey(state, tabKey, (tab) => ({
+                        ...tab,
+                        ...createTabFromState(tabKey, {
+                            ...state,
+                            ...getLoadedSessionState(session, provider, displayHistory, state),
+                        } as ChatState),
+                        lastSessionLoadMetrics: cacheMetrics,
+                        error: null,
+                        status: 'idle',
+                    })),
                     lastSessionLoadMetrics: cacheMetrics,
-                    error: abortError,
+                    error: null,
                 }));
                 return;
             }
@@ -1341,9 +1810,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 windowMapMs: windowMappedAt - windowLoadedAt,
             };
             set((state) => ({
-                ...getLoadedSessionState(session, provider, mappedHistoryWindow, state),
+                ...updateTabStateByKey(state, tabKey, (tab) => ({
+                    ...tab,
+                    ...createTabFromState(tabKey, {
+                        ...state,
+                        ...getLoadedSessionState(session, provider, mappedHistoryWindow, state),
+                    } as ChatState),
+                    lastSessionLoadMetrics: windowMetrics,
+                    error: null,
+                    status: 'idle',
+                })),
                 lastSessionLoadMetrics: windowMetrics,
-                error: abortError,
+                error: null,
             }));
 
             if (historyWindow.complete) {
@@ -1365,9 +1843,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 errorText,
             );
             set((state) => ({
-                messages: abortedActiveTurn
-                    ? stopStreamingAssistantMessages(state.messages, abortError ?? STOPPED_OUTPUT_ERROR)
-                    : state.messages,
+                ...updateTabStateByKey(state, tabKey, (tab) => ({
+                    ...tab,
+                    error: errorText,
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: errorMetrics,
+                    status: 'error',
+                })),
                 error: errorText,
                 pendingSessionKey: null,
                 lastSessionLoadMetrics: errorMetrics,
@@ -1586,21 +2068,118 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
     },
 
+    focusTab: (key) => {
+        set((state) => {
+            const tabs = saveActiveProjection(state);
+            const target = tabs.find((tab) => tab.key === key);
+            if (!target) return {};
+
+            return {
+                openTabs: tabs,
+                activeTabKey: key,
+                ...projectTabToState(target),
+            };
+        });
+    },
+
+    closeTab: (key) => {
+        set((state) => {
+            const tabs = saveActiveProjection(state);
+            const remainingTabs = removeTab(tabs, key);
+            const nextActiveKey = getNextTabAfterClose({
+                tabs,
+                closingKey: key,
+                activeKey: state.activeTabKey,
+            });
+
+            if (!nextActiveKey) {
+                const emptyTab = createEmptyTabFromState(state);
+                return {
+                    openTabs: [],
+                    activeTabKey: null,
+                    ...projectTabToState(emptyTab),
+                };
+            }
+
+            const nextActiveTab = remainingTabs.find((tab) => tab.key === nextActiveKey);
+            if (!nextActiveTab) return {openTabs: remainingTabs};
+
+            return {
+                openTabs: remainingTabs,
+                activeTabKey: nextActiveKey,
+                ...projectTabToState(nextActiveTab),
+            };
+        });
+    },
+
+    closeOtherTabs: (key) => {
+        set((state) => {
+            const tabs = saveActiveProjection(state);
+            const targetTab = tabs.find((tab) => tab.key === key);
+            if (!targetTab) return {};
+
+            return {
+                openTabs: [targetTab],
+                activeTabKey: targetTab.key,
+                ...projectTabToState(targetTab),
+            };
+        });
+    },
+
+    closeAllTabs: () => {
+        set((state) => {
+            const emptyTab = createEmptyTabFromState(state, state.currentCwd);
+            return {
+                openTabs: [],
+                activeTabKey: null,
+                ...projectTabToState(emptyTab),
+            };
+        });
+    },
+
+    markProviderConfigDirty: async () => {
+        const currentState = get();
+        if (hasAnyActiveChatTurn(currentState)) {
+            set({providerConfigDirty: true});
+            return;
+        }
+
+        set({
+            providerConfigDirty: true,
+            daemonReady: false,
+            daemonStatus: 'starting',
+            daemonReconnecting: false,
+            error: null,
+        });
+        try {
+            await invoke('chat_restart_daemon');
+            set({
+                providerConfigDirty: false,
+                daemonReconnecting: false,
+            });
+            scheduleDaemonReadyTimeout(get, set);
+        } catch (e) {
+            set({
+                providerConfigDirty: true,
+                daemonReady: false,
+                daemonStatus: 'error',
+                daemonReconnecting: false,
+                error: String(e),
+            });
+        }
+    },
+
     startNewSession: async (cwd) => {
         latestSessionLoadToken += 1;
-        const abortError = await abortActiveRequestIfNeeded(get, set);
         set((state) => ({
-            messages: [],
-            sessionId: null,
-            activeSession: null,
-            pendingSessionKey: null,
-            lastSessionLoadMetrics: null,
-            handoffContextProvider: null,
-            currentCwd: cwd ?? state.currentCwd,
-            activeRequestId: null,
-            contextTokens: 0,
-            contextMaxTokens: null,
-            error: abortError,
+            ...(() => {
+                const newTab = createEmptyTabFromState(state, cwd);
+                return {
+                    openTabs: upsertTab(saveProjectionBeforeSwitch(state), newTab),
+                    activeTabKey: newTab.key,
+                    ...projectTabToState(newTab),
+                };
+            })(),
         }));
     },
 
@@ -1625,35 +2204,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         retireRequestOwnership(activeRequestId);
         set((state) => ({
-            activeRequestId: null,
-            messages: state.messages.map((message) => {
-                if (message.role === 'assistant' && message.streaming) {
-                    clearStreamingTextSegment(message.id);
-                    return {
-                        ...message,
-                        streaming: false,
-                        error: message.error ?? STOPPED_OUTPUT_ERROR,
-                        durationMs: Date.now() - message.createdAt,
-                    };
-                }
-                return message;
-            }),
+            ...applyActiveTabProjection(
+                state,
+                {
+                    activeRequestId: null,
+                    messages: stopStreamingAssistantMessages(state.messages),
+                },
+                {status: 'idle', activeRequestId: null},
+            ),
         }));
     },
 
     clear: async () => {
         latestSessionLoadToken += 1;
+        retirePendingSendsForTab(get().activeTabKey);
         const abortError = await abortActiveRequestIfNeeded(get, set);
-        set({
-            messages: [],
-            sessionId: null,
-            activeSession: null,
-            pendingSessionKey: null,
-            lastSessionLoadMetrics: null,
-            handoffContextProvider: null,
-            error: abortError,
-            contextTokens: 0,
-            contextMaxTokens: null,
+        set((state) => {
+            const partial: Partial<ChatState> = {
+                messages: [],
+                sessionId: null,
+                activeSession: null,
+                pendingSessionKey: null,
+                lastSessionLoadMetrics: null,
+                handoffContextProvider: null,
+                error: abortError,
+                contextTokens: 0,
+                contextMaxTokens: null,
+            };
+            return applyActiveTabProjection(state, partial, {status: 'idle'});
         });
     },
 

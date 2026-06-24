@@ -1,20 +1,78 @@
-import { useTranslation } from 'react-i18next';
-import { Plus, RefreshCw, LayoutGrid, List, GripVertical, Zap, Edit2, Trash2, Eye, EyeOff, Search, Layers, Download, Upload, Loader2, Tag, Copy, ExternalLink, Terminal, Activity, HeartPulse } from 'lucide-react';
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { useProviderStore } from '../stores/useProviderStore';
-import { Provider } from '../types/provider';
-import { VISIBLE_APP_TYPES, APP_LABELS, APP_COLORS, AppType } from '../types/app';
+import {useTranslation} from 'react-i18next';
+import {
+    Activity,
+    ChevronDown,
+    Copy,
+    Download,
+    Edit2,
+    ExternalLink,
+    Eye,
+    EyeOff,
+    GripVertical,
+    HeartPulse,
+    Layers,
+    LayoutGrid,
+    List,
+    Loader2,
+    Plus,
+    RefreshCw,
+    Search,
+    Tag,
+    Terminal,
+    Trash2,
+    Upload,
+    Zap
+} from 'lucide-react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {invoke} from '@tauri-apps/api/core';
+import {useProviderStore} from '../stores/useProviderStore';
+import {Provider} from '../types/provider';
+import {APP_LABELS, AppType, VISIBLE_APP_TYPES} from '../types/app';
 import ModalDialog from '../components/common/ModalDialog';
-import { showToast } from '../components/common/ToastContainer';
-import { exportProvidersConfigToFile, importProvidersConfigFromFile } from '../services/configTransferService';
+import {showToast} from '../components/common/ToastContainer';
+import {exportProvidersConfigToFile, importProvidersConfigFromFile} from '../services/configTransferService';
 import ProviderCard from '../components/providers/ProviderCard';
 import ProviderForm from '../components/providers/ProviderForm';
 import ProviderIcon from '../components/providers/ProviderIcon';
-import { useHealthCheck } from '../hooks/useHealthCheck';
+import {useHealthCheck} from '../hooks/useHealthCheck';
 import HealthStatusBadge from '../components/providers/HealthStatusBadge';
 
 type ViewMode = 'card' | 'table';
+
+const providerConfigShortcuts: Array<{
+    appType: AppType;
+    cli: string;
+    termClass: string;
+    files: Array<{label: string; path: string}>;
+}> = [
+    {
+        appType: 'claude',
+        cli: 'claude',
+        termClass: 'text-orange-500 hover:bg-orange-500/10',
+        files: [
+            { label: 'settings.json', path: '~/.claude/settings.json' },
+            { label: '.claude.json', path: '~/.claude.json' },
+        ],
+    },
+    {
+        appType: 'codex',
+        cli: 'codex',
+        termClass: 'text-emerald-500 hover:bg-emerald-500/10',
+        files: [
+            { label: 'auth.json', path: '~/.codex/auth.json' },
+            { label: 'config.toml', path: '~/.codex/config.toml' },
+        ],
+    },
+    {
+        appType: 'gemini',
+        cli: 'gemini',
+        termClass: 'text-blue-500 hover:bg-blue-500/10',
+        files: [
+            { label: '.env', path: '~/.gemini/.env' },
+            { label: 'settings.json', path: '~/.gemini/settings.json' },
+        ],
+    },
+];
 
 function maskApiKey(key: string) {
     if (key.length <= 10) return '***';
@@ -40,6 +98,7 @@ function ProvidersPage() {
     // 拖拽状态
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
+    const filterDropdownRef = useRef<HTMLDetailsElement | null>(null);
     const dragSourceRef = useRef<string | null>(null);
     const dragOverRef = useRef<string | null>(null);
 
@@ -169,6 +228,11 @@ function ProvidersPage() {
 
     const toggleShowKey = (id: string) => {
         setShowKeys(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const handleFilterAppChange = (next: AppType | 'all') => {
+        setFilterApp(next);
+        filterDropdownRef.current?.removeAttribute('open');
     };
 
     // 拖拽逻辑
@@ -333,38 +397,60 @@ function ProvidersPage() {
                             className="input input-bordered input-sm w-full pl-9"
                         />
                     </div>
-                    <select
-                        className="select select-bordered select-sm"
-                        value={filterApp}
-                        onChange={(e) => setFilterApp(e.target.value as AppType | 'all')}
-                    >
-                        <option value="all">{t('providers.filter_all')}</option>
-                        {VISIBLE_APP_TYPES.map(type => (
-                            <option key={type} value={type}>{APP_LABELS[type]}</option>
-                        ))}
-                    </select>
+                    <details ref={filterDropdownRef} className="dropdown dropdown-end provider-filter-dropdown">
+                        <summary
+                            className="btn btn-sm btn-outline min-w-24 justify-between gap-2"
+                            title={filterApp === 'all' ? t('providers.filter_all') : APP_LABELS[filterApp]}
+                        >
+                            {filterApp === 'all' ? (
+                                <span className="text-sm">{t('providers.filter_all')}</span>
+                            ) : (
+                                <span className="inline-flex items-center gap-2 text-sm">
+                                    <ProviderIcon appType={filterApp} size="sm" />
+                                    {APP_LABELS[filterApp]}
+                                </span>
+                            )}
+                            <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+                        </summary>
+                        <ul className="dropdown-content menu bg-base-100 border border-base-300 rounded-box shadow-lg z-30 mt-1 w-36 p-1">
+                            <li>
+                                <button
+                                    type="button"
+                                    data-provider-filter-option="all"
+                                    onClick={() => handleFilterAppChange('all')}
+                                    className={filterApp === 'all' ? 'active' : ''}
+                                >
+                                    {t('providers.filter_all')}
+                                </button>
+                            </li>
+                            {VISIBLE_APP_TYPES.map(type => (
+                                <li key={type}>
+                                    <button
+                                        type="button"
+                                        data-provider-filter-option={type}
+                                        onClick={() => handleFilterAppChange(type)}
+                                        className={filterApp === type ? 'active' : ''}
+                                    >
+                                        <ProviderIcon appType={type} size="sm" />
+                                        {APP_LABELS[type]}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </details>
                 </div>
 
                 {/* 快捷打开配置文件 + 启动终端 */}
                 <div className="flex items-center gap-4 flex-wrap text-xs">
-                    {[
-                        { app: 'Claude', cli: 'claude', dot: 'bg-orange-400', termClass: 'text-orange-500 hover:bg-orange-500/10', files: [
-                            { label: 'settings.json', path: '~/.claude/settings.json' },
-                            { label: '.claude.json', path: '~/.claude.json' },
-                        ]},
-                        { app: 'Codex', cli: 'codex', dot: 'bg-emerald-400', termClass: 'text-emerald-500 hover:bg-emerald-500/10', files: [
-                            { label: 'auth.json', path: '~/.codex/auth.json' },
-                            { label: 'config.toml', path: '~/.codex/config.toml' },
-                        ]},
-                        { app: 'Gemini', cli: 'gemini', dot: 'bg-blue-400', termClass: 'text-blue-500 hover:bg-blue-500/10', files: [
-                            { label: '.env', path: '~/.gemini/.env' },
-                            { label: 'settings.json', path: '~/.gemini/settings.json' },
-                        ]},
-                    ].map(group => (
-                        <div key={group.app} className="inline-flex items-center gap-2">
+                    {providerConfigShortcuts.map(group => (
+                        <div
+                            key={group.appType}
+                            className="inline-flex items-center gap-2"
+                            data-provider-config-shortcut={group.appType}
+                        >
                             <span className="inline-flex items-center gap-1.5 text-base-content/50">
-                                <span className={`w-1.5 h-1.5 rounded-full ${group.dot}`} />
-                                {group.app}
+                                <ProviderIcon appType={group.appType} size="sm" />
+                                {APP_LABELS[group.appType]}
                             </span>
                             {group.files.map(file => (
                                 <button
@@ -520,8 +606,11 @@ function ProvidersPage() {
                                             </div>
                                         </td>
                                         <td className="w-28">
-                                            <span className="inline-flex items-center gap-1.5 text-xs text-base-content/70">
-                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: APP_COLORS[provider.appType] }} />
+                                            <span
+                                                className="inline-flex items-center gap-1.5 text-xs text-base-content/70"
+                                                data-provider-table-app={provider.appType}
+                                            >
+                                                <ProviderIcon appType={provider.appType} size="sm" />
                                                 {APP_LABELS[provider.appType]}
                                             </span>
                                         </td>

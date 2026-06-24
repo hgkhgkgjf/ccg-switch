@@ -1,3 +1,44 @@
+## 本轮 PLAN 2026-06-24 Provider brand icon alignment
+
+- 目标：将服务商管理界面的 Claude、Codex、Gemini 图标从首字母圆点改为与 Chat 模块一致的品牌 SVG 图标，同时保留 OpenCode/OpenClaw 等隐藏旧类型的首字母 fallback。
+- 功能点 1：Trellis 任务与 PRD。验证方式：创建 `.trellis/tasks/06-24-provider-brand-icon-alignment/prd.md`，记录已确认事实、需求、验收标准、非目标和轻量任务边界。
+- 功能点 2：RED 测试。验证方式：新增/更新 ProviderIcon 测试，断言 `claude`、`codex`、`gemini` 渲染 SVG 品牌图标且不显示首字母，`opencode` 仍显示首字母 fallback，并先确认旧实现失败。
+- 功能点 3：图标实现。验证方式：复用 Chat 模块 Claude/Codex glyph，补 Gemini compact SVG glyph，保持 `ProviderIcon` props 和 `ProviderCard` / `ProvidersPage` 调用不变。
+- 功能点 4：服务商页筛选与说明区图标一致性。验证方式：新增 `ProvidersPage.test.tsx`，覆盖筛选 dropdown、顶部配置快捷行、表格 App 类型列均使用 ProviderIcon 品牌图标，不再使用原生 select 文本选项或彩色 dot。
+- 功能点 5：质量验证。验证方式：运行定向 ProviderIcon / ProvidersPage 测试、相邻 Chat 图标测试、`npm run build`、IDE build / 文件问题扫描，并记录未做的真实 UI 手工验证。
+
+## 迭代记录 2026-06-24 Provider brand icon alignment
+
+- 本轮完成：创建 `.trellis/tasks/06-24-provider-brand-icon-alignment` 轻量 Trellis 任务并写入 PRD。新增 `src/components/common/BrandGlyphIcon.tsx` 作为共享品牌 glyph，Chat 模块 `ModelIcon` 与服务商 `ProviderIcon` 共同复用。`ProviderIcon` 现在对 `claude`、`codex`、`gemini` 渲染 SVG 品牌图标：Claude/Codex 复用共享 `BrandGlyphIcon`，Gemini 使用 compact sparkle SVG 和蓝紫渐变，未复制用户提供 SVG 中的大体积 base64 payload。`opencode` / `openclaw` 继续保留原首字母圆形 fallback。`ProviderIcon` props、`ProviderCard` 和 `ProvidersPage` 调用方式未改。
+- 本轮测试：RED：`npm test -- src/components/providers/ProviderIcon.test.tsx` 先失败，失败点为旧实现输出 `<div ...>C</div>` 且缺少 `data-provider-brand-icon="claude"`。GREEN：同命令通过（1 file / 2 tests）；相邻验证 `npm test -- src/components/providers/ProviderIcon.test.tsx src/components/chat/composer/ButtonArea.test.tsx src/components/chat/ChatSessionTabs.test.tsx` 通过（3 files / 17 tests）。
+- 本轮构建与检查：`npm run build` 通过，仅既有 Browserslist/caniuse-lite 过期和 chunk size 提示。构建产物 `dist` / `out` 已清理。IDE 文件问题扫描 `ProviderIcon.tsx` / `ProviderIcon.test.tsx` / `ModelIcon.tsx` 无错误；IDE 增量 build 通过，`problems: []`。`git diff --check -- src/components/providers/ProviderIcon.tsx src/components/providers/ProviderIcon.test.tsx src/components/chat/composer/ModelIcon.tsx .trellis/tasks/06-24-provider-brand-icon-alignment/prd.md TODO_LIST.md` 未发现空白错误，仅 Windows LF/CRLF 转换提示。
+- 暂存状态：已暂存本轮代码与新 Trellis 任务文件：`BrandGlyphIcon.tsx`、`ModelIcon.tsx`、`ProviderIcon.tsx`、`ProviderIcon.test.tsx`、`.trellis/tasks/06-24-provider-brand-icon-alignment/*`。`TODO_LIST.md` 保持未暂存，避免把文件内既有大量历史未提交记录一起纳入本轮暂存。
+- 未验证项：未启动真实 Tauri 桌面点测服务商页面在亮/暗主题下的视觉效果、hover title 和实际尺寸对齐；当前结论基于组件 SSR 测试、相邻 Chat 图标测试、TypeScript/Vite build 和 IDE 检查。
+
+## 迭代记录 2026-06-24 Provider page filter and shortcut icon alignment
+
+- 本轮完成：按截图反馈继续收敛服务商页面顶部区域。`ProvidersPage` 的服务商筛选器从原生 `<select>` 改为 DaisyUI dropdown，`All` 仍为文本选项，Claude/Codex/Gemini 选项渲染 `ProviderIcon` 品牌图标；顶部配置快捷行的 Claude/Codex/Gemini 小圆点改为同款品牌图标；表格视图 App 类型列也从 `APP_COLORS` 圆点改为 `ProviderIcon`。卡片图标逻辑、服务商过滤状态、配置文件打开按钮和终端启动按钮行为未改。
+- 本轮测试：RED：`npm test -- src/pages/ProvidersPage.test.tsx` 先失败，失败点为旧实现缺少 `provider-filter-dropdown` 且仍输出 `<select>` / `bg-orange-400` 等 dot 类。GREEN：`npm test -- src/pages/ProvidersPage.test.tsx src/components/providers/ProviderIcon.test.tsx` 通过（2 files / 4 tests）；相邻验证 `npm test -- src/pages/ProvidersPage.test.tsx src/components/providers/ProviderIcon.test.tsx src/components/chat/composer/ButtonArea.test.tsx src/components/chat/ChatSessionTabs.test.tsx` 通过（4 files / 19 tests）。
+- 本轮构建与检查：`npm run build` 通过，仅既有 Browserslist/caniuse-lite 过期和 chunk size 提示；`dist` / `out` 已清理。IDE 文件问题扫描 `ProvidersPage.tsx` / `ProvidersPage.test.tsx` 返回错误列表为空；IDE 增量 build 通过，`problems: []`。
+- 未验证项：未启动真实 Tauri 桌面点测筛选 dropdown 的打开/关闭交互、亮/暗主题视觉效果和键盘导航。当前结论基于 SSR/jsdom 组件测试、相邻回归测试、TypeScript/Vite build 和 IDE 检查。
+
+## 本轮 PLAN 2026-06-24 Chat tab startup and recent-session polish
+
+- 目标：修复首次打开历史会话时多出空白 `New chat` tab、顶部 tab 少量时铺满整行、Recent chats 显示超过 7 天旧会话的问题，并先修复阻塞全量前端测试的 StatusPanel edit hover preview 数据源。
+- 功能点 1：StatusPanel preview 修复。验证方式：运行 `npm test -- src/components/chat/StatusPanel.test.tsx`，确认 recent/all edit 同 key preview 兜底后 hover preview、split preview、`aria-describedby` 测试通过。
+- 功能点 2：首次打开会话不保留空白 draft tab。验证方式：扩展 `useChatStore.test.ts`，覆盖空白初始态 `loadSession()` 只打开目标会话；有 draft/messages/active request 时仍保存当前 tab。
+- 功能点 3：tab 最大宽度与按需压缩。验证方式：扩展 `ChatSessionTabs.test.tsx`，断言少量 tab 使用 bounded width/max width，不再 `flex-1 basis-0` 铺满；多 tab 仍单行 `overflow-hidden` 无横向滚动。
+- 功能点 4：Recent chats 七天过滤。验证方式：扩展 `chatSessionSidebarUtils.test.ts`，覆盖 7 天内会话展示、超过 7 天会话不展示。
+- 功能点 5：规范同步。验证方式：更新 `.trellis/spec/frontend/component-guidelines.md`，记录首次会话 tab、tab 宽度和 recent 7 天窗口约束。
+- 功能点 6：验证收尾。验证方式：运行定向测试、`npm test`、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`trellis-check`、`git diff --check` / `git diff --cached --check`，并清理 `dist` / `out`。
+
+## 迭代记录 2026-06-24 Chat tab startup and recent-session polish
+
+- 本轮完成：已创建并启动 `.trellis/tasks/06-24-06-24-chat-tab-startup-recent-session-polish` 轻量 Trellis task，并补齐 PRD、implement/check context。`StatusPanel` edit tree 文件行现在会从当前 visible edit 或同 key 的 recent/all edit 中补齐 `diffPreviewLines`，有预览时才渲染 `EditDiffPreview` 并绑定 `aria-describedby`；无预览行不会生成 tooltip 关联。`useChatStore` 的 `loadSession()` 切换前投影保存不再因为只有 `currentCwd` 就保留空白 startup draft tab，因此初始空白态点击历史会话不会额外出现 `New chat` tab；但存在 draft、messages、session、active request 等真实内容时仍会保留当前 tab。`ChatSessionTabs` 改为有默认宽度和最大宽度，少量 tab 不铺满整行，空间不足时才压缩，strip 保持单行 `overflow-hidden` 无滚动条。`Recent chats` 构建逻辑新增 7 天窗口过滤，超过 7 天无最新活动的会话不再进入最近聊天视图。
+- 本轮规范同步：`.trellis/spec/frontend/component-guidelines.md` 已记录 recent chats 只展示最近 7 天、tab 需要默认/最大宽度且只在空间不足时压缩、startup 空白状态不因 `currentCwd` 单独保存为 draft tab。
+- 本轮验证：`npm test -- src/components/chat/StatusPanel.test.tsx` 通过（1 file / 34 tests）；`npm test` 通过（62 files / 594 tests，仅既有 Browserslist/caniuse-lite 过期提示）；`npm run build` 通过（仅既有 Browserslist 过期和 chunk size > 500k 提示）；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`git diff --check` / `git diff --cached --check` 通过，前者仅 Windows LF/CRLF 转换提示。构建产物 `dist` 已在验证后清理，`out` 不存在。
+- 未验证项：未启动真实 Tauri 桌面做手工 UI 点测；顶部 tab 压缩、首次打开历史会话、Recent chats 七天过滤和 StatusPanel hover preview 的真实交互仍建议在桌面环境按验收步骤复核。
+
 ## 本轮 PLAN 2026-06-24 Chat provider live switching and multi-session management
 
 - 目标：规划并实现 Chat 多服务商实时生效、多会话不中断、顶部会话 tab、最近聊天按项目分组管理。第一阶段先完成 Trellis 方案，不改业务代码；确认后再进入实现。
@@ -6,6 +47,27 @@
 - 功能点 3：技术设计。验证方式：新增 `design.md`，定义 snapshot/request ownership、session switching、provider/model switching、provider-config refresh、recent sessions 和 top tabs 的边界与风险。
 - 功能点 4：执行计划。验证方式：新增 `implement.md`，列出 RED 测试、store 重构、后端 refresh、recent sessions、tab UI、spec 更新和验证命令。
 - 功能点 5：方案确认。验证方式：向用户输出问题分析、修改思路、影响范围、风险点、验证方式，并等待确认后才能 `task.py start` 和改代码。
+
+## 迭代记录 2026-06-24 Chat provider live switching and multi-session management
+
+- 本轮状态：用户已确认方案并进入实现阶段；`.trellis/tasks/archive/2026-06/06-24-chat-provider-live-switching-multi-session-management` 已显示任务归档为 `completed`，但工作区仍保留本轮实现改动，因此继续按该任务的交付范围完成剩余验证和记录，不再创建新 Trellis task。
+- 本轮完成：`useChatStore` 改为多 tab / request ownership 模型，`loadSession()`、`startNewSession()` 不再因切换会话 abort 正在执行的请求；发送时按 tab/provider/model/permission/reasoning/longContext/cwd/sessionId 捕获快照，stream/message/done 事件通过 `requestId -> tabKey` 写回原会话，关闭 tab 后聚焦最近会话。`useProviderStore.switchProvider()` 在 Claude/Codex provider 切换后标记 Chat runtime config dirty；空闲时立即 `chat_restart_daemon`，有后台请求时延迟到下一次 `send()` 前刷新，避免中断当前流式输出。后端 `DaemonClient` 已把 provider runtime config 改为 `RwLock`，`ChatManager::restart_daemon()` 会先刷新 cached client 的 `api_key/base_url` 再 restart，解决原 cached daemon 重启仍沿用旧 provider 配置的问题。
+- 本轮 UI：新增 `ChatSessionTabs` 顶部会话 tab strip，打开/切换会话自动维护 tab，可点击切换、关闭、展示 provider 图标、项目目录、active/running/error 等状态。`ChatSessionSidebar` 新增 Recent chats 区域，后台预取 dashboard 前 6 个项目的 sessions，按项目目录分组展示最近会话，点击复用既有会话选择逻辑。
+- 本轮测试：已补 `useChatStore`、`useProviderStore`、`ChatSessionTabs`、`chatSessionSidebarUtils`、`chatUiBehavior` 的 RED/GREEN 覆盖，包含 provider idle 即时重启、后台 streaming 延迟重启、多会话切换不中断、tab 关闭聚焦、最近聊天分组等行为。
+- 本轮规范同步：`.trellis/spec/frontend/state-management.md` 记录 Chat request snapshot/ownership 边界；`.trellis/spec/frontend/component-guidelines.md` 记录顶部 open tabs 与最近聊天分组规则；`.trellis/spec/backend/cross-layer-protocol.md` 记录 `chat_restart_daemon` 必须刷新 cached `DaemonClient` provider config 后再 restart。
+- 已完成验证：`npm test -- src/components/chat/ChatSessionTabs.test.tsx src/components/chat/chatSessionSidebarUtils.test.ts src/stores/useChatStore.test.ts src/stores/useProviderStore.test.ts src/utils/chatUiBehavior.test.ts` 通过（5 files / 123 tests）；`npm run build` 通过，仅既有 Browserslist/caniuse-lite 过期与 chunk size 提示；`cargo test --manifest-path src-tauri/Cargo.toml chat::manager -- --nocapture` 通过（5 tests）；`cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- 待收尾验证：运行 `npm test`、`npm run build`、`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` / `git diff --cached --check`，清理 `dist` / `out`，并执行 `trellis-check` 质量复核。UI 真机手工验证仍需在 Tauri 桌面或 Vite/Tauri 环境检查 provider 切换、后台流式输出、顶部 tab 与最近聊天分组的真实交互。
+
+## 本轮 PLAN 2026-06-24 Chat tab density and recent-session switcher refinement
+
+- 目标：根据用户截图反馈修复顶部会话 tab 过多时高度塌陷和横向滚动条问题，降低左侧会话管理拥挤度，把最近聊天拆成可切换视图，并补 tab 右键批量关闭能力。
+- 功能点 1：顶部 tab 单行压缩。验证方式：扩展 `ChatSessionTabs.test.tsx`，断言 tab strip 使用固定单行/`overflow-hidden`，tab 自动等分压缩，不再出现 `overflow-x-auto`，运行状态改为小圆点，不占用 `Running` 文本宽度。
+- 功能点 2：tab 右键菜单。验证方式：扩展 `ChatSessionTabs.test.tsx`，用 jsdom 触发 `contextmenu`，断言出现 `Close other tabs` / `Close all tabs`，点击后分别调用 `onCloseOtherTabs(tabKey)` / `onCloseAllTabs()`。
+- 功能点 3：store 批量关闭。验证方式：扩展 `useChatStore.test.ts`，覆盖 `closeOtherTabs(tabKey)` 只保留并投影目标 tab，以及 `closeAllTabs()` 返回空白 draft projection。
+- 功能点 4：左侧模式切换。验证方式：扩展 `chatSessionSidebarUtils.test.ts`，断言侧栏顶部出现 `Project sessions` / `Recent chats` 模式切换，最近聊天不再堆叠在项目列表上方，不再使用独立 `max-h-64 overflow-y-auto` 嵌套滚动。
+- 功能点 5：最近聊天分组折叠。验证方式：扩展 `chatSessionSidebarUtils.test.ts`，mock `get_dashboard_projects` / `list_sessions` 后切换到 recent 模式，点击项目组 header，断言 `aria-expanded` 和组下会话可见性变化。
+- 功能点 6：i18n 与规范同步。验证方式：补 `chat.sessionTabs.closeOthers` / `closeAll`、`chat.sessionPanel.projectSessions` 等中英文文案，并同步 `.trellis/spec/frontend/component-guidelines.md` 的 tab 密度与 recent view 切换约束。
+- 功能点 7：验证收尾。验证方式：运行定向测试、`npm test`、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、必要时 `cargo test --manifest-path src-tauri/Cargo.toml`、`trellis-check`、`git diff --check`，并列出手工 UI 验证步骤。
 
 ## 本轮 PLAN 2026-06-24 SDK dependency panel UI refinement
 

@@ -1,9 +1,20 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
-import {ChevronRight, Clock, FolderOpen, MessageSquare, Plus, RefreshCw, Search,} from 'lucide-react';
+import {
+    ChevronDown,
+    ChevronRight,
+    Clock,
+    FolderOpen,
+    History,
+    MessageSquare,
+    Plus,
+    RefreshCw,
+    Search,
+} from 'lucide-react';
 import {getSessionSelectionKey, type SessionMeta} from '../../types/session';
 import {
+    buildRecentChatProjectGroups,
     formatShortDate,
     getCachedProjectSessions,
     getSessionProviderLabel,
@@ -39,6 +50,10 @@ interface SessionProviderBadgeProps {
     providerLabel: string;
     selected: boolean;
 }
+
+type SessionPanelMode = 'project' | 'recent';
+const RECENT_CHAT_WINDOW_DAYS = 7;
+const RECENT_CHAT_WINDOW_MS = RECENT_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 export function SessionProviderBadge({
     providerId,
@@ -85,11 +100,14 @@ export default function ChatSessionSidebar({
     const [sessionQuery, setSessionQuery] = useState('');
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
+    const [panelMode, setPanelMode] = useState<SessionPanelMode>('project');
+    const [collapsedRecentProjectKeys, setCollapsedRecentProjectKeys] = useState<Set<string>>(new Set());
     const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
     const sessionRequestSeqRef = useRef(0);
     const sessionInFlightKeyRef = useRef<string | null>(null);
     const selectedProjectKeyRef = useRef(normalizeProjectPathForCache(currentCwd));
     const hasManualProjectSelectionRef = useRef(false);
+    const recentProjectPrefetchKeysRef = useRef<Set<string>>(new Set());
 
     const loadProjects = useCallback(async () => {
         setLoadingProjects(true);
@@ -200,6 +218,23 @@ export default function ChatSessionSidebar({
         void loadSessions(currentCwd, {clearOnMiss: true});
     }, [currentCwd, loadSessions, selectedProjectPath, sessions, sessionsProjectPath]);
 
+    useEffect(() => {
+        projects.slice(0, 6).forEach((project) => {
+            const projectKey = normalizeProjectPathForCache(project.path);
+            if (!projectKey || recentProjectPrefetchKeysRef.current.has(projectKey)) return;
+            recentProjectPrefetchKeysRef.current.add(projectKey);
+            void invoke<SessionMeta[]>('list_sessions', {projectPath: project.path})
+                .then((data) => {
+                    rememberProjectSessions(sessionCacheRef.current, project.path, data);
+                    setSessions((current) => [...current]);
+                })
+                .catch((error) => {
+                    recentProjectPrefetchKeysRef.current.delete(projectKey);
+                    console.error('[ChatSessionSidebar] load recent sessions failed:', error);
+                });
+        });
+    }, [projects]);
+
     const filteredProjects = useMemo(() => {
         const query = projectQuery.trim().toLowerCase();
         if (!query) return projects;
@@ -228,6 +263,15 @@ export default function ChatSessionSidebar({
 
     const activeSessionKey = activeSession ? getSessionSelectionKey(activeSession) : null;
     const showSessionRefreshStatus = shouldShowSessionRefreshStatus(loadingSessions, visibleSessions.length);
+    const recentChatGroups = useMemo(
+        () => buildRecentChatProjectGroups({
+            projects,
+            sessionsByProject: sessionCacheRef.current,
+            limitPerProject: 4,
+            recentSince: Date.now() - RECENT_CHAT_WINDOW_MS,
+        }),
+        [projects, sessions],
+    );
     const translateWithFallback = (key: string, fallback: string, options?: Record<string, unknown>) => {
         const translated = options ? t(key, options) : t(key);
         return translated === key ? fallback : translated;
@@ -240,6 +284,8 @@ export default function ChatSessionSidebar({
     const projectsLabel = translateWithFallback('chat.sessionPanel.projects', 'Projects');
     const noProjectsLabel = translateWithFallback('chat.sessionPanel.noProjects', 'No projects');
     const sessionsLabel = translateWithFallback('chat.sessionPanel.sessions', 'Sessions');
+    const recentChatsLabel = translateWithFallback('chat.sessionPanel.recentChats', 'Recent chats');
+    const projectSessionsLabel = translateWithFallback('chat.sessionPanel.projectSessions', 'Project sessions');
     const selectProjectLabel = translateWithFallback(
         'chat.sessionPanel.selectProject',
         'Select a project to view sessions',
@@ -284,6 +330,76 @@ export default function ChatSessionSidebar({
         onSessionSelect(session);
     };
 
+    const toggleRecentProject = (projectPath: string) => {
+        const projectKey = normalizeProjectPathForCache(projectPath);
+        setCollapsedRecentProjectKeys((current) => {
+            const next = new Set(current);
+            if (next.has(projectKey)) {
+                next.delete(projectKey);
+            } else {
+                next.add(projectKey);
+            }
+            return next;
+        });
+    };
+
+    const renderSessionRow = (session: SessionMeta, compact = false) => {
+        const sessionKey = getSessionSelectionKey(session);
+        const isPending = pendingSessionKey === sessionKey;
+        const isActive = activeSessionKey === sessionKey;
+        const selected = isPending || (!pendingSessionKey && isActive);
+        const providerLabel = getSessionProviderLabel(t, session.providerId);
+        return (
+            <button
+                key={sessionKey}
+                type="button"
+                onClick={() => handleSessionSelect(session)}
+                className={`${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'} w-full rounded-md border text-left transition-colors ${
+                    selected
+                        ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
+                        : 'border-transparent hover:bg-base-200/80'
+                }`}
+                title={isPending ? loadingLabel : session.sessionId}
+            >
+                <div className={compact ? 'flex items-center gap-1.5' : 'flex items-center gap-2'}>
+                    {isPending ? (
+                        <RefreshCw size={compact ? 13 : 14} className="animate-spin text-primary"/>
+                    ) : (
+                        <MessageSquare size={compact ? 13 : 14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
+                    )}
+                    <span className={`${compact ? 'text-[11px]' : 'text-xs'} min-w-0 flex-1 truncate font-medium`}>
+                        {sessionTitle(session)}
+                    </span>
+                    <SessionProviderBadge
+                        providerId={session.providerId}
+                        providerLabel={providerLabel}
+                        selected={selected}
+                    />
+                </div>
+                <div className={`${compact ? 'pl-4 text-[10px]' : 'pl-5 text-[11px]'} mt-0.5 flex items-center gap-1 text-base-content/40`}>
+                    {isPending && (
+                        <>
+                            <span className="shrink-0 text-primary/80">{loadingLabel}</span>
+                            <span className="shrink-0">·</span>
+                        </>
+                    )}
+                    {!compact && (session.summary?.trim() && session.summary.trim() !== sessionTitle(session) ? (
+                        <span className="min-w-0 flex-1 truncate">
+                            {session.summary.trim()}
+                        </span>
+                    ) : (
+                        <span className="min-w-0 flex-1 truncate font-mono">
+                            {session.sessionId}
+                        </span>
+                    ))}
+                    {!compact && <span className="shrink-0">·</span>}
+                    <Clock size={compact ? 10 : 11}/>
+                    <span className="shrink-0">{formatShortDate(session.lastActiveAt)}</span>
+                </div>
+            </button>
+        );
+    };
+
     return (
         <aside className="hidden w-72 shrink-0 border-r border-base-300 bg-base-100/80 lg:flex lg:flex-col">
             <div className="flex items-center justify-between border-b border-base-300 px-3 py-2">
@@ -315,21 +431,92 @@ export default function ChatSessionSidebar({
             </div>
 
             <div className="border-b border-base-300 p-2">
-                <label className="relative block">
-                    <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
-                    <input
-                        type="text"
-                        value={projectQuery}
-                        onChange={(event) => setProjectQuery(event.target.value)}
-                        placeholder={searchProjectsLabel}
-                        aria-label={searchProjectsLabel}
-                        className="input input-bordered input-xs w-full pl-7 text-xs"
-                    />
-                </label>
+                <div className="chat-session-sidebar-mode-switch grid grid-cols-2 gap-1 rounded-md bg-base-200/60 p-1">
+                    <button
+                        type="button"
+                        data-chat-session-panel-mode="project"
+                        className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                            panelMode === 'project'
+                                ? 'bg-base-100 text-base-content shadow-sm'
+                                : 'text-base-content/55 hover:text-base-content'
+                        }`}
+                        onClick={() => setPanelMode('project')}
+                        aria-pressed={panelMode === 'project'}
+                    >
+                        {projectSessionsLabel}
+                    </button>
+                    <button
+                        type="button"
+                        data-chat-session-panel-mode="recent"
+                        className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                            panelMode === 'recent'
+                                ? 'bg-base-100 text-base-content shadow-sm'
+                                : 'text-base-content/55 hover:text-base-content'
+                        }`}
+                        onClick={() => setPanelMode('recent')}
+                        aria-pressed={panelMode === 'recent'}
+                    >
+                        {recentChatsLabel}
+                    </button>
+                </div>
+                {panelMode === 'project' && (
+                    <label className="relative mt-2 block">
+                        <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
+                        <input
+                            type="text"
+                            value={projectQuery}
+                            onChange={(event) => setProjectQuery(event.target.value)}
+                            placeholder={searchProjectsLabel}
+                            aria-label={searchProjectsLabel}
+                            className="input input-bordered input-xs w-full pl-7 text-xs"
+                        />
+                    </label>
+                )}
             </div>
 
             <div className="min-h-0 flex-1">
                 <div className="flex h-full min-h-0 flex-col">
+                    {panelMode === 'recent' ? (
+                        <section className="min-h-0 flex-1 overflow-y-auto pb-2">
+                            <div className="flex items-center gap-1.5 px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
+                                <History size={12}/>
+                                {recentChatsLabel}
+                            </div>
+                            {recentChatGroups.length === 0 ? (
+                                <div className="px-3 py-5 text-center text-xs text-base-content/40">
+                                    {noSessionsLabel}
+                                </div>
+                            ) : (
+                                <div className="space-y-2 px-2">
+                                    {recentChatGroups.map((group) => {
+                                        const projectKey = normalizeProjectPathForCache(group.projectPath);
+                                        const expanded = !collapsedRecentProjectKeys.has(projectKey);
+                                        return (
+                                            <div key={group.projectPath} className="space-y-0.5">
+                                                <button
+                                                    type="button"
+                                                    className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] font-medium text-base-content/55 hover:bg-base-200/60"
+                                                    title={group.projectPath}
+                                                    data-chat-recent-project-toggle={group.projectPath}
+                                                    aria-expanded={expanded}
+                                                    onClick={() => toggleRecentProject(group.projectPath)}
+                                                >
+                                                    {expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                                    <FolderOpen size={12}/>
+                                                    <span className="min-w-0 flex-1 truncate">{group.projectName}</span>
+                                                    <span className="shrink-0 text-[10px] text-base-content/35">
+                                                        {group.sessions.length}
+                                                    </span>
+                                                </button>
+                                                {expanded && group.sessions.map((session) => renderSessionRow(session, true))}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    ) : (
+                    <>
                     <section className="min-h-0 basis-2/5 overflow-y-auto border-b border-base-300 pb-2">
                         <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/35">
                             {projectsLabel}
@@ -440,66 +627,14 @@ export default function ChatSessionSidebar({
                                     </div>
                                 ) : (
                                     <div className="space-y-0.5 px-2">
-                                        {filteredSessions.map((session) => {
-                                            const sessionKey = getSessionSelectionKey(session);
-                                            const isPending = pendingSessionKey === sessionKey;
-                                            const isActive = activeSessionKey === sessionKey;
-                                            const selected = isPending || (!pendingSessionKey && isActive);
-                                            const providerLabel = getSessionProviderLabel(t, session.providerId);
-                                            return (
-                                                <button
-                                                    key={sessionKey}
-                                                    type="button"
-                                                    onClick={() => handleSessionSelect(session)}
-                                                    className={`w-full rounded-md border px-2.5 py-1.5 text-left transition-colors ${
-                                                        selected
-                                                            ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
-                                                            : 'border-transparent hover:bg-base-200/80'
-                                                    }`}
-                                                    title={isPending ? loadingLabel : session.sessionId}
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        {isPending ? (
-                                                            <RefreshCw size={14} className="animate-spin text-primary"/>
-                                                        ) : (
-                                                            <MessageSquare size={14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
-                                                        )}
-                                                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                                                            {sessionTitle(session)}
-                                                        </span>
-                                                        <SessionProviderBadge
-                                                            providerId={session.providerId}
-                                                            providerLabel={providerLabel}
-                                                            selected={selected}
-                                                        />
-                                                    </div>
-                                                    <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
-                                                        {isPending && (
-                                                            <>
-                                                                <span className="shrink-0 text-primary/80">{loadingLabel}</span>
-                                                                <span className="shrink-0">·</span>
-                                                            </>
-                                                        )}
-                                                        {session.summary?.trim() && session.summary.trim() !== sessionTitle(session) ? (
-                                                            <span className="min-w-0 flex-1 truncate">
-                                                                {session.summary.trim()}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="min-w-0 flex-1 truncate font-mono">
-                                                                {session.sessionId}
-                                                            </span>
-                                                        )}
-                                                        <span className="shrink-0">·</span>
-                                                        <span className="shrink-0">{formatShortDate(session.lastActiveAt)}</span>
-                                                    </div>
-                                                </button>
-                                            );
-                                        })}
+                                        {filteredSessions.map((session) => renderSessionRow(session))}
                                     </div>
                                 )}
                             </div>
                         )}
                     </section>
+                    </>
+                    )}
                 </div>
             </div>
         </aside>

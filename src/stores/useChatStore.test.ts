@@ -125,6 +125,9 @@ function resetStore() {
         pendingToolPermissionQueue: [],
         toolPermissionResponseInFlightRequestId: null,
         deniedToolIds: new Set(),
+        openTabs: [],
+        activeTabKey: null,
+        providerConfigDirty: false,
         lastSessionLoadMetrics: null,
     });
 }
@@ -326,7 +329,7 @@ describe('useChatStore session transitions', () => {
         });
     });
 
-    it('aborts an active request before starting a new session', async () => {
+    it('starts a new session without aborting the running request', async () => {
         useChatStore.setState({
             messages: activeMessages,
             activeRequestId: 'request-1',
@@ -339,7 +342,7 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().startNewSession('C:/new-project');
 
-        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_abort');
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
         expect(useChatStore.getState()).toMatchObject({
             messages: [],
             sessionId: null,
@@ -351,7 +354,7 @@ describe('useChatStore session transitions', () => {
         });
     });
 
-    it('keeps abort failure visible after starting a new session', async () => {
+    it('keeps a running request alive when starting a new session even if abort would fail', async () => {
         useChatStore.setState({
             messages: activeMessages,
             activeRequestId: 'request-1',
@@ -364,7 +367,7 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().startNewSession('C:/new-project');
 
-        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_abort');
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
         expect(useChatStore.getState()).toMatchObject({
             messages: [],
             sessionId: null,
@@ -372,8 +375,14 @@ describe('useChatStore session transitions', () => {
             currentCwd: 'C:/new-project',
             activeRequestId: null,
             contextTokens: 0,
-            error: 'Error: daemon offline',
+            error: null,
         });
+        expect(useChatStore.getState().openTabs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                activeRequestId: 'request-1',
+                status: 'running',
+            }),
+        ]));
     });
 
     it('keeps abort failure visible after clearing the current chat', async () => {
@@ -401,7 +410,7 @@ describe('useChatStore session transitions', () => {
         });
     });
 
-    it('aborts an active request before loading a history session', async () => {
+    it('loads a history session without aborting the running request', async () => {
         const history: UnifiedSessionMessage[] = [
             {
                 role: 'user',
@@ -415,7 +424,6 @@ describe('useChatStore session transitions', () => {
             },
         ];
         tauriMocks.invoke.mockImplementation(async (command: string) => {
-            if (command === 'chat_abort') return undefined;
             if (command === 'get_unified_session_message_window') return buildTestHistoryWindow(history);
             if (command === 'get_unified_session_messages') return history;
             throw new Error(`Unexpected command: ${command}`);
@@ -429,8 +437,8 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().loadSession(loadedSession);
 
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'chat_abort');
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(2, 'get_unified_session_message_window', {
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
+        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'get_unified_session_message_window', {
             providerId: 'codex',
             sourcePath: loadedSession.sourcePath,
             tailLimit: 120,
@@ -451,7 +459,67 @@ describe('useChatStore session transitions', () => {
         ]);
     });
 
-    it('keeps abort failure visible after loading a history session', async () => {
+    it('does not keep an empty startup draft tab when opening a history session', async () => {
+        const history: UnifiedSessionMessage[] = [
+            {
+                role: 'user',
+                content: 'open real session',
+                ts: '2026-06-17T08:00:00.000Z',
+            },
+        ];
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_message_window') return buildTestHistoryWindow(history);
+            if (command === 'get_unified_session_messages') return history;
+            throw new Error(`Unexpected command: ${command}`);
+        });
+        useChatStore.setState({
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+
+        expect(useChatStore.getState().openTabs).toHaveLength(1);
+        expect(useChatStore.getState().openTabs[0]).toEqual(expect.objectContaining({
+            activeSession: loadedSession,
+            sessionId: loadedSession.sessionId,
+        }));
+        expect(useChatStore.getState().openTabs[0].activeSession).not.toBeNull();
+    });
+
+    it('keeps a non-empty startup draft tab when opening a history session', async () => {
+        const history: UnifiedSessionMessage[] = [
+            {
+                role: 'assistant',
+                content: 'loaded response',
+                ts: '2026-06-17T08:00:00.000Z',
+            },
+        ];
+        tauriMocks.invoke.mockImplementation(async (command: string) => {
+            if (command === 'get_unified_session_message_window') return buildTestHistoryWindow(history);
+            if (command === 'get_unified_session_messages') return history;
+            throw new Error(`Unexpected command: ${command}`);
+        });
+        useChatStore.setState({
+            currentCwd: 'C:/guodevelop/ccg-switch',
+            draft: 'keep this prompt',
+        });
+
+        await useChatStore.getState().loadSession(loadedSession);
+
+        expect(useChatStore.getState().openTabs).toHaveLength(2);
+        expect(useChatStore.getState().openTabs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                activeSession: null,
+                draft: 'keep this prompt',
+            }),
+            expect.objectContaining({
+                activeSession: loadedSession,
+                sessionId: loadedSession.sessionId,
+            }),
+        ]));
+    });
+
+    it('loads a history session without surfacing abort errors from another running tab', async () => {
         const history: UnifiedSessionMessage[] = [
             {
                 role: 'assistant',
@@ -460,7 +528,6 @@ describe('useChatStore session transitions', () => {
             },
         ];
         tauriMocks.invoke.mockImplementation(async (command: string) => {
-            if (command === 'chat_abort') throw new Error('abort failed');
             if (command === 'get_unified_session_message_window') return buildTestHistoryWindow(history);
             if (command === 'get_unified_session_messages') return history;
             throw new Error(`Unexpected command: ${command}`);
@@ -474,8 +541,8 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().loadSession(loadedSession);
 
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'chat_abort');
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(2, 'get_unified_session_message_window', {
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
+        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'get_unified_session_message_window', {
             providerId: 'codex',
             sourcePath: loadedSession.sourcePath,
             tailLimit: 120,
@@ -487,16 +554,21 @@ describe('useChatStore session transitions', () => {
             activeSession: loadedSession,
             pendingSessionKey: null,
             activeRequestId: null,
-            error: 'Error: abort failed',
+            error: null,
         });
         expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
             'history still loads',
         ]);
+        expect(useChatStore.getState().openTabs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                activeRequestId: 'request-1',
+                status: 'running',
+            }),
+        ]));
     });
 
-    it('stops the previous streaming assistant when history loading fails after abort', async () => {
+    it('keeps the previous streaming assistant running when history loading fails', async () => {
         tauriMocks.invoke.mockImplementation(async (command: string) => {
-            if (command === 'chat_abort') return undefined;
             if (command === 'get_unified_session_message_window') throw new Error('history unreadable');
             if (command === 'get_unified_session_messages') return [];
             throw new Error(`Unexpected command: ${command}`);
@@ -510,27 +582,25 @@ describe('useChatStore session transitions', () => {
 
         await useChatStore.getState().loadSession(loadedSession);
 
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'chat_abort');
-        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(2, 'get_unified_session_message_window', {
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
+        expect(tauriMocks.invoke).toHaveBeenNthCalledWith(1, 'get_unified_session_message_window', {
             providerId: 'codex',
             sourcePath: loadedSession.sourcePath,
             tailLimit: 120,
         });
         expect(useChatStore.getState()).toMatchObject({
             activeRequestId: null,
-            activeSession: null,
+            activeSession: loadedSession,
             pendingSessionKey: null,
             error: 'Error: history unreadable',
         });
-        expect(useChatStore.getState().messages).toEqual([
-            activeMessages[0],
-            {
-                ...activeMessages[1],
-                streaming: false,
-                error: '已停止输出',
-                durationMs: expect.any(Number),
-            },
-        ]);
+        expect(useChatStore.getState().openTabs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                activeRequestId: 'request-1',
+                status: 'running',
+                messages: activeMessages,
+            }),
+        ]));
     });
 
     it('marks the selected history session as pending while loading', async () => {
@@ -2289,7 +2359,7 @@ describe('useChatStore session transitions', () => {
         });
     });
 
-    it('keeps provider, model, mode, and reasoning locked while a turn is active', () => {
+    it('updates provider, model, mode, and reasoning for the next turn while a request is active', () => {
         useChatStore.setState({
             activeRequestId: 'request-current',
             provider: 'claude',
@@ -2308,14 +2378,149 @@ describe('useChatStore session transitions', () => {
 
         expect(useChatStore.getState()).toMatchObject({
             activeRequestId: 'request-current',
-            provider: 'claude',
-            model: 'claude-opus-4-8',
-            permissionMode: 'default',
-            reasoningEffort: 'high',
-            sessionId: 'claude-session',
-            activeSession: claudeSession,
-            pendingSessionKey: 'pending-session',
+            provider: 'codex',
+            model: 'gpt-5.2-codex',
+            permissionMode: 'bypassPermissions',
+            reasoningEffort: 'low',
+            sessionId: null,
+            activeSession: null,
+            pendingSessionKey: null,
         });
+    });
+
+    it('routes streaming events back to the original tab after switching sessions', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        let resolveSend: ((requestId: string) => void) | null = null;
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'chat_start_daemon') return Promise.resolve(undefined);
+            if (command === 'chat_send') {
+                return new Promise<string>((resolve) => {
+                    resolveSend = resolve;
+                });
+            }
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().init();
+        useChatStore.setState({
+            provider: 'codex',
+            model: 'gpt-5.2-codex',
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+
+        const sendPromise = useChatStore.getState().send('run in the first tab');
+        await Promise.resolve();
+
+        const stateWithTabs = useChatStore.getState() as ReturnType<typeof useChatStore.getState> & {
+            activeTabKey: string | null;
+            focusTab: (key: string) => void;
+            openTabs: Array<{key: string; status: string; activeRequestId: string | null}>;
+        };
+        const originalTabKey = stateWithTabs.activeTabKey;
+        expect(originalTabKey).toEqual(expect.any(String));
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'run in the first tab',
+            '',
+        ]);
+
+        await useChatStore.getState().startNewSession('C:/guodevelop/other-project');
+
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith('chat_abort');
+        expect((useChatStore.getState() as typeof stateWithTabs).activeTabKey).not.toBe(originalTabKey);
+        expect(useChatStore.getState().messages).toEqual([]);
+
+        expect(resolveSend).not.toBeNull();
+        resolveSend!('request-background');
+        await sendPromise;
+
+        listeners['chat://stream']?.({
+            payload: {
+                requestId: 'request-background',
+                kind: 'line',
+                text: '[CONTENT_DELTA] "background result"',
+            },
+        });
+
+        expect(useChatStore.getState().messages).toEqual([]);
+        const backgroundTab = (useChatStore.getState() as typeof stateWithTabs).openTabs
+            .find((tab) => tab.key === originalTabKey);
+        expect(backgroundTab).toMatchObject({
+            status: 'running',
+            activeRequestId: 'request-background',
+        });
+
+        (useChatStore.getState() as typeof stateWithTabs).focusTab(originalTabKey!);
+
+        expect(useChatStore.getState()).toMatchObject({
+            activeRequestId: 'request-background',
+            currentCwd: 'C:/guodevelop/ccg-switch',
+        });
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual([
+            'run in the first tab',
+            'background result',
+        ]);
+    });
+
+    it('closes the current tab and focuses the most recently used remaining tab', () => {
+        const makeTab = (key: string, content: string, updatedAt: number) => ({
+            key,
+            messages: [{
+                id: `${key}-user`,
+                role: 'user' as const,
+                content,
+                createdAt: updatedAt,
+            }],
+            provider: 'claude' as const,
+            permissionMode: 'default' as const,
+            model: 'claude-opus-4-8',
+            reasoningEffort: 'high' as const,
+            draft: '',
+            longContextEnabled: true,
+            contextTokens: 0,
+            contextMaxTokens: null,
+            activeRequestId: null,
+            sessionId: key,
+            currentCwd: `C:/workspace/${key}`,
+            activeSession: null,
+            pendingSessionKey: null,
+            lastSessionLoadMetrics: null,
+            handoffContextProvider: null,
+            status: 'idle' as const,
+            error: null,
+            createdAt: updatedAt,
+            updatedAt,
+        });
+        const tabs = [
+            makeTab('session:older', 'older tab', 100),
+            makeTab('session:recent', 'recent tab', 300),
+            makeTab('session:active', 'active tab', 200),
+        ];
+        useChatStore.setState({
+            openTabs: tabs,
+            activeTabKey: 'session:active',
+            messages: tabs[2].messages,
+            sessionId: tabs[2].sessionId,
+            currentCwd: tabs[2].currentCwd,
+        } as Partial<ReturnType<typeof useChatStore.getState>>);
+
+        (useChatStore.getState() as ReturnType<typeof useChatStore.getState> & {
+            closeTab: (key: string) => void;
+        }).closeTab('session:active');
+
+        expect(useChatStore.getState()).toMatchObject({
+            activeTabKey: 'session:recent',
+            sessionId: 'session:recent',
+            currentCwd: 'C:/workspace/session:recent',
+        });
+        expect(useChatStore.getState().messages.map((message) => message.content)).toEqual(['recent tab']);
+        expect(useChatStore.getState().openTabs.map((tab) => tab.key)).toEqual([
+            'session:older',
+            'session:recent',
+        ]);
     });
 
     it('ignores duplicate ask-user-question responses after the pending request is cleared', async () => {
@@ -2340,6 +2545,156 @@ describe('useChatStore session transitions', () => {
             answers: {},
         });
         expect(useChatStore.getState().pendingAskUserQuestion).toBeNull();
+    });
+
+    it('closes every tab except the requested one and projects that tab', () => {
+        useChatStore.setState({
+            activeTabKey: 'session:active',
+            messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
+            provider: 'claude',
+            currentCwd: 'C:/workspace/active',
+            openTabs: [
+                {
+                    key: 'session:active',
+                    messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
+                    provider: 'claude',
+                    permissionMode: 'default',
+                    model: 'claude-opus-4-8',
+                    reasoningEffort: 'high',
+                    draft: '',
+                    longContextEnabled: true,
+                    contextTokens: 0,
+                    contextMaxTokens: null,
+                    activeRequestId: null,
+                    sessionId: null,
+                    currentCwd: 'C:/workspace/active',
+                    activeSession: null,
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: null,
+                    handoffContextProvider: null,
+                    status: 'idle',
+                    error: null,
+                    createdAt: 1,
+                    updatedAt: 1,
+                },
+                {
+                    key: 'session:target',
+                    messages: [{id: 'target-message', role: 'user', content: 'target', createdAt: 2}],
+                    provider: 'codex',
+                    permissionMode: 'bypassPermissions',
+                    model: 'gpt-5-codex',
+                    reasoningEffort: 'medium',
+                    draft: 'target draft',
+                    longContextEnabled: false,
+                    contextTokens: 10,
+                    contextMaxTokens: 400000,
+                    activeRequestId: null,
+                    sessionId: 'target-session',
+                    currentCwd: 'C:/workspace/target',
+                    activeSession: loadedSession,
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: null,
+                    handoffContextProvider: null,
+                    status: 'idle',
+                    error: null,
+                    createdAt: 2,
+                    updatedAt: 8,
+                },
+                {
+                    key: 'session:other',
+                    messages: [],
+                    provider: 'claude',
+                    permissionMode: 'default',
+                    model: 'claude-opus-4-8',
+                    reasoningEffort: 'high',
+                    draft: '',
+                    longContextEnabled: true,
+                    contextTokens: 0,
+                    contextMaxTokens: null,
+                    activeRequestId: null,
+                    sessionId: null,
+                    currentCwd: 'C:/workspace/other',
+                    activeSession: null,
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: null,
+                    handoffContextProvider: null,
+                    status: 'idle',
+                    error: null,
+                    createdAt: 3,
+                    updatedAt: 3,
+                },
+            ],
+        });
+
+        useChatStore.getState().closeOtherTabs('session:target');
+
+        expect(useChatStore.getState().openTabs.map((tab) => tab.key)).toEqual(['session:target']);
+        expect(useChatStore.getState()).toMatchObject({
+            activeTabKey: 'session:target',
+            provider: 'codex',
+            model: 'gpt-5-codex',
+            draft: 'target draft',
+            sessionId: 'target-session',
+            currentCwd: 'C:/workspace/target',
+        });
+        expect(useChatStore.getState().messages).toEqual([
+            {id: 'target-message', role: 'user', content: 'target', createdAt: 2},
+        ]);
+    });
+
+    it('closes all tabs and returns to an empty draft projection', () => {
+        useChatStore.setState({
+            activeTabKey: 'session:active',
+            messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
+            provider: 'codex',
+            model: 'gpt-5-codex',
+            draft: 'active draft',
+            sessionId: 'active-session',
+            currentCwd: 'C:/workspace/active',
+            activeSession: loadedSession,
+            openTabs: [
+                {
+                    key: 'session:active',
+                    messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
+                    provider: 'codex',
+                    permissionMode: 'default',
+                    model: 'gpt-5-codex',
+                    reasoningEffort: 'high',
+                    draft: 'active draft',
+                    longContextEnabled: false,
+                    contextTokens: 11,
+                    contextMaxTokens: 400000,
+                    activeRequestId: null,
+                    sessionId: 'active-session',
+                    currentCwd: 'C:/workspace/active',
+                    activeSession: loadedSession,
+                    pendingSessionKey: null,
+                    lastSessionLoadMetrics: null,
+                    handoffContextProvider: null,
+                    status: 'idle',
+                    error: null,
+                    createdAt: 1,
+                    updatedAt: 2,
+                },
+            ],
+        });
+
+        useChatStore.getState().closeAllTabs();
+
+        expect(useChatStore.getState().openTabs).toEqual([]);
+        expect(useChatStore.getState()).toMatchObject({
+            activeTabKey: null,
+            messages: [],
+            draft: '',
+            sessionId: null,
+            activeSession: null,
+            pendingSessionKey: null,
+            lastSessionLoadMetrics: null,
+            handoffContextProvider: null,
+            contextTokens: 0,
+            contextMaxTokens: null,
+        });
+        expect(useChatStore.getState().currentCwd).toBe('C:/workspace/active');
     });
 
     it('ignores concurrent duplicate ask-user-question responses before invoke resolves', async () => {

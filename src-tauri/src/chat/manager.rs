@@ -31,6 +31,11 @@ trait ManagerDaemonClient: Send + Sync {
     fn set_event_sink(&self, sink: EventSink) -> ClientFuture<'_, ()>;
     fn start(&self) -> ClientResultFuture<'_, ()>;
     fn restart(&self) -> ClientResultFuture<'_, ()>;
+    fn update_provider_config(
+        &self,
+        api_key: Option<String>,
+        base_url: Option<String>,
+    ) -> ClientFuture<'_, ()>;
     fn heartbeat(&self) -> ClientResultFuture<'_, ()>;
     fn send_streaming(
         &self,
@@ -58,6 +63,16 @@ impl ManagerDaemonClient for DaemonClient {
 
     fn restart(&self) -> ClientResultFuture<'_, ()> {
         Box::pin(async move { DaemonClient::restart(self).await })
+    }
+
+    fn update_provider_config(
+        &self,
+        api_key: Option<String>,
+        base_url: Option<String>,
+    ) -> ClientFuture<'_, ()> {
+        Box::pin(async move {
+            DaemonClient::update_provider_config(self, api_key, base_url).await;
+        })
     }
 
     fn heartbeat(&self) -> ClientResultFuture<'_, ()> {
@@ -171,6 +186,21 @@ impl ChatManager {
             spawn_heartbeat(client.clone());
         }
         Ok(client)
+    }
+
+    async fn refresh_cached_client_provider_config<F>(
+        client: Arc<dyn ManagerDaemonClient>,
+        api_key: Option<String>,
+        base_url: Option<String>,
+        spawn_heartbeat: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(Arc<dyn ManagerDaemonClient>),
+    {
+        client.update_provider_config(api_key, base_url).await;
+        client.restart().await?;
+        spawn_heartbeat(client);
+        Ok(())
     }
 
     /// Get active Provider config (API Key and base URL)
@@ -350,11 +380,14 @@ impl ChatManager {
     /// 重启 daemon：停止当前实例并以新进程重新启动（用于安装 SDK 后刷新）。
     pub async fn restart_daemon(&self) -> Result<(), String> {
         if let Some(c) = self.client.get() {
-            c.restart().await?;
-            // restart 会重建 stdout reader（事件 sink 仍有效），但旧的心跳循环
-            // 已随 is_running()=false 退出，需重新拉起。
-            Self::spawn_heartbeat(c.clone());
-            Ok(())
+            let (api_key, base_url) = self.get_active_provider_config().await?;
+            Self::refresh_cached_client_provider_config(
+                c.clone(),
+                api_key,
+                base_url,
+                Self::spawn_heartbeat,
+            )
+            .await
         } else {
             // 尚未初始化，直接懒启动（client() 内部会启动心跳）。
             self.warm_up().await
@@ -468,6 +501,7 @@ mod tests {
         running: AtomicBool,
         restart_calls: AtomicUsize,
         stop_calls: AtomicUsize,
+        config_update_calls: AtomicUsize,
         fail_restart: bool,
     }
 
@@ -477,6 +511,7 @@ mod tests {
                 running: AtomicBool::new(running),
                 restart_calls: AtomicUsize::new(0),
                 stop_calls: AtomicUsize::new(0),
+                config_update_calls: AtomicUsize::new(0),
                 fail_restart: false,
             }
         }
@@ -486,6 +521,7 @@ mod tests {
                 running: AtomicBool::new(false),
                 restart_calls: AtomicUsize::new(0),
                 stop_calls: AtomicUsize::new(0),
+                config_update_calls: AtomicUsize::new(0),
                 fail_restart: true,
             }
         }
@@ -515,6 +551,16 @@ mod tests {
                 }
                 self.running.store(true, Ordering::SeqCst);
                 Ok(())
+            })
+        }
+
+        fn update_provider_config(
+            &self,
+            _api_key: Option<String>,
+            _base_url: Option<String>,
+        ) -> ClientFuture<'_, ()> {
+            Box::pin(async {
+                self.config_update_calls.fetch_add(1, Ordering::SeqCst);
             })
         }
 
@@ -611,5 +657,28 @@ mod tests {
         assert!(!fake.is_running());
         assert_eq!(fake.restart_calls.load(Ordering::SeqCst), 1);
         assert_eq!(heartbeat_spawns.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn provider_config_refresh_updates_cached_client_before_restart() {
+        let fake = Arc::new(FakeDaemonClient::new(true));
+        let client: Arc<dyn ManagerDaemonClient> = fake.clone();
+        let heartbeat_spawns = Arc::new(AtomicUsize::new(0));
+        let captured_spawns = heartbeat_spawns.clone();
+
+        ChatManager::refresh_cached_client_provider_config(
+            client,
+            Some("secret-token".into()),
+            Some("https://api.example.invalid".into()),
+            move |_| {
+                captured_spawns.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .await
+        .expect("provider config refresh should restart cached daemon");
+
+        assert_eq!(fake.config_update_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.restart_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(heartbeat_spawns.load(Ordering::SeqCst), 1);
     }
 }

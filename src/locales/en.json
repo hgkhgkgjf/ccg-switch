@@ -270,6 +270,8 @@
         "sessionPanel": {
             "title": "Session Management",
             "newChat": "New chat",
+            "recentChats": "Recent chats",
+            "projectSessions": "Project sessions",
             "projects": "Projects",
             "sessions": "Sessions",
             "searchProjects": "Search projects...",
@@ -280,6 +282,19 @@
             "noMatchingSessions": "No matching sessions",
             "refreshingSessions": "Refreshing sessions…",
             "projectSessionCount": "{{count}} sessions"
+        },
+        "sessionTabs": {
+            "label": "Open conversations",
+            "close": "Close tab",
+            "closeOthers": "Close other tabs",
+            "closeAll": "Close all tabs",
+            "status": {
+                "idle": "Idle",
+                "loading": "Loading",
+                "running": "Running",
+                "queued": "Queued",
+                "error": "Error"
+            }
         },
         "enhancer": {
             "title": "Prompt Enhancer",

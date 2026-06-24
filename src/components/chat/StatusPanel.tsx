@@ -42,7 +42,7 @@ import type {ChatMcpConnectivityState, ChatMcpLiveStatus} from '../../utils/chat
 import type {ChatMcpAvailabilitySummary} from '../../utils/chatMcpStatus';
 import {cn} from '../../utils/cn';
 import {AVAILABLE_MODES, type PermissionMode, REASONING_LEVELS, type ReasoningEffort} from './composer/constants';
-import type {EditDiffPreviewMode} from '../toolBlocks/EditDiffPreview';
+import EditDiffPreview, {type EditDiffPreviewMode} from '../toolBlocks/EditDiffPreview';
 import {isToolBlockToggleActivationKey} from '../../utils/toolGrouping';
 
 const EMPTY_EDIT_SUMMARIES: ChatStatusEditSummary[] = [];
@@ -241,6 +241,10 @@ function formatMetricMs(value: number | null): string {
 function formatMetricCount(value: number | null): string {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
     return String(value);
+}
+
+function createStatusEditPreviewId(editKey: string): string {
+    return `status-edit-diff-preview-${editKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
 export function getStatusEditPreviewTop(
@@ -445,6 +449,14 @@ export default function StatusPanel({
     const [localDiffViewMode, setLocalDiffViewMode] = useState<EditDiffPreviewMode>('unified');
     const activeDiffViewMode = diffViewMode ?? localDiffViewMode;
     const visibleEdits = showAllEdits ? allEdits : recentEdits;
+    const editPreviewLinesByKey = useMemo(() => {
+        const previews = new Map<string, ChatStatusEditSummary['diffPreviewLines']>();
+        [...allEdits, ...recentEdits].forEach((edit) => {
+            if (edit.diffPreviewLines.length === 0) return;
+            previews.set(getChatStatusEditKey(edit), edit.diffPreviewLines);
+        });
+        return previews;
+    }, [allEdits, recentEdits]);
     const editTree = useMemo(() => buildEditTree(visibleEdits), [visibleEdits]);
     const editFolderKeys = useMemo(() => collectEditFolderKeys(editTree), [editTree]);
     const sessionLoadMetricsKey = sessionLoadMetrics
@@ -977,6 +989,10 @@ export default function StatusPanel({
         const openEditedFileLabel = getOpenEditedFileLabel(edit.displayPath);
         const editStatusTargetLabel = getEditStatusTargetLabel(edit);
         const editStatsTargetLabel = getEditStatsTargetLabel(edit.displayPath, edit.additions, edit.deletions);
+        const previewLines = edit.diffPreviewLines.length > 0
+            ? edit.diffPreviewLines
+            : (editPreviewLinesByKey.get(editKey) ?? []);
+        const previewId = previewLines.length > 0 ? createStatusEditPreviewId(editKey) : undefined;
 
         return (
             <div
@@ -990,6 +1006,7 @@ export default function StatusPanel({
                 style={{ paddingLeft }}
                 title={inspectDiffLabel}
                 aria-label={inspectDiffLabel}
+                aria-describedby={previewId}
                 aria-current={isSelected ? 'true' : undefined}
                 onClick={() => handleSelectEditedFile(edit)}
                 onKeyDown={(event) => handleEditedFileKeyDown(event, edit)}
@@ -1038,6 +1055,18 @@ export default function StatusPanel({
                         <ExternalLink size={11} />
                     </button>
                 </div>
+                {previewId && (
+                    <EditDiffPreview
+                        id={previewId}
+                        filePath={edit.displayPath}
+                        additions={edit.additions}
+                        deletions={edit.deletions}
+                        lines={previewLines}
+                        mode={activeDiffViewMode}
+                        surface="status"
+                        visible
+                    />
+                )}
             </div>
         );
     };

@@ -1,7 +1,8 @@
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { Provider } from '../types/provider';
-import { AppType } from '../types/app';
+import {create} from 'zustand';
+import {invoke} from '@tauri-apps/api/core';
+import {Provider} from '../types/provider';
+import {AppType} from '../types/app';
+import {useChatStore} from './useChatStore';
 
 // ── 类型定义 ──────────────────────────────────────────────
 
@@ -89,6 +90,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         try {
             await invoke('switch_provider', { app, providerId });
             await get().loadAllProviders(true);
+            if (app === 'claude' || app === 'codex') {
+                await useChatStore.getState().markProviderConfigDirty();
+            }
         } catch (error) {
             set({ error: String(error), loading: false });
             throw error;

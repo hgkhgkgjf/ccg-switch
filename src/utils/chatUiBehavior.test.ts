@@ -20,6 +20,7 @@ import {
     getEffectiveRevealedCount,
     getManualRevealWindow,
     getNextRevealState,
+    getNextTabAfterClose,
     getPaneResizeHandleLabel,
     getPaneWidthsAfterResize,
     getRevealStateAfterServerExpansion,
@@ -538,6 +539,33 @@ describe('chat UI behavior', () => {
             sdkName: 'Claude SDK',
             translate: (key) => key,
         })).toBe('Claude SDK is not installed yet. Install it to start chatting.');
+    });
+
+    it('activates the most recently used tab after closing the current tab', () => {
+        const tabs = [
+            {key: 'session:old', updatedAt: 100},
+            {key: 'session:recent', updatedAt: 300},
+            {key: 'draft:newer', updatedAt: 200},
+            {key: 'draft:active', updatedAt: 250},
+        ];
+
+        expect(getNextTabAfterClose({
+            tabs,
+            closingKey: 'draft:active',
+            activeKey: 'draft:active',
+        })).toBe('session:recent');
+
+        expect(getNextTabAfterClose({
+            tabs,
+            closingKey: 'session:old',
+            activeKey: 'draft:active',
+        })).toBe('draft:active');
+
+        expect(getNextTabAfterClose({
+            tabs: [{key: 'only', updatedAt: 1}],
+            closingKey: 'only',
+            activeKey: 'only',
+        })).toBeNull();
     });
 
     it('keeps chat navigation control labels readable when translations return keys', () => {

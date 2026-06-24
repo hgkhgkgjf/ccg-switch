@@ -22,6 +22,17 @@ interface ChatSessionSelectionInput {
     pendingSessionKey: string | null;
 }
 
+interface ChatTabCandidate {
+    key: string;
+    updatedAt: number;
+}
+
+interface NextTabAfterCloseInput {
+    tabs: ChatTabCandidate[];
+    closingKey: string;
+    activeKey: string | null;
+}
+
 interface CompleteChatStatusSummaryInput {
     messageCount: number;
     isSearching: boolean;
@@ -42,6 +53,22 @@ export function shouldIgnoreChatSessionSelection({
     pendingSessionKey,
 }: ChatSessionSelectionInput): boolean {
     return sessionKey === pendingSessionKey || (!pendingSessionKey && sessionKey === activeSessionKey);
+}
+
+export function getNextTabAfterClose({
+    tabs,
+    closingKey,
+    activeKey,
+}: NextTabAfterCloseInput): string | null {
+    if (activeKey && activeKey !== closingKey && tabs.some((tab) => tab.key === activeKey)) {
+        return activeKey;
+    }
+
+    const remainingTabs = tabs
+        .filter((tab) => tab.key !== closingKey)
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+
+    return remainingTabs[0]?.key ?? null;
 }
 
 export function shouldBuildCompleteChatStatusSummary({

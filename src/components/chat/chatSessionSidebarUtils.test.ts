@@ -1,11 +1,14 @@
-import {createElement} from 'react';
+// @vitest-environment jsdom
+import {act, createElement} from 'react';
+import {createRoot, type Root} from 'react-dom/client';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createInstance} from 'i18next';
 import {I18nextProvider} from 'react-i18next';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {SessionMeta} from '../../types/session';
 import ChatSessionSidebar, {SessionProviderBadge} from './ChatSessionSidebar';
 import {
+    buildRecentChatProjectGroups,
     filterProjectChatSessions,
     filterSupportedChatSessions,
     getCachedProjectSessions,
@@ -20,6 +23,18 @@ import {
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
 } from './chatSessionSidebarUtils';
+
+(
+    globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+const tauriMocks = vi.hoisted(() => ({
+    invoke: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+    invoke: tauriMocks.invoke,
+}));
 
 const t = (key: string): string => {
     const map: Record<string, string> = {
@@ -54,6 +69,99 @@ function createSession(overrides: Partial<SessionMeta>): SessionMeta {
         resumeCommand: null,
         ...overrides,
     };
+}
+
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+
+afterEach(async () => {
+    if (root) {
+        await act(async () => {
+            root?.unmount();
+        });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+    tauriMocks.invoke.mockReset();
+});
+
+async function renderSidebarWithData() {
+    const now = Date.now();
+    const projects = [
+        {
+            name: 'ccg-switch',
+            path: 'C:/workspace/ccg-switch',
+            session_count: 2,
+            last_active: null,
+        },
+        {
+            name: 'ai-bridge',
+            path: 'C:/workspace/ai-bridge',
+            session_count: 1,
+            last_active: null,
+        },
+    ];
+    const sessionsByProject: Record<string, SessionMeta[]> = {
+        'C:/workspace/ccg-switch': [
+            createSession({
+                providerId: 'claude',
+                sessionId: 'recent-claude',
+                title: 'Continue Trellis work',
+                projectDir: 'C:/workspace/ccg-switch',
+                lastActiveAt: now,
+                sourcePath: 'C:/sessions/recent-claude.jsonl',
+            }),
+            createSession({
+                providerId: 'codex',
+                sessionId: 'recent-codex',
+                title: 'Review multi session UI',
+                projectDir: 'C:/workspace/ccg-switch',
+                lastActiveAt: now - 1_000,
+                sourcePath: 'C:/sessions/recent-codex.jsonl',
+            }),
+        ],
+        'C:/workspace/ai-bridge': [
+            createSession({
+                providerId: 'claude',
+                sessionId: 'bridge-session',
+                title: 'Bridge follow up',
+                projectDir: 'C:/workspace/ai-bridge',
+                lastActiveAt: now - 2_000,
+                sourcePath: 'C:/sessions/bridge-session.jsonl',
+            }),
+        ],
+    };
+    tauriMocks.invoke.mockImplementation((command: string, args?: {projectPath?: string}) => {
+        if (command === 'get_dashboard_projects') return Promise.resolve(projects);
+        if (command === 'list_sessions' && args?.projectPath) {
+            return Promise.resolve(sessionsByProject[args.projectPath] ?? []);
+        }
+        throw new Error(`Unexpected command: ${command}`);
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+        root?.render(createElement(
+            I18nextProvider,
+            {i18n: createKeyOnlyI18n()},
+            createElement(ChatSessionSidebar, {
+                activeSession: null,
+                currentCwd: 'C:/workspace/ccg-switch',
+                pendingSessionKey: null,
+                onSessionSelect: () => undefined,
+                onNewSession: () => undefined,
+            }),
+        ));
+    });
+    await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+
+    return {container};
 }
 
 describe('chatSessionSidebarUtils', () => {
@@ -99,6 +207,55 @@ describe('chatSessionSidebarUtils', () => {
         expect(html).not.toContain('chat.sessionPanel.sessions');
         expect(html).not.toContain('chat.sessionPanel.noSessions');
         expect(html).not.toContain('common.refresh');
+    });
+
+    it('renders a compact mode switch instead of stacking recent chats above projects', () => {
+        const html = renderToStaticMarkup(createElement(
+            I18nextProvider,
+            {i18n: createKeyOnlyI18n()},
+            createElement(ChatSessionSidebar, {
+                activeSession: null,
+                currentCwd: 'C:/guodevelop/ccg-switch',
+                pendingSessionKey: null,
+                onSessionSelect: () => undefined,
+                onNewSession: () => undefined,
+            }),
+        ));
+
+        expect(html).toContain('chat-session-sidebar-mode-switch');
+        expect(html).toContain('Project sessions');
+        expect(html).toContain('Recent chats');
+        expect(html).not.toContain('max-h-64 shrink-0 overflow-y-auto');
+    });
+
+    it('switches to recent chats mode and allows project groups to collapse', async () => {
+        const {container: rendered} = await renderSidebarWithData();
+
+        expect(rendered.textContent).toContain('Projects');
+        expect(rendered.querySelector('[data-chat-recent-project-toggle]')).toBeNull();
+
+        const recentModeButton = rendered.querySelector('[data-chat-session-panel-mode="recent"]');
+        expect(recentModeButton).toBeInstanceOf(HTMLButtonElement);
+        await act(async () => {
+            recentModeButton?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        expect(rendered.textContent).toContain('Continue Trellis work');
+        expect(rendered.textContent).toContain('Review multi session UI');
+        expect(rendered.textContent).toContain('Bridge follow up');
+
+        const groupToggle = rendered.querySelector('[data-chat-recent-project-toggle="C:/workspace/ccg-switch"]');
+        expect(groupToggle).toBeInstanceOf(HTMLButtonElement);
+        expect(groupToggle?.getAttribute('aria-expanded')).toBe('true');
+
+        await act(async () => {
+            groupToggle?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        expect(groupToggle?.getAttribute('aria-expanded')).toBe('false');
+        expect(rendered.textContent).not.toContain('Continue Trellis work');
+        expect(rendered.textContent).not.toContain('Review multi session UI');
+        expect(rendered.textContent).toContain('Bridge follow up');
     });
 
     it('renders Claude and Codex session providers with the shared provider icons', () => {
@@ -332,6 +489,119 @@ describe('chatSessionSidebarUtils', () => {
         expect(shouldShowSessionRefreshStatus(true, 2)).toBe(true);
         expect(shouldShowSessionRefreshStatus(true, 0)).toBe(false);
         expect(shouldShowSessionRefreshStatus(false, 2)).toBe(false);
+    });
+
+    it('groups recent chats by project with supported-provider filtering and per-project caps', () => {
+        const groups = buildRecentChatProjectGroups({
+            projects: [
+                {
+                    name: 'ccg-switch',
+                    path: 'C:\\guodevelop\\ccg-switch\\',
+                    session_count: 3,
+                    last_active: '2026-06-24T12:00:00.000Z',
+                },
+                {
+                    name: 'other',
+                    path: 'C:/guodevelop/other',
+                    session_count: 1,
+                    last_active: null,
+                },
+            ],
+            sessionsByProject: new Map([
+                ['c:/guodevelop/ccg-switch', [
+                    createSession({
+                        providerId: 'claude',
+                        sessionId: 'older',
+                        title: 'Older chat',
+                        projectDir: 'C:/guodevelop/ccg-switch',
+                        lastActiveAt: 100,
+                    }),
+                    createSession({
+                        providerId: 'codex',
+                        sessionId: 'newest',
+                        title: 'Newest chat',
+                        projectDir: 'C:\\guodevelop\\ccg-switch\\',
+                        lastActiveAt: 300,
+                    }),
+                    createSession({
+                        providerId: 'gemini',
+                        sessionId: 'unsupported',
+                        title: 'Unsupported chat',
+                        projectDir: 'C:/guodevelop/ccg-switch',
+                        lastActiveAt: 400,
+                    }),
+                    createSession({
+                        providerId: 'claude',
+                        sessionId: 'wrong-project',
+                        title: 'Wrong project',
+                        projectDir: 'C:/guodevelop/other',
+                        lastActiveAt: 500,
+                    }),
+                ]],
+                ['c:/guodevelop/other', [
+                    createSession({
+                        providerId: 'codex',
+                        sessionId: 'other-project',
+                        title: 'Other project',
+                        projectDir: 'C:/guodevelop/other',
+                        lastActiveAt: 200,
+                    }),
+                ]],
+            ]),
+            limitPerProject: 1,
+        });
+
+        expect(groups).toEqual([
+            {
+                projectName: 'ccg-switch',
+                projectPath: 'C:\\guodevelop\\ccg-switch\\',
+                sessions: [
+                    expect.objectContaining({sessionId: 'newest'}),
+                ],
+            },
+            {
+                projectName: 'other',
+                projectPath: 'C:/guodevelop/other',
+                sessions: [
+                    expect.objectContaining({sessionId: 'other-project'}),
+                ],
+            },
+        ]);
+    });
+
+    it('filters recent chat groups to sessions active within the requested time window', () => {
+        const now = Date.UTC(2026, 5, 24, 12, 0, 0);
+        const oneDay = 24 * 60 * 60 * 1000;
+        const groups = buildRecentChatProjectGroups({
+            projects: [
+                {
+                    name: 'ccg-switch',
+                    path: 'C:/guodevelop/ccg-switch',
+                    session_count: 3,
+                    last_active: '2026-06-24T12:00:00.000Z',
+                },
+            ],
+            sessionsByProject: new Map([
+                ['c:/guodevelop/ccg-switch', [
+                    createSession({
+                        providerId: 'claude',
+                        sessionId: 'within-seven-days',
+                        projectDir: 'C:/guodevelop/ccg-switch',
+                        lastActiveAt: now - (7 * oneDay) + 1,
+                    }),
+                    createSession({
+                        providerId: 'codex',
+                        sessionId: 'too-old',
+                        projectDir: 'C:/guodevelop/ccg-switch',
+                        lastActiveAt: now - (7 * oneDay) - 1,
+                    }),
+                ]],
+            ]),
+            recentSince: now - (7 * oneDay),
+        });
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].sessions.map((session) => session.sessionId)).toEqual(['within-seven-days']);
     });
 
     it('does not sync current cwd over a manually selected different project', () => {

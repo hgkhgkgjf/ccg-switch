@@ -1121,24 +1121,42 @@ return files
 
 ---
 
-## Scenario: Chat Session Transition Abort Boundary
+## Scenario: Chat Session Snapshot And Request Ownership Boundary
 
 ### 1. Scope / Trigger
 
-- Trigger: the user starts a new chat, clears the transcript, or loads a
-  historical chat while a daemon request is still active.
-- This is event-driven state. Tauri stream events can arrive after UI state has
-  started transitioning, so the store owns the transition boundary.
+- Trigger: the user switches tabs, starts a new chat, loads a historical chat,
+  or changes runtime provider/model while a daemon request is still active.
+- This is event-driven state. Tauri stream/message/done events can arrive after
+  the visible UI has switched to another conversation, so the store owns
+  request ownership and active-tab projection.
 
 ### 2. Signatures
 
 ```ts
+interface ChatSessionTab {
+    key: string;
+    messages: ChatMessage[];
+    provider: ChatProvider;
+    model: string;
+    activeRequestId: string | null;
+    sessionId: string | null;
+    currentCwd: string | null;
+    activeSession: SessionMeta | null;
+    status: 'idle' | 'loading' | 'running' | 'queued' | 'error';
+    updatedAt: number;
+}
+
 interface ChatState {
+    openTabs: ChatSessionTab[];
+    activeTabKey: string | null;
     activeRequestId: string | null;
     sessionId: string | null;
     currentCwd: string | null;
     activeSession: SessionMeta | null;
 
+    focusTab: (key: string) => void;
+    closeTab: (key: string) => void;
     loadSession: (session: SessionMeta) => Promise<void>;
     startNewSession: (cwd?: string | null) => Promise<void>;
     clear: () => Promise<void>;
@@ -1147,69 +1165,69 @@ interface ChatState {
 ```
 
 ```ts
-await invoke('chat_abort');
-await invoke<UnifiedSessionMessage[]>('get_unified_session_messages', {
-    providerId: session.providerId,
-    sourcePath: session.sourcePath,
-});
+requestId -> tabKey
 ```
 
 ### 3. Contracts
 
-- If `activeRequestId` is present, `loadSession`, `startNewSession`, and
-  `clear` must call `chat_abort` before replacing transcript/session state.
-- `loadSession` then sets `provider`, `sessionId`, `currentCwd`,
-  `activeSession`, and mapped history messages from
-  `get_unified_session_messages`.
-- `startNewSession` clears `messages`, `sessionId`, `activeSession`, active
-  request state, and token counters while preserving or applying the target
-  `cwd`.
-- `clear` clears transcript/session state and active request state. It does not
-  change provider/model settings.
-- If `chat_abort` fails during a session transition, the transition may still
-  continue so the user can recover from a stuck daemon, but the final store
-  state must keep `error: String(error)`. Do not overwrite the abort failure
-  with `error: null` in the final `loadSession`, `startNewSession`, or `clear`
-  state update; otherwise the UI silently hides that the old daemon turn was
-  not cleanly interrupted.
-- If `loadSession` aborts an active turn and then
-  `get_unified_session_messages` fails, keep the current transcript for data
-  recovery, but mark any previous streaming assistant message as stopped/error.
-  The store must not leave `streaming: true` after it has retired the old active
-  request ownership.
+- `useChatStore` keeps one or more `ChatSessionTab` snapshots. The legacy
+  top-level fields (`messages`, `provider`, `model`, `activeRequestId`,
+  `sessionId`, `currentCwd`, `activeSession`, etc.) are the active tab's
+  projection so existing components can continue to read them.
+- Sending captures a snapshot key, provider, model, permission mode, reasoning
+  effort, long-context flag, cwd, and provider-native session id before calling
+  `chat_send`.
+- When `chat_send` returns a request id, store `requestId -> tabKey`. Every
+  `chat://stream`, `chat://message`, and `chat://done` handler must resolve the
+  target tab by request id before mutating messages or terminal status.
+- `loadSession()` and `startNewSession()` are navigation actions. They must not
+  call global `chat_abort` merely because another tab has an active request.
+  Switching away saves the current projection as a tab and focuses/creates the
+  target tab.
+- Explicit destructive actions remain explicit: `abort()` stops the current
+  active turn, and `clear()` may abort/clear the active tab. Do not expose a
+  background-tab stop action while `chat_abort` cannot target request ids.
+- Runtime provider/model controls update the active tab's next-turn config
+  immediately. The in-flight request continues with the send-time captured
+  config.
+- Closing the active tab focuses the most recently updated remaining tab. If no
+  tab remains, project an empty draft state. Closing a tab must not let stale
+  request events bind to a newly active tab.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Required behavior |
 |-----------|-------------------|
-| Active request exists and user loads history | Abort first, then load history. |
-| Active request exists and user starts a new chat | Abort first, then clear session state. |
-| `chat_abort` fails | Store `String(error)` and still remove stale `activeRequestId`. |
-| `chat_abort` fails while transition continues | Complete the requested transition, but preserve the abort error in final state. |
-| History load fails after an active turn was aborted | Keep the old transcript visible, stop the old streaming assistant, clear `pendingSessionKey`, and show the history load error. |
+| Active request exists and user loads history | Save current tab; load/focus the historical session tab without invoking `chat_abort`. |
+| Active request exists and user starts a new chat | Save current tab; create/focus a draft tab without invoking `chat_abort`. |
+| Old request emits stream after user switched tabs | Update the original tab only; visible transcript stays on the active tab. |
+| `chat_send` request id resolves after the user cleared/replaced that pending send | Retire the request id and ignore later events. |
+| User aborts active tab | Invoke `chat_abort`, retire the active request id, and stop streaming assistant messages in that tab. |
+| User changes provider/model during active turn | Update next-turn config; current in-flight request keeps captured params. |
 | Unsupported history provider | Set an error and do not load messages. |
 | History role is unknown | Normalize to `system` instead of throwing. |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a streaming response is interrupted before a history session replaces
-  the transcript.
-- Base: loading a completed session with no active request skips `chat_abort`
-  and only reads history.
-- Bad: clearing messages while the old daemon response is still active, letting
-  old stream events update the new chat.
+- Good: a long Claude turn keeps streaming in tab A while the user opens a Codex
+  history in tab B; returning to tab A shows the completed output.
+- Base: loading a completed session with no active request creates/focuses the
+  session tab and reads the first-paint history window.
+- Bad: using a single top-level `activeRequestId` gate only, so a stale stream
+  from tab A appends into tab B after navigation.
 
 ### 6. Tests Required
 
-- Unit test: `startNewSession()` with `activeRequestId` calls `chat_abort` and
-  clears session state.
-- Unit test: `loadSession()` with `activeRequestId` calls `chat_abort` before
-  `get_unified_session_messages`.
-- Unit test: abort failure during `startNewSession()`, `clear()`, and
-  `loadSession()` keeps the abort error visible after the transition finishes.
-- Unit test: `loadSession()` with an active turn and a rejected
-  `get_unified_session_messages` call stops the previous streaming assistant
-  instead of leaving an infinite loading placeholder.
+- Unit test: `startNewSession()` with an active request does not call
+  `chat_abort`, preserves the running tab, and focuses a draft tab.
+- Unit test: `loadSession()` with an active request does not call `chat_abort`
+  and does not stop the old streaming assistant.
+- Unit test: stream/message/done events route back to the original tab after
+  switching sessions.
+- Unit test: active-turn provider/model/permission/reasoning changes update the
+  next-turn snapshot without changing the captured request params.
+- Unit test: `closeTab()` focuses the most recently updated remaining tab and
+  clears projection when no tab remains.
 - Build check: `npm run build` must pass because store action signatures are
   consumed by page callbacks.
 
@@ -1230,15 +1248,10 @@ startNewSession: (cwd) => set({
 
 ```ts
 startNewSession: async (cwd) => {
-    await abortActiveRequestIfNeeded(get, set);
     set((state) => ({
-        messages: [],
-        sessionId: null,
-        activeSession: null,
-        currentCwd: cwd ?? state.currentCwd,
-        activeRequestId: null,
-        contextTokens: 0,
-        error: null,
+        openTabs: upsertTab(saveProjectionBeforeSwitch(state), createEmptyTabFromState(state, cwd)),
+        activeTabKey: nextTab.key,
+        ...projectTabToState(nextTab),
     }));
 };
 ```

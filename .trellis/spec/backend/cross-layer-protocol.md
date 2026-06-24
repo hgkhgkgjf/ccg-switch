@@ -477,6 +477,76 @@ if was_running {
 
 ---
 
+## Scenario: Chat Provider Config Runtime Refresh
+
+### 1. Scope / Trigger
+
+- Trigger: the user switches the active Provider row for a chat-capable app
+  (`claude` or `codex`) while the Chat daemon may already have been initialized.
+- This is a cross-layer runtime configuration contract. Provider rows can hold
+  API keys and base URLs, but `DaemonClient` injects them into the Node daemon
+  process environment only at daemon start.
+
+### 2. Signatures
+
+```ts
+await invoke('switch_provider', { app, providerId });
+await invoke('chat_restart_daemon');
+```
+
+```rust
+pub async fn ChatManager::restart_daemon(&self) -> Result<(), String>;
+pub async fn DaemonClient::update_provider_config(
+    &self,
+    api_key: Option<String>,
+    base_url: Option<String>,
+);
+```
+
+### 3. Contracts
+
+- After `switch_provider` succeeds for `claude` or `codex`, the frontend must
+  refresh Chat daemon configuration. If no chat turn is active, it may call
+  `chat_restart_daemon` immediately. If any tab still has an active request or
+  streaming assistant, mark provider config dirty and defer restart until before
+  the next send.
+- `chat_restart_daemon` must re-read the active Provider config from the
+  database and update the cached `DaemonClient` before restarting the daemon
+  process. Restarting the old client without updating its internal config keeps
+  the old API key/base URL in effect.
+- Rust and frontend logs must not print API keys, tokens, or full secret-bearing
+  provider payloads. Tests may use placeholder strings but production
+  diagnostics should only describe command success/failure.
+- If no daemon client has been initialized, `chat_restart_daemon` may warm up a
+  new client, which reads the current active Provider during construction.
+- The frontend runtime provider/model selection remains request-owned: an
+  in-flight turn keeps its send-time parameters; the refreshed Provider config
+  affects new turns.
+
+### 4. Validation Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| User switches Claude Provider while daemon idle | Frontend calls `chat_restart_daemon`; backend updates cached config then restarts daemon. |
+| User switches Provider while another tab is streaming | Frontend sets provider-config dirty and does not restart immediately. |
+| User sends after deferred dirty state | Frontend calls `chat_restart_daemon` before `chat_send`, then clears dirty state on success. |
+| Cached daemon client exists | `ChatManager::restart_daemon()` calls `DaemonClient::update_provider_config()` before `restart()`. |
+| No cached client exists | `restart_daemon()` warms up a fresh client using the latest DB Provider config. |
+
+### 5. Tests Required
+
+- Frontend store test: chat Provider switch invokes `chat_restart_daemon` when
+  Chat is idle.
+- Frontend store test: chat Provider switch during a background streaming tab
+  defers restart and marks provider config dirty.
+- Rust manager test: provider config refresh updates the cached client before
+  restart and spawns a replacement heartbeat.
+- Build checks: `npm run build`,
+  `cargo check --manifest-path src-tauri/Cargo.toml`, and focused frontend/Rust
+  tests must pass.
+
+---
+
 ## 3. 文件 IPC 协议（Permission Bridge）
 
 ### 背景

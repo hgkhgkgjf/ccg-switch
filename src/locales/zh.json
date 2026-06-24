@@ -259,6 +259,8 @@
         "sessionPanel": {
             "title": "会话管理",
             "newChat": "新对话",
+            "recentChats": "最近聊天",
+            "projectSessions": "项目会话",
             "projects": "项目",
             "sessions": "会话",
             "searchProjects": "搜索项目...",
@@ -269,6 +271,19 @@
             "noMatchingSessions": "没有匹配的会话",
             "refreshingSessions": "正在刷新会话列表…",
             "projectSessionCount": "{{count}} 个会话"
+        },
+        "sessionTabs": {
+            "label": "已打开会话",
+            "close": "关闭标签页",
+            "closeOthers": "关闭其他标签页",
+            "closeAll": "关闭所有标签页",
+            "status": {
+                "idle": "空闲",
+                "loading": "加载中",
+                "running": "运行中",
+                "queued": "排队中",
+                "error": "异常"
+            }
         },
         "enhancer": {
             "title": "提示词增强",

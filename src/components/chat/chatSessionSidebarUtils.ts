@@ -4,6 +4,19 @@ import {shouldIgnoreChatSessionSelection} from '../../utils/chatUiBehavior';
 
 export type SessionCache = Map<string, SessionMeta[]>;
 
+export interface ChatSessionProjectInfo {
+    name: string;
+    path: string;
+    session_count: number;
+    last_active: string | null;
+}
+
+export interface RecentChatProjectGroup {
+    projectName: string;
+    projectPath: string;
+    sessions: SessionMeta[];
+}
+
 interface SessionListResponseOwnership {
     requestSeq: number;
     latestRequestSeq: number;
@@ -145,6 +158,42 @@ export function shouldIgnoreSessionClick(
 
 export function shouldShowSessionRefreshStatus(loadingSessions: boolean, visibleSessionCount: number): boolean {
     return loadingSessions && visibleSessionCount > 0;
+}
+
+export function buildRecentChatProjectGroups({
+    projects,
+    sessionsByProject,
+    limitPerProject = 5,
+    recentSince,
+}: {
+    projects: ChatSessionProjectInfo[];
+    sessionsByProject: SessionCache;
+    limitPerProject?: number;
+    recentSince?: number;
+}): RecentChatProjectGroup[] {
+    const safeLimit = Math.max(1, Math.floor(limitPerProject));
+    const safeRecentSince = typeof recentSince === 'number' && Number.isFinite(recentSince)
+        ? recentSince
+        : null;
+
+    return projects
+        .map((project) => {
+            const projectKey = normalizeProjectPathForCache(project.path);
+            const sessions = (sessionsByProject.get(projectKey) ?? [])
+                .filter((session) => isSupportedChatProvider(session.providerId))
+                .filter((session) => isSessionInProject(session, project.path))
+                .filter((session) => safeRecentSince === null || session.lastActiveAt >= safeRecentSince)
+                .slice()
+                .sort((left, right) => right.lastActiveAt - left.lastActiveAt)
+                .slice(0, safeLimit);
+
+            return {
+                projectName: project.name,
+                projectPath: project.path,
+                sessions,
+            };
+        })
+        .filter((group) => group.sessions.length > 0);
 }
 
 export function formatShortDate(value: number | string | null): string {

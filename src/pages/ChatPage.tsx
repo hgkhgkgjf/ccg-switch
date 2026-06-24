@@ -15,6 +15,7 @@ import ScrollControl from '../components/chat/ScrollControl';
 import StatusPanel from '../components/chat/StatusPanel';
 import ChatInputStatusTabs from '../components/chat/ChatInputStatusTabs';
 import ChatSessionSidebar from '../components/chat/ChatSessionSidebar';
+import ChatSessionTabs from '../components/chat/ChatSessionTabs';
 import ChatDiffReviewPane from '../components/chat/ChatDiffReviewPane';
 import {ChatComposer} from '../components/chat/composer/ChatComposer';
 import ModalDialog from '../components/common/ModalDialog';
@@ -128,12 +129,18 @@ export default function ChatPage() {
         pendingAskUserQuestion,
         pendingPlanApproval,
         pendingToolPermission,
+        openTabs,
+        activeTabKey,
         init,
         reconnectDaemon,
         clear,
         loadSession,
         loadActiveSessionFullHistory,
         expandActiveSessionHistory,
+        focusTab,
+        closeTab,
+        closeOtherTabs,
+        closeAllTabs,
         startNewSession,
         answerAskUserQuestion,
         answerToolPermission,
@@ -912,6 +919,14 @@ export default function ChatPage() {
                         className="chat-conversation-pane"
                         style={{flex: `1 1 ${conversationPaneWidth}px`}}
                     >
+                        <ChatSessionTabs
+                            tabs={openTabs}
+                            activeTabKey={activeTabKey}
+                            onFocusTab={focusTab}
+                            onCloseTab={closeTab}
+                            onCloseOtherTabs={closeOtherTabs}
+                            onCloseAllTabs={closeAllTabs}
+                        />
                         <ConversationSearch ref={searchInputRef} value={searchQuery} onChange={handleSearchChange} />
 
                         <div

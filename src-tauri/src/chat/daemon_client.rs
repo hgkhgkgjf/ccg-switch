@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 use super::protocol::{DaemonEvent, DaemonRequest, RawLine, StreamLine};
 
@@ -38,12 +38,17 @@ pub struct DaemonClient {
     bridge_dir: PathBuf,
     deps_dir: PathBuf,
     permission_dir: PathBuf,
-    api_key: Option<String>,
-    base_url: Option<String>,
+    provider_config: RwLock<ProviderRuntimeConfig>,
     request_counter: AtomicU64,
     running: Arc<AtomicBool>,
     inner: Arc<Mutex<Inner>>,
     event_sink: Mutex<Option<EventSink>>,
+}
+
+#[derive(Clone)]
+struct ProviderRuntimeConfig {
+    api_key: Option<String>,
+    base_url: Option<String>,
 }
 
 impl DaemonClient {
@@ -60,8 +65,7 @@ impl DaemonClient {
             bridge_dir,
             deps_dir,
             permission_dir,
-            api_key,
-            base_url,
+            provider_config: RwLock::new(ProviderRuntimeConfig { api_key, base_url }),
             request_counter: AtomicU64::new(0),
             running: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(Mutex::new(Inner {
@@ -127,10 +131,11 @@ impl DaemonClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(ref key) = self.api_key {
+        let provider_config = self.provider_config.read().await.clone();
+        if let Some(ref key) = provider_config.api_key {
             cmd.env("ANTHROPIC_AUTH_TOKEN", key);
         }
-        if let Some(ref url) = self.base_url {
+        if let Some(ref url) = provider_config.base_url {
             cmd.env("ANTHROPIC_BASE_URL", url);
         }
 
@@ -208,6 +213,14 @@ impl DaemonClient {
         }
 
         Ok(())
+    }
+
+    pub async fn update_provider_config(
+        &self,
+        api_key: Option<String>,
+        base_url: Option<String>,
+    ) {
+        *self.provider_config.write().await = ProviderRuntimeConfig { api_key, base_url };
     }
 
     async fn current_sink(&self) -> Option<EventSink> {
