@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查补全 UI 与 store 改动是否触犯禁用模式与代码标准"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "校验新增类型字段的可选性与回退处理是否安全"}

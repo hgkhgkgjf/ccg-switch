@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CompletionMenu UI 重写需遵循组件 props/composition 约定"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useCompletions hook 数据结构与 store 接收逻辑改动"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "新增 CompletionItemKind、TokenUsage.max_tokens、contextMaxTokens 的类型约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "useChatStore 新增 contextMaxTokens 字段与复位逻辑"}

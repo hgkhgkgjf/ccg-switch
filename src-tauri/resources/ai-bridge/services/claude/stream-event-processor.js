@@ -1,6 +1,6 @@
-import { emitAccumulatedUsage, mergeUsage } from '../../utils/usage-utils.js';
-import { truncateErrorContent, truncateToolResultBlock } from './message-output-filter.js';
-import { normalizeStreamDelta, resolveSnapshotDelta, resetTurnBlockState } from './stream-delta-normalizer.js';
+import {deriveContextWindow, emitAccumulatedUsage, mergeUsage} from '../../utils/usage-utils.js';
+import {truncateErrorContent, truncateToolResultBlock} from './message-output-filter.js';
+import {normalizeStreamDelta, resetTurnBlockState, resolveSnapshotDelta} from './stream-delta-normalizer.js';
 
 export function emitUsageTag(msg) {
   if (msg.type === 'assistant' && msg.message?.usage) {
@@ -30,6 +30,7 @@ export function createTurnState(requestContext, runtime) {
     textBlockContentByIndex: new Map(),
     thinkingBlockContentByIndex: new Map(),
     finalSessionId: requestContext.requestedSessionId || runtime?.sessionId || '',
+    modelId: requestContext.modelId || null,
     accumulatedUsage: null
   };
 }
@@ -59,7 +60,7 @@ export function processStreamEvent(msg, turnState) {
 
   if (event.type === 'message_delta' && event.usage) {
     turnState.accumulatedUsage = mergeUsage(turnState.accumulatedUsage, event.usage);
-    emitAccumulatedUsage(turnState.accumulatedUsage);
+    emitAccumulatedUsage(turnState.accumulatedUsage, deriveContextWindow(turnState.modelId));
   }
 
   if (event.type === 'content_block_delta' && event.delta) {

@@ -1,13 +1,29 @@
 import {useEffect, useRef} from 'react';
-import {Loader2} from 'lucide-react';
+import type {LucideIcon} from 'lucide-react';
+import {Bot, File, Folder, Loader2, Sparkles, Terminal} from 'lucide-react';
+
+/** 补全项类型，决定左侧图标与展示语义。 */
+export type CompletionItemKind = 'file' | 'directory' | 'command' | 'agent' | 'prompt';
 
 export interface CompletionItem {
     id: string;
+    /** 主文本：文件名 / 命令名 / 代理名 / 预设名 */
     label: string;
+    /** 副文本：文件所在路径 / 命令说明 / 预设摘要 */
     description?: string;
     /** 插入到输入框的值（不含触发符），默认用 label */
     insertText?: string;
+    /** 补全项类型，缺省按文件处理 */
+    kind?: CompletionItemKind;
 }
+
+const KIND_ICON: Record<CompletionItemKind, LucideIcon> = {
+    file: File,
+    directory: Folder,
+    command: Terminal,
+    agent: Bot,
+    prompt: Sparkles,
+};
 
 interface CompletionMenuProps {
     items: CompletionItem[];
@@ -61,31 +77,39 @@ export function CompletionMenu({
                 <div className="px-3 py-3 text-xs text-base-content/40">{emptyText}</div>
             ) : (
                 <div ref={listRef}>
-                    {items.map((item, i) => (
-                        <button
-                            key={item.id}
-                            type="button"
-                            role="option"
-                            aria-selected={i === activeIndex}
-                            aria-label={item.description ? `${item.label}. ${item.description}` : item.label}
-                            onMouseDown={(e) => {
-                                e.preventDefault();
-                                onSelect(i);
-                            }}
-                            onMouseEnter={() => onHover(i)}
-                            className={`w-full flex flex-col items-start px-3 py-1.5 text-left
-                                ${i === activeIndex ? 'bg-primary/10' : 'hover:bg-base-200'}`}
-                        >
-                            <span className="text-xs font-medium text-base-content truncate w-full">
-                                {item.label}
-                            </span>
-                            {item.description && (
-                                <span className="text-[11px] text-base-content/50 truncate w-full">
-                                    {item.description}
+                    {items.map((item, i) => {
+                        const Icon = KIND_ICON[item.kind ?? 'file'];
+                        const active = i === activeIndex;
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                aria-label={item.description ? `${item.label}. ${item.description}` : item.label}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    onSelect(i);
+                                }}
+                                onMouseEnter={() => onHover(i)}
+                                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left
+                                    ${active ? 'bg-primary/10' : 'hover:bg-base-200'}`}
+                            >
+                                <Icon
+                                    size={15}
+                                    className={`shrink-0 ${active ? 'text-primary' : 'text-base-content/45'}`}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium text-base-content">
+                                    {item.label}
                                 </span>
-                            )}
-                        </button>
-                    ))}
+                                {item.description && (
+                                    <span className="ml-2 max-w-[55%] shrink-0 truncate text-right text-[11px] text-base-content/45">
+                                        {item.description}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
         </div>

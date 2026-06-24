@@ -1287,6 +1287,115 @@ const userMsg = {
 
 ---
 
+## Scenario: Chat SDK Dependency Version Management
+
+### 1. Scope / Trigger
+
+- Trigger: the Chat SDK dependency modal opens or the user installs, upgrades,
+  switches, or uninstalls a Claude/Codex SDK dependency.
+- This is a frontend-to-backend command contract. Rust owns npm package
+  resolution, installed-version detection, registry lookup, and version payload
+  validation; the frontend owns target-version selection and compact action
+  presentation.
+
+### 2. Signatures
+
+```ts
+await invoke<SdkStatus[]>('chat_sdk_status');
+await invoke('chat_install_sdk', { sdkId, version });
+await invoke('chat_uninstall_sdk', { sdkId });
+
+interface SdkStatus {
+    id: string;
+    displayName: string;
+    installed: boolean;
+    path: string;
+    currentVersion?: string | null;
+    defaultVersion: string;
+    latestVersion?: string | null;
+    availableVersions: string[];
+}
+```
+
+```rust
+#[tauri::command]
+pub async fn chat_sdk_status(
+    state: State<'_, ChatState>,
+) -> Result<Vec<crate::chat::SdkStatus>, String>
+
+#[tauri::command]
+pub async fn chat_install_sdk(
+    sdk_id: String,
+    version: Option<String>,
+    state: State<'_, ChatState>,
+) -> Result<(), String>
+
+#[tauri::command]
+pub async fn chat_uninstall_sdk(
+    sdk_id: String,
+    state: State<'_, ChatState>,
+) -> Result<(), String>
+```
+
+### 3. Contracts
+
+- `chat_sdk_status` must not fail solely because npm registry metadata is
+  unavailable. It should still return local installed state, install path,
+  current installed version when readable, default backend spec, and any safe
+  fallback versions.
+- `currentVersion` comes from the installed primary package's `package.json`.
+  `latestVersion` and `availableVersions` come from npm registry metadata when
+  available. `availableVersions` must contain only safe exact stable versions,
+  not npm ranges, `latest`, URLs, file paths, or git specs.
+- The frontend may only send `version` values selected from
+  `availableVersions`. Rust still validates the optional `version` because UI
+  payloads are not a security boundary.
+- If `version` is omitted, Rust installs the backend-defined default
+  `SdkDefinition.version`. If `version` is present, Rust builds the npm spec as
+  `<npm_package>@<version>` after validation.
+- Installing or switching a version uses the same command path. On success,
+  Rust emits `chat://sdk-install-done`, refreshes through the store, and
+  restarts the daemon so the newly installed SDK is loaded.
+- Uninstalling must stop the cached ai-bridge daemon before removing the SDK
+  directory so Windows releases `node_modules` file handles. The delete path
+  must clear read-only file attributes and retry `remove_dir_all` for short
+  Windows lock races. If deletion still fails, return an error that names the
+  SDK directory and tells the user to check for terminal, antivirus, or
+  ai-bridge/node process ownership.
+
+### 4. Validation Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Installed package has `package.json` with `version` | `currentVersion` is returned. |
+| Registry returns latest and stable versions | `latestVersion` and sorted `availableVersions` are returned. |
+| Registry query fails | `chat_sdk_status` still succeeds with local fallback state. |
+| UI sends `version = "1.2.3"` | Install command uses `<package>@1.2.3`. |
+| UI sends `version = "latest"`, `^1.2.3`, `file:...`, git/url/path, or whitespace | Backend rejects before spawning npm. |
+| User uninstalls SDK while daemon has loaded it | Backend stops the cached daemon before deleting the dependency directory. |
+| SDK directory contains Windows read-only files | Backend clears read-only attributes and removes the directory. |
+| SDK directory remains locked after retries | Backend returns a clear error mentioning likely process/permission ownership. |
+
+### 5. Tests Required
+
+- Rust unit test: installed package version is read from primary package
+  `package.json`.
+- Rust unit test: npm registry metadata parsing filters prerelease/unsafe
+  versions and returns latest stable metadata.
+- Rust unit test: unsafe explicit version payloads are rejected.
+- Rust unit test: explicit selected version builds the expected npm package
+  spec.
+- Rust unit test: SDK uninstall removes directories that contain read-only
+  files.
+- Rust unit test: SDK uninstall preparation stops an already-running cached
+  daemon before dependency deletion.
+- Frontend unit test: SDK panel renders target version, current/latest metadata,
+  update/current/switch/install action labels, and key-only fallback text.
+- Frontend store test: `useSdkStore.install(sdkId, version)` invokes
+  `chat_install_sdk` with the selected version.
+
+---
+
 ## Scenario: Chat Slash Command Registry
 
 ### 1. Scope / Trigger
@@ -1647,6 +1756,105 @@ if (!window.complete) {
     rememberSessionHistory(session, mapHistoryMessages(session, full));
 }
 ```
+
+---
+
+## Scenario: Chat Sidecar USAGE Event Context Window
+
+### 1. Scope / Trigger
+
+- Trigger: the ai-bridge Node sidecar emits an accumulated `[USAGE]` line after a
+  Claude/Codex turn, and the Chat composer renders the live context-window usage
+  ring (`TokenIndicator`).
+- This is a cross-layer truth-source contract. Only the sidecar knows whether the
+  current session is running with the 1M context window enabled (model id has the
+  `[1m]` suffix and `CLAUDE_CODE_DISABLE_1M_CONTEXT` is not set), so the live
+  window upper bound must be pushed through the IPC text protocol instead of
+  re-derived in the frontend.
+
+### 2. Signatures
+
+Sidecar emits (`src-tauri/resources/ai-bridge/utils/usage-utils.js`):
+
+```js
+function emitAccumulatedUsage(accumulated, maxTokens) {
+    const payload = {
+        input_tokens: accumulated.input_tokens || 0,
+        output_tokens: accumulated.output_tokens || 0,
+        cache_creation_input_tokens: accumulated.cache_creation_input_tokens || 0,
+        cache_read_input_tokens: accumulated.cache_read_input_tokens || 0,
+    };
+    if (typeof maxTokens === 'number' && maxTokens > 0) {
+        payload.max_tokens = maxTokens;
+    }
+    process.stdout.write(`[USAGE] ${JSON.stringify(payload)}\n`);
+}
+```
+
+Frontend `TokenUsage` (`src/types/chat.ts`):
+
+```ts
+interface TokenUsage {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    max_tokens?: number; // live context-window upper bound from sidecar
+}
+```
+
+### 3. Contracts
+
+- The sidecar layer that holds the resolved `modelId` (currently
+  `message-sender.js`, `persistent-query-service.js`, and
+  `stream-event-processor.js`) must compute `maxTokens` and pass it into
+  `emitAccumulatedUsage()`. For Claude, `[1m]` suffix on the resolved model id
+  yields `1_000_000`; otherwise `200_000`. Codex / gpt-* sessions may omit
+  `max_tokens` and let the frontend fall back to its static table.
+- `useChatStore`'s `[USAGE]` parse branch must read `usage.max_tokens` and store
+  it as `contextMaxTokens: number | null`. New chat / cleared session resets it
+  to `null` alongside `contextTokens = 0`.
+- `ChatComposer` consumes the value as
+  `maxTokens = contextMaxTokens && contextMaxTokens > 0 ? contextMaxTokens : contextWindowFor(model)`.
+  The static `contextWindowFor()` lookup in `constants.ts` is a fallback only,
+  for older sidecar payloads that pre-date this protocol field.
+- This is an additive optional field. Old sidecar builds without `max_tokens`
+  must continue to work: the frontend falls back to the static table without
+  errors or layout regressions.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Claude session resolved with `[1m]` model id | Sidecar emits `max_tokens: 1000000`; ring shows `1000k` and percentage uses 1M denominator. |
+| Claude session without `[1m]` | Sidecar emits `max_tokens: 200000`; ring uses 200K. |
+| Sidecar build without `max_tokens` field | Frontend `contextMaxTokens` stays `null` and falls back to `contextWindowFor(model)`. |
+| New session / clear chat | `contextMaxTokens` resets to `null` together with `contextTokens = 0`. |
+| `usage.max_tokens` is `0`, negative, or non-number | Frontend ignores it and falls back to the static table; no division by zero. |
+
+### 5. Tests Required
+
+- Sidecar test: `emitAccumulatedUsage(accumulated, maxTokens)` writes
+  `max_tokens` only when it is a positive number, and omits the field for
+  missing / zero / negative values.
+- Frontend store test: `[USAGE]` parse branch with `max_tokens` populates
+  `contextMaxTokens`; payload without the field leaves it `null` so the
+  component-level fallback to `contextWindowFor(model)` still applies.
+- Frontend component test: `ChatComposer` prefers `contextMaxTokens` over the
+  static table when both are present.
+- Build checks: `npm run build`,
+  `npx vitest run src/stores/useChatStore.test.ts`,
+  `npx vitest run src/components/chat/composer/ChatComposer.render.test.tsx`,
+  and the relevant `node --test` sidecar test.
+
+### 6. General Rule
+
+When the frontend needs to know "what configuration is the sidecar actually
+running with" (model variant, feature flag, runtime-resolved limit), push the
+truth through the IPC text protocol (`[USAGE]`, `[MESSAGE]`, `chat://*` events)
+rather than maintaining a parallel frontend lookup table that has to guess.
+Frontend static tables remain valid only as last-resort fallbacks for
+backward-compatible payloads.
 
 ---
 

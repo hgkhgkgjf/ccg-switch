@@ -1,11 +1,7 @@
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type {
-    SdkStatus,
-    SdkInstallLogEvent,
-    SdkInstallDoneEvent,
-} from '../types/chat';
+import {create} from 'zustand';
+import {invoke} from '@tauri-apps/api/core';
+import {listen, type UnlistenFn} from '@tauri-apps/api/event';
+import type {SdkInstallDoneEvent, SdkInstallLogEvent, SdkStatus,} from '../types/chat';
 
 interface SdkState {
     statuses: SdkStatus[];
@@ -19,7 +15,7 @@ interface SdkState {
 
     init: () => Promise<void>;
     refresh: () => Promise<void>;
-    install: (sdkId: string) => Promise<void>;
+    install: (sdkId: string, version?: string) => Promise<void>;
     uninstall: (sdkId: string) => Promise<void>;
     clearLogs: () => void;
 }
@@ -77,13 +73,13 @@ export const useSdkStore = create<SdkState>((set, get) => ({
         }
     },
 
-    install: async (sdkId) => {
+    install: async (sdkId, version) => {
         if (get().installing) return;
         set({ installing: sdkId, logs: [], error: null });
         try {
             // 注意：该命令在安装完成后才 resolve（含 daemon 重启），
             // 进度通过事件实时推送。
-            await invoke('chat_install_sdk', { sdkId });
+            await invoke('chat_install_sdk', { sdkId, version });
         } catch (e) {
             set({ installing: null, error: String(e) });
         }

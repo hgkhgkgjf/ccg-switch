@@ -273,6 +273,8 @@ interface ChatState {
     draft: string;
     /** 累计上下文 token 数（用于用量环估算） */
     contextTokens: number;
+    /** 上下文窗口上限（由 sidecar [USAGE] 推送，缺省时回退静态表） */
+    contextMaxTokens: number | null;
     /** daemon 是否就绪 */
     daemonReady: boolean;
     /** 最近一次 daemon 生命周期消息（诊断用） */
@@ -654,6 +656,7 @@ function getLoadedSessionState(
         handoffContextProvider: null,
         activeRequestId: null,
         contextTokens: 0,
+        contextMaxTokens: null,
         error: null,
     };
 }
@@ -746,6 +749,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     reasoningEffort: loadReasoning(),
     draft: loadDraft('claude'),
     contextTokens: 0,
+    contextMaxTokens: null,
     daemonReady: false,
     daemonStatus: null,
     daemonReconnecting: false,
@@ -842,7 +846,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             (usage.cache_read_input_tokens || 0) +
                             (usage.cache_creation_input_tokens || 0) +
                             (usage.output_tokens || 0);
-                        return { messages, contextTokens };
+                        // sidecar 推送的真实上下文窗口（按 1M/200K 状态）；
+                        // 缺省时保留 null，由前端回退静态表。
+                        const nextMax = typeof usage.max_tokens === 'number'
+                            && Number.isFinite(usage.max_tokens)
+                            && usage.max_tokens > 0
+                            ? usage.max_tokens
+                            : state.contextMaxTokens;
+                        return { messages, contextTokens, contextMaxTokens: nextMax };
                     });
                 } catch {
                     // 忽略解析失败
@@ -1545,6 +1556,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             currentCwd: cwd ?? state.currentCwd,
             activeRequestId: null,
             contextTokens: 0,
+            contextMaxTokens: null,
             error: abortError,
         }));
     },
@@ -1598,6 +1610,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             handoffContextProvider: null,
             error: abortError,
             contextTokens: 0,
+            contextMaxTokens: null,
         });
     },
 

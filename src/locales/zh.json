@@ -330,6 +330,22 @@
             "install": "安装",
             "installing": "安装中",
             "uninstall": "卸载",
+            "installLog": "安装日志",
+            "targetVersion": "目标版本",
+            "description": {
+                "claude": "Claude AI 功能所需。包含 Claude Code SDK 及相关依赖。",
+                "codex": "Codex AI 功能所需。包含 OpenAI Codex SDK。",
+                "generic": "{{name}} 功能所需。"
+            },
+            "currentVersion": "当前 {{version}}",
+            "latestStableVersion": "最新稳定版 {{version}}",
+            "defaultVersion": "默认 {{version}}",
+            "updateAvailable": "可更新",
+            "currentVersionAction": "当前版本",
+            "installVersion": "安装 {{version}}",
+            "updateToVersion": "更新到 {{version}}",
+            "switchToVersion": "切换到 {{version}}",
+            "noVersions": "暂无可用版本",
             "missingBanner": "{{name}} 尚未安装，安装后才能开始对话。"
         }
     },

@@ -4,41 +4,41 @@
  */
 
 import {
-  isCustomBaseUrl,
-  loadClaudeSettings,
-  setupApiKey,
-  buildCliEnv,
-  buildWebviewControlledSettingsOverride,
+    buildCliEnv,
+    buildWebviewControlledSettingsOverride,
+    isCustomBaseUrl,
+    loadClaudeSettings,
+    setupApiKey,
 } from '../../config/api-config.js';
-import { selectWorkingDirectory } from '../../utils/path-utils.js';
-import { mapModelIdToSdkName, resolveModelFromSettings, setModelEnvironmentVariables } from '../../utils/model-utils.js';
-import { AsyncStream } from '../../utils/async-stream.js';
-import { canUseTool } from '../../permission-handler.js';
-import { buildContentBlocks, loadAttachments } from './attachment-service.js';
-import { buildIDEContextPrompt } from '../system-prompts.js';
-import { buildQuickFixPrompt } from '../quickfix-prompts.js';
-import { emitAccumulatedUsage, mergeUsage } from '../../utils/usage-utils.js';
+import {selectWorkingDirectory} from '../../utils/path-utils.js';
+import {mapModelIdToSdkName, resolveModelFromSettings, setModelEnvironmentVariables} from '../../utils/model-utils.js';
+import {AsyncStream} from '../../utils/async-stream.js';
+import {canUseTool} from '../../permission-handler.js';
+import {buildContentBlocks, loadAttachments} from './attachment-service.js';
+import {buildIDEContextPrompt} from '../system-prompts.js';
+import {buildQuickFixPrompt} from '../quickfix-prompts.js';
+import {deriveContextWindow, emitAccumulatedUsage, mergeUsage} from '../../utils/usage-utils.js';
 import {
-  ensureClaudeSdk,
-  AUTO_RETRY_CONFIG,
-  isRetryableError,
-  isNoConversationFoundError,
-  sleep,
-  getRetryDelayMs,
-  hasClaudeProjectSessionFile,
-  waitForClaudeProjectSessionFile,
-  truncateToolResultBlock,
-  truncateString,
-  truncateErrorContent,
-  emitUsageTag,
-  buildConfigErrorPayload
+    AUTO_RETRY_CONFIG,
+    buildConfigErrorPayload,
+    emitUsageTag,
+    ensureClaudeSdk,
+    getRetryDelayMs,
+    hasClaudeProjectSessionFile,
+    isNoConversationFoundError,
+    isRetryableError,
+    sleep,
+    truncateErrorContent,
+    truncateString,
+    truncateToolResultBlock,
+    waitForClaudeProjectSessionFile
 } from './message-utils.js';
-import { createPreToolUseHook } from './permission-mode.js';
-import { loadMcpServersConfigAsRecord } from './mcp-status/config-loader.js';
-import { setActiveQueryResult } from './message-session-registry.js';
-import { normalizeStreamDelta, resolveSnapshotDelta, resetTurnBlockState } from './stream-delta-normalizer.js';
-import { generateSessionTitle } from '../session-title-service.js';
-import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
+import {createPreToolUseHook} from './permission-mode.js';
+import {loadMcpServersConfigAsRecord} from './mcp-status/config-loader.js';
+import {setActiveQueryResult} from './message-session-registry.js';
+import {normalizeStreamDelta, resetTurnBlockState, resolveSnapshotDelta} from './stream-delta-normalizer.js';
+import {generateSessionTitle} from '../session-title-service.js';
+import {getClaudeCliPathOverride} from '../../utils/claude-cli-path.js';
 
 // ========== Internal helpers for deduplication ==========
 
@@ -180,7 +180,7 @@ function processStreamMessage(msg, state, logPrefix) {
       }
       if (event.type === 'message_delta' && event.usage) {
         state.accumulatedUsage = mergeUsage(state.accumulatedUsage, event.usage);
-        emitAccumulatedUsage(state.accumulatedUsage);
+        emitAccumulatedUsage(state.accumulatedUsage, deriveContextWindow(state.modelId));
       }
       if (event.type === 'content_block_delta' && event.delta) {
         if (event.delta.type === 'text_delta' && event.delta.text) {
@@ -298,7 +298,7 @@ function emitThinkingDelta(thinkingText, state, blockIndex = 0) {
 /**
  * Execute a query call with auto-retry logic for transient API errors.
  */
-async function executeWithRetry({ createQueryResult, streamingEnabled, resumeSessionId, workingDirectory, logPrefix, outerStreamState, userMessage }) {
+async function executeWithRetry({ createQueryResult, streamingEnabled, resumeSessionId, workingDirectory, logPrefix, outerStreamState, userMessage, modelId }) {
   let retryAttempt = 0;
   let lastRetryError = null;
   const lp = logPrefix ? ` ${logPrefix}` : '';
@@ -308,7 +308,8 @@ async function executeWithRetry({ createQueryResult, streamingEnabled, resumeSes
       currentSessionId: resumeSessionId, messageCount: 0, hasStreamEvents: false,
       lastAssistantContent: '', lastThinkingContent: '', accumulatedUsage: null,
       streamingEnabled, streamStarted: outerStreamState.streamStarted,
-      streamEnded: outerStreamState.streamEnded, queryResult: null
+      streamEnded: outerStreamState.streamEnded, queryResult: null,
+      modelId: modelId || null
     };
 
     if (retryAttempt > 0) {
@@ -493,7 +494,8 @@ export async function sendMessage(message, resumeSessionId = null, cwd = null, p
       workingDirectory,
       logPrefix: '',
       outerStreamState,
-      userMessage: message
+      userMessage: message,
+      modelId: model
     });
 
   } catch (error) {
@@ -575,7 +577,8 @@ export async function sendMessageWithAttachments(message, resumeSessionId = null
       workingDirectory,
       logPrefix: '(withAttachments)',
       outerStreamState,
-      userMessage: message
+      userMessage: message,
+      modelId: model
     });
 
   } catch (error) {

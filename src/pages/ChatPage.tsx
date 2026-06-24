@@ -1067,9 +1067,11 @@ export default function ChatPage() {
             <ModalDialog
                 isOpen={sdkModalOpen}
                 title={sdkDependencyLabels.title}
-                maxWidthClass="max-w-lg"
+                maxWidthClass="max-w-xl"
                 confirmText={sdkDependencyLabels.close}
+                cancelText={sdkDependencyLabels.cancel}
                 onConfirm={() => setSdkModalOpen(false)}
+                onCancel={() => setSdkModalOpen(false)}
                 onClose={() => setSdkModalOpen(false)}
             >
                 <SdkDependencyPanel/>

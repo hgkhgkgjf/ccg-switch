@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {invoke} from '@tauri-apps/api/core';
-import type {CompletionItem} from './CompletionMenu';
+import type {CompletionItem, CompletionItemKind} from './CompletionMenu';
 
 /** 触发符类型。 */
 export type CompletionTrigger = '@' | '#' | '!' | '/';
@@ -165,6 +165,7 @@ export function getSlashCommandCompletions(
             label: c.label,
             description: formatSlashDescription(c.description, c.source),
             insertText: c.label,
+            kind: 'command' as const,
         }));
 }
 
@@ -268,11 +269,19 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
                     return files
                         .map(normalizeWorkspaceFile)
                         .filter((f): f is WorkspaceFile => f !== null)
-                        .map((f) => ({
-                            id: f.relPath,
-                            label: f.relPath + (f.isDir ? '/' : ''),
-                            insertText: f.relPath,
-                        }));
+                        .map<CompletionItem>((f) => {
+                            // 拆分文件名与所在路径：主文本显示文件名（目录追加 /），
+                            // 副文本以弱化样式显示其父级目录路径。
+                            const parent = f.relPath.slice(0, f.relPath.length - f.name.length).replace(/[/\\]$/, '');
+                            const kind: CompletionItemKind = f.isDir ? 'directory' : 'file';
+                            return {
+                                id: f.relPath,
+                                label: f.name + (f.isDir ? '/' : ''),
+                                description: parent || undefined,
+                                insertText: f.relPath,
+                                kind,
+                            };
+                        });
                 }
                 case '#': {
                     const agents = await invoke<Subagent[]>('list_subagents');
@@ -282,6 +291,7 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
                             id: a.name,
                             label: a.name,
                             insertText: a.name,
+                            kind: 'agent' as const,
                         }));
                 }
                 case '!': {
@@ -298,6 +308,7 @@ export function useCompletions({ cwd, provider }: UseCompletionsOptions = {}): C
                                 ? (p.content.length > 80 ? `${p.content.slice(0, 80)}…` : p.content)
                                 : undefined,
                             insertText: p.content || p.name,
+                            kind: 'prompt' as const,
                         }));
                 }
                 default:

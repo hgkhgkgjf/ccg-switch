@@ -38,6 +38,7 @@ describe('getSlashCommandCompletions', () => {
             label: '/review:deep',
             description: 'Deep project review [project]',
             insertText: '/review:deep',
+            kind: 'command',
         }]);
     });
 });

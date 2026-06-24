@@ -1,3 +1,58 @@
+## 本轮 PLAN 2026-06-24 SDK dependency panel UI refinement
+
+- 目标：在保留 SDK 版本安装 / 更新 / 切换 / 卸载能力的前提下，按用户截图重做 SDK 依赖弹窗排版：每个 SDK 一张深色紧凑卡片，标题行显示名称、当前版本 chip、最新版本 chip 和轻量更新提示，目标版本 select 独占一行，按钮行与底部版本元信息对齐。
+- 功能点 1：补 RED 测试。验证方式：扩展 `src/components/chat/SdkDependencyPanel.test.tsx`，断言面板内不再重复输出 `SDK Dependencies` 标题，SDK 卡片使用稳定 `sdk-dependency-card` / `sdk-card-header` / `sdk-version-chip` / `sdk-version-arrow-chip` / `sdk-target-select-row` / `sdk-card-actions` / `sdk-card-meta` 标记，并覆盖 SDK 说明文案 fallback。
+- 功能点 2：重构 SDK 面板布局。验证方式：`SdkDependencyPanel.tsx` 改为截图式单卡布局；保留刷新、日志、错误、select、安装/更新/切换/卸载行为。
+- 功能点 3：弹窗宽度微调。验证方式：`ChatPage.tsx` 的 SDK modal `maxWidthClass` 从 `max-w-lg` 调整为 `max-w-xl`，减少目标版本 select 和卡片内容挤压。
+- 功能点 4：规范同步与验证记录。验证方式：更新 `.trellis/spec/frontend/component-guidelines.md` 的 SDK 面板布局约束；运行 `npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts`、`npm run build`、IDE build、相关 `git diff --check`，并在本文件记录结果。
+
+## 迭代记录 2026-06-24 SDK dependency panel screenshot card layout
+
+- 本轮完成：按用户截图重做 `SdkDependencyPanel` 排版，废弃上一版左右分栏列表。现在每个 SDK 使用深色紧凑卡片：标题行包含状态图标、SDK 名称、当前版本 chip、`→ 最新版本` chip 和轻量 `可更新` pill；卡片内展示 SDK 专属说明、整行目标版本 select、蓝色弱背景主动作按钮、红色弱背景卸载按钮，以及底部当前/最新/路径元信息。`ChatPage` 的 SDK modal 宽度从 `max-w-lg` 调整为 `max-w-xl`；`en.json` / `zh.json` 新增 Claude/Codex SDK 说明文案；前端组件规范已记录 SDK 面板必须使用截图式单卡布局，不再拆成右侧操作列。
+- 本轮验证：RED：`npm test -- src/components/chat/SdkDependencyPanel.test.tsx` 先失败 3 项，失败点为旧实现缺少 SDK 专属说明、缺少 `sdk-dependency-card` / `sdk-card-header` / `sdk-version-chip` / `sdk-version-arrow-chip` / `sdk-target-select-row` / `sdk-card-actions` / `sdk-card-meta` 结构。GREEN：`npm test -- src/components/chat/SdkDependencyPanel.test.tsx` 通过（1 file / 6 tests）；`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 通过（2 files / 7 tests）。`npm run build` 通过，仅既有 Browserslist/caniuse-lite 过期提示。`cargo check --manifest-path src-tauri/Cargo.toml` 通过。IDE `build_project` 通过，`problems: []`；IDE 文件问题扫描 `SdkDependencyPanel.tsx` / `SdkDependencyPanel.test.tsx` 无错误。`git diff --check -- src/components/chat/SdkDependencyPanel.tsx src/components/chat/SdkDependencyPanel.test.tsx src/pages/ChatPage.tsx src/locales/en.json src/locales/zh.json .trellis/spec/frontend/component-guidelines.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。浏览器冒烟：Vite 页面可打开 Chat 和 SDK 依赖弹窗，但纯 Web/Vite 环境没有 Tauri SDK 状态返回，因此真实卡片视觉由 SSR 结构测试覆盖。构建生成的 `dist` / `out` 已清理，本地 5174 Vite 进程已停止。
+
+## 本轮 PLAN 2026-06-24 SDK dependency panel light theme compatibility
+
+- 目标：修复 SDK 依赖弹窗按深色截图落地后在亮色主题下层级和对比度不足的问题。保留截图式单卡排版，只把卡片、版本 chip、更新提示、select、主动作和卸载动作改成 light/dark 成对主题样式。
+- 功能点 1：补 RED 测试。验证方式：扩展 `src/components/chat/SdkDependencyPanel.test.tsx`，断言 SDK 卡片、版本 chip、更新 pill、目标版本 select、主动作按钮和卸载按钮同时包含亮色基础类与 `dark:` 变体。
+- 功能点 2：修复组件局部样式。验证方式：`SdkDependencyPanel.tsx` 使用浅色下更稳定的 white/slate/blue/red 层级，并保留深色下接近截图的 DaisyUI token，不改 SDK 版本选择、安装、更新、切换、卸载逻辑。
+- 功能点 3：规范同步。验证方式：更新 `.trellis/spec/frontend/component-guidelines.md`，记录 SDK 面板不得只按深色截图使用半透明 semantic token，必须具备 light/dark 成对样式。
+- 功能点 4：验证与暂存。验证方式：运行 `npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts`、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、IDE build、相关 `git diff --check`，并只暂存本轮 SDK UI 相关文件。
+
+## 迭代记录 2026-06-24 SDK dependency panel light theme compatibility
+
+- 本轮完成：修复 SDK 依赖弹窗截图式单卡布局在亮色主题下颜色层级不兼容的问题。`SdkDependencyPanel` 现在以亮色主题可读的 `white/slate/blue/red` 作为基础样式，并通过 `dark:` 变体保留深色截图风格：卡片使用白底、slate 边框和轻阴影；版本 chip 使用 slate 灰面；更新提示和主动作使用 blue 弱背景；卸载动作使用 red 弱背景；select、描述、元信息和刷新按钮也补齐 light/dark 成对颜色。SDK 版本选择、安装、更新、切换、卸载、刷新、日志和错误逻辑未改动。
+- 本轮规范同步：`.trellis/spec/frontend/component-guidelines.md` 已记录 SDK dependency panel 必须使用 light/dark 成对主题样式，禁止只依赖 `bg-base-200/40`、`bg-base-300/80`、`bg-info/15`、`bg-error/10` 这类在亮色主题下可能低对比的半透明 semantic token。
+- 本轮验证：RED：`npm test -- src/components/chat/SdkDependencyPanel.test.tsx` 先失败 1 项，失败点为旧实现缺少 `border-slate-200 bg-white`、`dark:border-base-300 dark:bg-base-200/40`、light/dark chip/action/select 主题类。GREEN：同命令通过（1 file / 7 tests）；`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 通过（2 files / 8 tests）。`npm run build` 通过；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；IDE `build_project` 通过，`problems: []`；IDE 文件问题扫描 `SdkDependencyPanel.tsx` / `SdkDependencyPanel.test.tsx` 无错误。`git diff --check -- src/components/chat/SdkDependencyPanel.tsx src/components/chat/SdkDependencyPanel.test.tsx .trellis/spec/frontend/component-guidelines.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已确认在工作区内并清理。
+
+## 本轮 PLAN 2026-06-24 SDK dependency panel log surface
+
+- 目标：修复 SDK 依赖弹窗底部安装日志在亮色主题下显示为一大块低对比灰色背景的问题。保留安装日志能力，但安装完成后默认折叠，安装中保持展开，日志面板使用轻量 light/dark 成对样式。
+- 功能点 1：补 RED 测试。验证方式：扩展 `src/components/chat/SdkDependencyPanel.test.tsx`，断言日志区域不再使用 `mockup-code` / `bg-base-300`，安装完成后的日志默认渲染为折叠 `details`，并包含 light/dark 成对日志面板类。
+- 功能点 2：修复日志区域 UI。验证方式：`SdkDependencyPanel.tsx` 将日志区域从 DaisyUI mock terminal 改为紧凑轻量面板；安装中直接展开，完成后折叠；新增 `chat.sdk.installLog` i18n fallback，不改日志来源和 SDK 安装流程。
+- 功能点 3：i18n 与规范同步。验证方式：更新 `src/locales/en.json` / `src/locales/zh.json` 和 `.trellis/spec/frontend/component-guidelines.md`，记录 SDK 日志区域不得使用大面积 `bg-base-300` mockup 样式。
+- 功能点 4：验证与暂存。验证方式：运行 `npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts`、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、IDE build、相关 `git diff --check`，并只暂存本轮 SDK UI 相关文件。
+
+## 迭代记录 2026-06-24 SDK dependency panel log surface
+
+- 本轮完成：修复 SDK 依赖弹窗底部日志在亮色主题下变成大面积灰块的问题。`SdkDependencyPanel` 已移除日志区域的 DaisyUI `mockup-code` / `bg-base-300` 终端块，改为 `sdk-install-log` 轻量折叠面板：亮色使用白底、slate 边框和低对比文本，深色使用 `dark:border-base-300` / `dark:bg-base-200/60`；安装中 `details` 自动展开，安装完成后默认折叠，日志内容限高滚动。新增 `chat.sdk.installLog` 中英文文案，并保留 helper fallback。
+- 本轮规范同步：`.trellis/spec/frontend/component-guidelines.md` 已记录 SDK install logs 不得使用大面积 `mockup-code` / `bg-base-300` terminal block，安装中展开、完成后默认折叠，避免诊断日志压过 SDK 卡片。
+- 本轮验证：RED：`npm test -- src/components/chat/SdkDependencyPanel.test.tsx` 先失败 2 项，失败点为旧日志区域仍输出 `mockup-code text-xs max-h-48 overflow-y-auto bg-base-300` 且没有 `sdk-install-log` / `details open` 结构。GREEN：同命令通过（1 file / 9 tests）；`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 通过（2 files / 10 tests）。`npm run build` 通过；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；IDE `build_project` 通过，`problems: []`；IDE 文件问题扫描 `SdkDependencyPanel.tsx` / `SdkDependencyPanel.test.tsx` 无错误。`git diff --check -- src/components/chat/SdkDependencyPanel.tsx src/components/chat/SdkDependencyPanel.test.tsx src/locales/en.json src/locales/zh.json .trellis/spec/frontend/component-guidelines.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已确认在工作区内并清理。
+
+## 本轮 PLAN 2026-06-24 SDK uninstall Windows access denied
+
+- 目标：修复 Windows 下点击卸载 SDK 时删除 `~/.ccg-switch/ai-bridge-deps/dependencies/<sdkId>` 失败并报 `拒绝访问 (os error 5)` 的问题。根因方向是卸载前未释放 ai-bridge daemon 对 SDK `node_modules` 的占用，且删除目录时未处理 npm 包中的只读文件和短暂锁文件。
+- 功能点 1：补 RED 测试。验证方式：扩展 `src-tauri/src/chat/sdk_installer.rs` 测试，构造 SDK 目录下只读文件，断言卸载能删除目录；扩展 `src-tauri/src/chat/manager.rs` 测试，断言卸载准备阶段会 stop 已初始化 daemon。
+- 功能点 2：后端稳健卸载。验证方式：`ChatManager::uninstall_sdk` 改为 async，卸载前停掉 cached daemon 并短暂等待释放句柄；`sdk_installer::uninstall_sdk` 清理只读属性并对 `remove_dir_all` 做有限重试，最终失败时返回包含“进程占用/权限”的明确提示。
+- 功能点 3：命令合同同步。验证方式：`chat_uninstall_sdk` 调用 async manager，并更新 `.trellis/spec/backend/cross-layer-protocol.md` 记录卸载前停 daemon 与 Windows 删除目录策略。
+- 功能点 4：验证与暂存。验证方式：运行 `cargo test --manifest-path src-tauri/Cargo.toml sdk`、`cargo check --manifest-path src-tauri/Cargo.toml`、`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts`、`npm run build`、IDE build、相关 `git diff --check`，并只暂存本轮相关文件。
+
+## 迭代记录 2026-06-24 SDK uninstall Windows access denied
+
+- 本轮完成：修复 Windows 下卸载 SDK 目录可能因 `拒绝访问 (os error 5)` 失败的问题。`chat_uninstall_sdk` 现在 await 异步 `ChatManager::uninstall_sdk`；manager 卸载前会 stop 已初始化且正在运行的 ai-bridge daemon，并等待 150ms 释放 Node 对 SDK `node_modules` 的文件句柄；`sdk_installer::uninstall_sdk` 改为先递归清理只读属性，再对 `remove_dir_all` 做 5 次、每次 200ms 的有限重试。最终失败时错误会提示检查终端、杀毒软件或 ai-bridge/node 进程占用。
+- 本轮规范同步：`.trellis/spec/backend/cross-layer-protocol.md` 已把 `chat_uninstall_sdk` 纳入 SDK dependency version management 合同，记录卸载前停 daemon、清理只读属性、重试删除和最终错误提示要求。
+- 本轮验证：RED：`cargo test --manifest-path src-tauri/Cargo.toml sdk -- --nocapture` 先失败，失败点为 `ChatManager::stop_cached_daemon_before_sdk_uninstall` 不存在；只读文件删除测试也覆盖旧裸 `remove_dir_all` 风险。GREEN：同命令通过（7 tests passed）；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 通过（2 files / 10 tests）；`npm run build` 通过；IDE `build_project` 通过，`problems: []`；IDE 文件问题扫描 `sdk_installer.rs` / `manager.rs` / `chat_commands.rs` 无错误；`git diff --check -- src-tauri/src/chat/sdk_installer.rs src-tauri/src/chat/manager.rs src-tauri/src/commands/chat_commands.rs .trellis/spec/backend/cross-layer-protocol.md TODO_LIST.md` 通过，仅 Windows LF/CRLF 转换提示。构建生成的 `dist` / `out` 已确认在工作区内并清理。
+
 ## 迭代记录 2026-06-23 edit diff hover hit area
 
 - 本轮完成：修复聊天消息内“编辑文件”hover diff 预览无法移入的问题。根因是基础 hover 预览使用 `bottom: calc(100% + 8px)`，触发行和预览框之间存在 8px 不可 hover 间隙；鼠标移动到间隙时 `.edit-diff-hover-trigger:hover` 失效，预览被隐藏，导致用户无法进入悬浮框，也无法滚动内部 diff。现只对普通 transcript 的 `.edit-diff-hover-preview-scrollable` 覆盖为 `bottom: 100%` 并保留 `pointer-events: auto`，让触发器到预览框的命中区域连续；右侧 status-panel hover 预览间距不变。
@@ -6339,3 +6394,19 @@
 - 修改文件：`src/utils/toolPresentation.ts`、`src/utils/toolPresentation.test.ts`、`src/components/toolBlocks/SearchToolGroupBlock.tsx`、`src/components/toolBlocks/SearchToolGroupBlock.test.tsx`、`src/styles/toolBlocks.css`、`src/locales/en.json`、`src/locales/zh.json`、`.trellis/spec/frontend/component-guidelines.md`、`TODO_LIST.md`。
 - 验证通过：RED/GREEN 定向（2 files / 46 tests）、相邻验证（15 files / 177 tests）、`npm test`（55 files / 526 tests）、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`（116 tests passed，2 doctests ignored）、dist/out 清理确认 `{"dist":false,"out":false}`、`git diff --check` / `git diff --cached --check`。IDE build/file problems 仍 120 秒超时。
 - 下一步候选：真实 Tauri desktop smoke；是否给 Search footer 增加展开 raw output 快捷入口；收束同主题提交边界；与可读 cc-gui 做真实运行并排截图。
+## 迭代记录 2026-06-24 SDK dependency version management
+
+- 本轮完成：创建并启动 Trellis 任务 `.trellis/tasks/06-24-sdk-dependency-version-management`；补齐 SDK 依赖管理跨层版本合同。Rust 后端 `SdkStatus` 现在返回当前版本、默认版本、最新稳定版和可选版本列表；`chat_sdk_status` 改为 async 并容错 npm registry 查询失败；`chat_install_sdk` 支持可选精确版本参数，后端拒绝 `latest`、range、file/git/url、空白、路径和 shell-like 版本 payload。前端 `useSdkStore.install()` 传递目标版本；`SdkDependencyPanel` 改为 cc-gui 风格紧凑行，展示状态、当前/最新/默认版本、目标版本 select、安装/更新/当前版本/切换版本和卸载操作；SDK modal 增加取消按钮；中英文 i18n 与 key-only fallback 已同步。Trellis backend/frontend 规范已记录 SDK 版本合同和 UI fallback 规则。
+- 本轮验证：RED：`cargo test --manifest-path src-tauri/Cargo.toml sdk_installer -- --nocapture` 先失败 7 个编译/方法缺失点，覆盖版本读取、registry 解析、安全校验、显式 package spec 和 fallback 状态；`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 先失败 6 项，覆盖版本 UI、action helper 和 store install payload。GREEN：`npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts` 通过（2 files / 6 tests）；`npm run build` 通过；`cargo test --manifest-path src-tauri/Cargo.toml sdk -- --nocapture` 通过（5 SDK tests）；`cargo check --manifest-path src-tauri/Cargo.toml` 通过；`cargo test --manifest-path src-tauri/Cargo.toml` 通过（121 tests passed，2 doctests ignored）；`cargo fmt --manifest-path src-tauri/Cargo.toml --check` 通过；`git diff --check` 针对本任务文件通过，仅 Windows LF/CRLF 提示。构建生成的 `dist` 已确认在工作区内并清理，`out` 不存在。
+- 已知非本任务失败：相邻验证 `npm test -- src/components/chat/SdkDependencyPanel.test.tsx src/stores/useSdkStore.test.ts src/components/chat/StatusPanel.test.tsx` 中 `StatusPanel.test.tsx` 仍失败 3 项，失败点为 `edit-diff-hover-preview` / `edit-diff-hover-preview-split` / `aria-describedby`，与 SDK 版本管理无关，且与本轮开始前交接记录中的既有失败一致。
+- 未验证项：未启动真实 Tauri 桌面执行 npm registry 联网查询、真实 SDK 安装/更新/卸载和 daemon 重启点测；自动化测试没有触发真实 `npm install`，只覆盖命令构造、安全校验、状态解析、store payload 和 SSR UI。
+
+## 本轮 PLAN 2026-06-24 SDK dependency version management
+
+- 目标：将 Chat 的 SDK 依赖管理弹窗按 cc-gui 风格优化，并补齐 SDK 当前版本展示、目标版本选择、升级/切换指定版本能力；在用户确认方案前只完成 Trellis 规划文档，不修改业务代码。
+- 功能点 1：恢复 Trellis 和工作区上下文。验证方式：运行 `.trellis/scripts/get_context.py` 与 phase index，确认当前任务为 `.trellis/tasks/06-24-sdk-dependency-version-management`、状态 `planning`，并确认已有未暂存/已暂存改动不属于本任务。
+- 功能点 2：复核本项目 SDK 面板/Store/后端命令现状。验证方式：使用 CodeGraph 读取 `SdkDependencyPanel`、`useSdkStore`、`SdkStatus`、`chat_install_sdk`、`ChatManager::install_sdk`、`sdk_installer::install_sdk` 调用链，确认当前只支持默认版本安装且状态不含版本字段。
+- 功能点 3：复核 cc-gui 对标实现。验证方式：使用 CodeGraph 读取 `C:/guodevelop/demo/jetbrains-cc-gui` 的 `DependencySection` 与依赖类型，确认参考实现包含状态、版本列表、目标版本选择、安装/更新/卸载和日志展示。
+- 功能点 4：完善 Trellis 规划产物。验证方式：更新 `prd.md`，新增 `design.md` 和 `implement.md`，覆盖需求、跨层合同、版本安全、UI 行为、TDD 步骤和验证命令。
+- 功能点 5：暂存本任务规划文件。验证方式：只 `git add` `.trellis/tasks/06-24-sdk-dependency-version-management/*` 与 `TODO_LIST.md`，不暂存 `src/` 或其它 Trellis 任务的用户改动。
+- 功能点 6：提交方案给用户确认。验证方式：输出问题分析、修改思路、影响范围、风险点和验证方式；未确认前不执行 `task.py start`，不修改业务代码。

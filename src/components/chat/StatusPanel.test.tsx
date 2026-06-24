@@ -39,6 +39,10 @@ describe('StatusPanel', () => {
                     displayName: 'Claude Code SDK',
                     installed: true,
                     path: 'C:/deps/claude-sdk',
+                    currentVersion: '1.2.0',
+                    defaultVersion: '^0.2.58',
+                    latestVersion: '1.2.0',
+                    availableVersions: ['1.2.0'],
                 }}
             />,
         );
@@ -103,6 +107,10 @@ describe('StatusPanel', () => {
                         displayName: 'Claude Code SDK',
                         installed: true,
                         path: 'C:/deps/claude-sdk',
+                        currentVersion: '1.2.0',
+                        defaultVersion: '^0.2.58',
+                        latestVersion: '1.2.0',
+                        availableVersions: ['1.2.0'],
                     }}
                     onReconnectDaemon={() => undefined}
                 />

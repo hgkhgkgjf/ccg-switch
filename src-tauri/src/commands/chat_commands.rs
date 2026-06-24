@@ -227,21 +227,27 @@ pub fn chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceStatus,
 
 /// 列出所有 SDK 的安装状态（Claude / Codex）。
 #[tauri::command]
-pub fn chat_sdk_status(state: State<'_, ChatState>) -> Result<Vec<crate::chat::SdkStatus>, String> {
-    state.manager.sdk_status()
+pub async fn chat_sdk_status(
+    state: State<'_, ChatState>,
+) -> Result<Vec<crate::chat::SdkStatus>, String> {
+    state.manager.sdk_status().await
 }
 
 /// 安装指定 SDK。npm 日志通过 "chat://sdk-install-log" 事件流式推送，
 /// 结束时发 "chat://sdk-install-done"。
 #[tauri::command]
-pub async fn chat_install_sdk(sdk_id: String, state: State<'_, ChatState>) -> Result<(), String> {
-    state.manager.install_sdk(sdk_id).await
+pub async fn chat_install_sdk(
+    sdk_id: String,
+    version: Option<String>,
+    state: State<'_, ChatState>,
+) -> Result<(), String> {
+    state.manager.install_sdk(sdk_id, version).await
 }
 
 /// 卸载指定 SDK。
 #[tauri::command]
 pub async fn chat_uninstall_sdk(sdk_id: String, state: State<'_, ChatState>) -> Result<(), String> {
-    state.manager.uninstall_sdk(sdk_id)
+    state.manager.uninstall_sdk(sdk_id).await
 }
 
 /// 重启 daemon（用于手动刷新）。

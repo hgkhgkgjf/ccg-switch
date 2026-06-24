@@ -290,14 +290,14 @@ impl ChatManager {
     // ===== SDK 依赖管理 =====
 
     /// 列出所有 SDK 的安装状态。
-    pub fn sdk_status(&self) -> Result<Vec<super::sdk_installer::SdkStatus>, String> {
+    pub async fn sdk_status(&self) -> Result<Vec<super::sdk_installer::SdkStatus>, String> {
         let deps = resources::deps_dir(&self.app)?;
-        Ok(super::sdk_installer::all_status(&deps))
+        Ok(super::sdk_installer::all_status(&deps).await)
     }
 
     /// 安装指定 SDK，npm 日志通过 "chat://sdk-install-log" 事件推送。
     /// 安装成功后重启 daemon 以加载新装的 SDK。
-    pub async fn install_sdk(&self, sdk_id: String) -> Result<(), String> {
+    pub async fn install_sdk(&self, sdk_id: String, version: Option<String>) -> Result<(), String> {
         let sdk = super::sdk_installer::sdk_by_id(&sdk_id)
             .ok_or_else(|| format!("未知 SDK: {sdk_id}"))?;
         let node = resources::detect_node()?;
@@ -305,13 +305,14 @@ impl ChatManager {
 
         let app = self.app.clone();
         let sdk_id_for_log = sdk_id.clone();
-        let result = super::sdk_installer::install_sdk(sdk, &node, &deps, move |line| {
-            let _ = app.emit(
-                "chat://sdk-install-log",
-                json!({ "sdkId": sdk_id_for_log, "line": line }),
-            );
-        })
-        .await;
+        let result =
+            super::sdk_installer::install_sdk(sdk, &node, &deps, version.as_deref(), move |line| {
+                let _ = app.emit(
+                    "chat://sdk-install-log",
+                    json!({ "sdkId": sdk_id_for_log, "line": line }),
+                );
+            })
+            .await;
 
         // 通知安装结束（成功或失败）。
         let _ = self.app.emit(
@@ -327,11 +328,23 @@ impl ChatManager {
     }
 
     /// 卸载指定 SDK。
-    pub fn uninstall_sdk(&self, sdk_id: String) -> Result<(), String> {
+    pub async fn uninstall_sdk(&self, sdk_id: String) -> Result<(), String> {
         let sdk = super::sdk_installer::sdk_by_id(&sdk_id)
             .ok_or_else(|| format!("未知 SDK: {sdk_id}"))?;
         let deps = resources::deps_dir(&self.app)?;
+        Self::stop_cached_daemon_before_sdk_uninstall(self.client.get().cloned()).await;
         super::sdk_installer::uninstall_sdk(sdk, &deps)
+    }
+
+    async fn stop_cached_daemon_before_sdk_uninstall(
+        client: Option<Arc<dyn ManagerDaemonClient>>,
+    ) {
+        if let Some(client) = client {
+            if client.is_running() {
+                client.stop().await;
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        }
     }
 
     /// 重启 daemon：停止当前实例并以新进程重新启动（用于安装 SDK 后刷新）。
@@ -454,6 +467,7 @@ mod tests {
     struct FakeDaemonClient {
         running: AtomicBool,
         restart_calls: AtomicUsize,
+        stop_calls: AtomicUsize,
         fail_restart: bool,
     }
 
@@ -462,6 +476,7 @@ mod tests {
             Self {
                 running: AtomicBool::new(running),
                 restart_calls: AtomicUsize::new(0),
+                stop_calls: AtomicUsize::new(0),
                 fail_restart: false,
             }
         }
@@ -470,6 +485,7 @@ mod tests {
             Self {
                 running: AtomicBool::new(false),
                 restart_calls: AtomicUsize::new(0),
+                stop_calls: AtomicUsize::new(0),
                 fail_restart: true,
             }
         }
@@ -523,9 +539,21 @@ mod tests {
 
         fn stop(&self) -> ClientFuture<'_, ()> {
             Box::pin(async {
+                self.stop_calls.fetch_add(1, Ordering::SeqCst);
                 self.running.store(false, Ordering::SeqCst);
             })
         }
+    }
+
+    #[tokio::test]
+    async fn sdk_uninstall_stops_cached_daemon_before_removing_dependencies() {
+        let fake = Arc::new(FakeDaemonClient::new(true));
+        let client: Arc<dyn ManagerDaemonClient> = fake.clone();
+
+        ChatManager::stop_cached_daemon_before_sdk_uninstall(Some(client)).await;
+
+        assert!(!fake.is_running());
+        assert_eq!(fake.stop_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

@@ -139,6 +139,27 @@ See `src/components/providers/ProviderCard.tsx` and
   `Close`, `Refresh`, `Installed`, `Not installed`, `Install`, `Uninstall`, and
   `Installing...` instead of `chat.sdk.*` / `common.close` keys while i18n is
   still loading or incomplete.
+  The SDK dependency panel also owns version-management presentation. It should
+  render target-version selects, current/latest/default version metadata,
+  update availability, and install/update/current/switch action labels through
+  the same helper-owned fallback boundary. Use one compact card per SDK: header
+  icon + SDK name + current-version chip + latest-version chip + lightweight
+  update pill, a short SDK-specific description, one full-width target-version
+  select row, an action row for install/update/current/switch plus uninstall,
+  and a quiet current/latest metadata footer. Do not split the select/actions
+  into a separate right-hand column in this modal; it makes the narrow desktop
+  dialog look misaligned. Never let the frontend accept arbitrary npm specs;
+  choices must come from the backend `availableVersions` list. This panel must
+  be theme-paired: light mode should use opaque white/slate/blue/red surfaces
+  with readable borders, while dark mode uses `dark:` variants to keep the
+  screenshot-style DaisyUI semantic tokens. Do not rely only on translucent
+  semantic classes such as `bg-base-200/40`, `bg-base-300/80`, `bg-info/15`, or
+  `bg-error/10` for card, chip, select, update, install, or uninstall surfaces;
+  those can become too low-contrast in light themes. SDK install logs should
+  use the same lightweight theme-paired treatment: render an opaque bordered
+  panel instead of DaisyUI `mockup-code` / broad `bg-base-300` terminal blocks,
+  keep the log expanded while an install is running, and collapse completed
+  logs by default so diagnostic output does not visually outweigh the SDK cards.
   Tool permission dialogs follow the same recovery-path rule: the title, tool
   description, parameters heading, raw-input disclosure, working-directory
   label, deny action, and allow-once action must use a helper-owned fallback so
@@ -1044,6 +1065,12 @@ See `src/components/providers/ProviderCard.tsx` and
   payloads sent through `ChatAttachment`; do not fake image/file context by
   prepending `@filename` to the prompt. Empty composer context should stay quiet
   instead of rendering placeholder text that increases the input area's height.
+  When handling paste on the contenteditable composer, pasted image files must
+  call `preventDefault()` before entering the attachment flow; otherwise the
+  browser may insert an `<img>` into the editable body while the same file is
+  also shown as a thumbnail. If a paste contains both image data and plain text,
+  keep the image in `ChatAttachment` thumbnails and insert only the plain text
+  into the editor.
   In the Chat page, place the composer inside the central conversation column
   and center its inner content with a bounded max width; it must not span across
   the session sidebar or status panel on wide screens. If the composer exposes a
@@ -1099,6 +1126,25 @@ See `src/components/providers/ProviderCard.tsx` and
   `/update-config`, and Codex `/diff`. Project command files from
   `.claude/commands/**/*.md` should show their source suffix (for example
   `[project]`) so users can distinguish built-in and local commands.
+- Chat composer completion rows for `@` / `/` / `#` / `!` triggers must follow
+  the cc-gui list-style anatomy: a leading lucide kind icon, a primary label
+  that takes the remaining horizontal space (`flex-1 truncate`), and a
+  right-aligned faded secondary text with a max width and `truncate`. Map
+  `kind` to icons through a single helper (`file` -> `File`, `directory` ->
+  `Folder`, `command` -> `Terminal`, `agent` -> `Bot`, `prompt` -> `Sparkles`,
+  default `File`); keep `kind` optional on `CompletionItem` so legacy items
+  fall back to the default icon without breaking. This row anatomy is the
+  canonical pattern for any list-style menu surfacing a "what + where" pair
+  (file + parent path, command + source tag, agent + description), so reuse it
+  rather than introducing per-trigger ad hoc layouts.
+- For `@` file completion items, separate display text from insertion text:
+  the `label` is the basename (with a trailing `/` for directories) and the
+  `description` is the parent directory path; `insertText` stays the full
+  `relPath` so the inserted reference chip remains unambiguous. Keep the
+  trailing `/` on directory labels because `applySelection` relies on
+  `item.label.endsWith('/')` as the `isDir` signal at insertion time. The same
+  display-vs-insertion split applies whenever a completion row needs a compact
+  display label but must insert a longer disambiguated token.
 - Chat composer model selection should not be limited to the static fallback
   arrays in `constants.ts`. The selector should merge active Provider model
   fields, locally cached dynamic models, and fallback models through

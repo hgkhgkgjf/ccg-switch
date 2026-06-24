@@ -29,15 +29,34 @@ export function mergeUsage(accumulated, newUsage) {
 }
 
 /**
+ * Derive the effective context-window upper bound from a Claude model id.
+ * The webview-controlled settings layer toggles 1M/200K via a `[1m]` suffix on
+ * the requested model id; mirror that single source of truth here so every
+ * sidecar emit reflects the true window the SDK is using.
+ */
+export function deriveContextWindow(modelId) {
+  if (typeof modelId !== 'string' || modelId.length === 0) return 200_000;
+  return modelId.includes('[1m]') ? 1_000_000 : 200_000;
+}
+
+/**
  * Emit [USAGE] tag from accumulated usage data during streaming.
  * NOTE: Uses process.stdout.write for consistent buffering with other IPC messages.
+ * @param {object} accumulated  Accumulated token usage.
+ * @param {number} [maxTokens]  Optional context-window upper bound (e.g. 200000 / 1000000).
+ *   Forwarded as `max_tokens` so the frontend ring can show the real window
+ *   (1M when the requested model has a `[1m]` suffix, 200K otherwise).
  */
-export function emitAccumulatedUsage(accumulated) {
+export function emitAccumulatedUsage(accumulated, maxTokens) {
   if (!accumulated) return;
-  process.stdout.write('[USAGE] ' + JSON.stringify({
+  const payload = {
     input_tokens: accumulated.input_tokens || 0,
     output_tokens: accumulated.output_tokens || 0,
     cache_creation_input_tokens: accumulated.cache_creation_input_tokens || 0,
     cache_read_input_tokens: accumulated.cache_read_input_tokens || 0
-  }) + '\n');
+  };
+  if (typeof maxTokens === 'number' && Number.isFinite(maxTokens) && maxTokens > 0) {
+    payload.max_tokens = maxTokens;
+  }
+  process.stdout.write('[USAGE] ' + JSON.stringify(payload) + '\n');
 }

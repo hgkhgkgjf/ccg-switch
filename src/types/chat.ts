@@ -37,6 +37,8 @@ export interface TokenUsage {
     output_tokens: number;
     cache_creation_input_tokens: number;
     cache_read_input_tokens: number;
+    /** 当前会话上下文窗口上限（由 sidecar 按 1M/200K 状态推送，可缺省） */
+    max_tokens?: number;
 }
 
 /** MESSAGE 标签的完整结构 */
@@ -139,6 +141,10 @@ export interface SdkStatus {
     displayName: string;
     installed: boolean;
     path: string;
+    currentVersion?: string | null;
+    defaultVersion: string;
+    latestVersion?: string | null;
+    availableVersions: string[];
 }
 
 /** "chat://sdk-install-log" 事件载荷 */

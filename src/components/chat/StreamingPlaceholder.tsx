@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Loader2} from 'lucide-react';
+import BouncingDots from './BouncingDots';
 
 interface StreamingPlaceholderProps {
     delayMs?: number;
@@ -28,7 +28,7 @@ export default function StreamingPlaceholder({ delayMs = 350 }: StreamingPlaceho
 
     return (
         <div className="flex items-center gap-2 text-sm text-base-content/50" aria-live="polite">
-            <Loader2 size={16} className="animate-spin" />
+            <BouncingDots size={4} />
             <span>
                 {showConnectedHint
                     ? connectedLabel

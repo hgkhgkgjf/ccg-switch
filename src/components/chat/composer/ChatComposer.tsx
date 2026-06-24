@@ -185,6 +185,7 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         reasoningEffort,
         draft,
         contextTokens,
+        contextMaxTokens,
         activeRequestId,
         activeSession,
         setProvider,
@@ -258,7 +259,8 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
         () => getChatModelRefreshSource(providerId, providers),
         [providerId, providers],
     );
-    const maxTokens = contextWindowFor(model);
+    const fallbackMaxTokens = contextWindowFor(model);
+    const maxTokens = contextMaxTokens && contextMaxTokens > 0 ? contextMaxTokens : fallbackMaxTokens;
     const percentage = maxTokens > 0 ? (contextTokens / maxTokens) * 100 : 0;
 
     useEffect(() => {
@@ -540,12 +542,19 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
     };
 
     const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
-        // Handle image paste
-        if (e.clipboardData.files.length > 0) {
-            void handleAddAttachment(e.clipboardData.files);
-        }
-        // For text paste: only allow plain text (strip HTML)
         const text = e.clipboardData.getData('text/plain');
+        const hasImageFiles = Array.from(e.clipboardData.files).some((file) => inferImageMediaType(file) !== null);
+
+        if (hasImageFiles) {
+            e.preventDefault();
+            void handleAddAttachment(e.clipboardData.files);
+            if (text) {
+                document.execCommand('insertText', false, text);
+            }
+            return;
+        }
+
+        // For text paste: only allow plain text (strip HTML)
         if (text) {
             e.preventDefault();
             document.execCommand('insertText', false, text);

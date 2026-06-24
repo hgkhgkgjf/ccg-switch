@@ -341,6 +341,22 @@
             "install": "Install",
             "installing": "Installing",
             "uninstall": "Uninstall",
+            "installLog": "Install log",
+            "targetVersion": "Target version",
+            "description": {
+                "claude": "Required for Claude AI features. Includes Claude Code SDK and related dependencies.",
+                "codex": "Required for Codex AI features. Includes OpenAI Codex SDK.",
+                "generic": "Required for {{name}} features."
+            },
+            "currentVersion": "Current {{version}}",
+            "latestStableVersion": "Latest stable {{version}}",
+            "defaultVersion": "Default {{version}}",
+            "updateAvailable": "Update available",
+            "currentVersionAction": "Current version",
+            "installVersion": "Install {{version}}",
+            "updateToVersion": "Update to {{version}}",
+            "switchToVersion": "Switch to {{version}}",
+            "noVersions": "No versions available",
             "missingBanner": "{{name}} is not installed yet. Install it to start chatting."
         }
     },
