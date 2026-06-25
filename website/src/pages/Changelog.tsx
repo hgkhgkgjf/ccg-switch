@@ -13,6 +13,14 @@ interface Version {
 
 const versions: Version[] = [
   {
+    version: '1.6.1',
+    date: '2026-06-25',
+    type: 'minor',
+    changes: [
+      { type: 'feature', text: '迁移会话终端操作并移除独立工作区页面' }
+    ]
+  },
+  {
     version: '1.5.0',
     date: '2026-04-29',
     type: 'minor',
