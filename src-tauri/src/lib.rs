@@ -916,6 +916,8 @@ pub fn run() {
             chat_commands::permission_respond_ask_user_question,
             chat_commands::permission_respond_tool,
             chat_commands::permission_respond_plan_approval,
+            chat_commands::chat_open_project_in_terminal,
+            chat_commands::chat_resume_session_in_terminal,
             chat_commands::chat_list_workspace_files,
             chat_commands::chat_enhance_prompt,
             // Editor 命令

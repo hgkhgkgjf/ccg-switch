@@ -294,6 +294,12 @@
             "context": {
                 "projectPin": "Pin project",
                 "openInExplorer": "Open in Explorer",
+                "openInTerminal": "Open in Terminal",
+                "openInTerminalFailed": "Failed to open terminal",
+                "resumeInTerminal": "Resume Session in Terminal",
+                "resumeInTerminalFailed": "Failed to resume session in terminal",
+                "noProjectDir": "No valid project directory",
+                "noSessionId": "Invalid session ID",
                 "projectCreateWorktree": "Create permanent worktree",
                 "projectRename": "Rename project",
                 "projectMarkAllRead": "Mark all as read",

@@ -641,6 +641,173 @@ pub async fn permission_respond_plan_approval(
     )
 }
 
+/// 在系统终端打开会话的工作目录。
+///
+/// - 路径验证：拒绝空路径、不存在的目录、控制字符。
+/// - 根据平台调用系统终端：
+///   - Windows: cmd /c start cmd /K "cd /d <projectDir>"
+///   - macOS: osascript -e 'tell app "Terminal" to do script "cd <projectDir>"'
+///   - Linux: 检测常见终端（gnome-terminal / konsole / xterm）
+#[tauri::command]
+pub fn chat_open_project_in_terminal(
+    project_dir: String,
+) -> Result<(), String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Err("工作目录路径为空".to_string());
+    }
+    if trimmed.contains(|c: char| c.is_control()) {
+        return Err("工作目录路径包含非法字符".to_string());
+    }
+
+    let path = Path::new(trimmed);
+    if !path.exists() {
+        return Err(format!("工作目录不存在: {}", trimmed));
+    }
+    if !path.is_dir() {
+        return Err(format!("路径不是目录: {}", trimmed));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let cmd = format!("cd /d \"{}\"", trimmed);
+        Command::new("cmd")
+            .args(&["/c", "start", "cmd", "/K", &cmd])
+            .spawn()
+            .map_err(|e| format!("无法打开终端: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!("tell app \"Terminal\" to do script \"cd \\\"{}\\\"\"", trimmed);
+        Command::new("osascript")
+            .args(&["-e", &script])
+            .spawn()
+            .map_err(|e| format!("无法打开终端: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let cmd = format!("cd \"{}\" && exec bash", trimmed);
+
+        // 尝试检测常见终端
+        let terminals = vec![
+            ("gnome-terminal", vec!["--", "bash", "-c", &cmd]),
+            ("konsole", vec!["-e", "bash", "-c", &cmd]),
+            ("xterm", vec!["-e", "bash", "-c", &cmd]),
+            ("x-terminal-emulator", vec!["-e", "bash", "-c", &cmd]),
+        ];
+
+        let mut opened = false;
+        for (terminal, args) in terminals {
+            if let Ok(mut child) = Command::new(terminal).args(&args).spawn() {
+                let _ = child.wait();
+                opened = true;
+                break;
+            }
+        }
+
+        if !opened {
+            return Err("无法打开终端：未找到可用的终端模拟器".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+/// 在系统终端恢复会话继续对话。
+///
+/// - 路径验证：拒绝空 sessionId、控制字符。
+/// - 根据 provider 选择 CLI 命令（claude / codex / gemini）。
+/// - 根据平台调用系统终端执行命令：
+///   - Windows: cmd /c start cmd /K "cd /d <projectDir> && <cli> --resume <sessionId>"
+///   - macOS: osascript -e 'tell app "Terminal" to do script "cd <projectDir> && <cli> --resume <sessionId>"'
+///   - Linux: 检测常见终端
+#[tauri::command]
+pub fn chat_resume_session_in_terminal(
+    provider: String,
+    session_id: String,
+    project_dir: Option<String>,
+) -> Result<(), String> {
+    let trimmed_session = session_id.trim();
+    if trimmed_session.is_empty() {
+        return Err("会话 ID 为空".to_string());
+    }
+    if trimmed_session.contains(|c: char| c.is_control()) {
+        return Err("会话 ID 包含非法字符".to_string());
+    }
+
+    // 根据 provider 选择 CLI 命令和参数
+    let (cli, resume_arg) = match provider.trim().to_lowercase().as_str() {
+        "claude" => ("claude", "--resume"),
+        "codex" => ("codex", "--session"),
+        "gemini" => ("gemini", "--session"),
+        _ => return Err(format!("不支持的 provider: {}", provider)),
+    };
+
+    // 构建命令：如果有 projectDir，先 cd；再执行 CLI 恢复
+    let mut cmd_parts = Vec::new();
+
+    if let Some(dir) = project_dir.as_ref() {
+        let trimmed_dir = dir.trim();
+        if !trimmed_dir.is_empty() {
+            let path = Path::new(trimmed_dir);
+            if path.exists() && path.is_dir() {
+                #[cfg(target_os = "windows")]
+                cmd_parts.push(format!("cd /d \"{}\"", trimmed_dir));
+
+                #[cfg(not(target_os = "windows"))]
+                cmd_parts.push(format!("cd \"{}\"", trimmed_dir));
+            }
+        }
+    }
+
+    cmd_parts.push(format!("{} {} \"{}\"", cli, resume_arg, trimmed_session));
+    let full_cmd = cmd_parts.join(" && ");
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(&["/c", "start", "cmd", "/K", &full_cmd])
+            .spawn()
+            .map_err(|e| format!("无法打开终端: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!("tell app \"Terminal\" to do script \"{}\"", full_cmd.replace("\"", "\\\""));
+        Command::new("osascript")
+            .args(&["-e", &script])
+            .spawn()
+            .map_err(|e| format!("无法打开终端: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let terminals = vec![
+            ("gnome-terminal", vec!["--", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
+            ("konsole", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
+            ("xterm", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
+            ("x-terminal-emulator", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
+        ];
+
+        let mut opened = false;
+        for (terminal, args) in terminals {
+            if let Ok(mut child) = Command::new(terminal).args(&args).spawn() {
+                let _ = child.wait();
+                opened = true;
+                break;
+            }
+        }
+
+        if !opened {
+            return Err("无法打开终端：未找到可用的终端模拟器".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -334,6 +334,8 @@ export default function ChatSessionSidebar({
     );
     const projectPinLabel = translateWithFallback('chat.sessionPanel.context.projectPin', 'Pin project');
     const openInExplorerLabel = translateWithFallback('chat.sessionPanel.context.openInExplorer', 'Open in Explorer');
+    const openInTerminalLabel = translateWithFallback('chat.sessionPanel.context.openInTerminal', 'Open in Terminal');
+    const resumeInTerminalLabel = translateWithFallback('chat.sessionPanel.context.resumeInTerminal', 'Resume Session in Terminal');
     const projectCreateWorktreeLabel = translateWithFallback(
         'chat.sessionPanel.context.projectCreateWorktree',
         'Create permanent worktree',
@@ -454,6 +456,43 @@ export default function ChatSessionSidebar({
                 showToast(`${openExplorerFailedLabel}: ${String(error)}`, 'error', 5000);
             });
         setContextMenu(null);
+    };
+
+    const handleOpenInTerminal = (projectDir: string | null | undefined) => {
+        const trimmedPath = projectDir?.trim();
+        if (!trimmedPath) {
+            showToast(t('chat.sessionPanel.context.noProjectDir', '会话无有效工作目录'), 'error', 3000);
+            setContextMenu(null);
+            return;
+        }
+        void invoke<void>('chat_open_project_in_terminal', {projectDir: trimmedPath})
+            .then(() => {
+                setContextMenu(null);
+            })
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] open in terminal failed:', error);
+                showToast(`${t('chat.sessionPanel.context.openInTerminalFailed', '打开终端失败')}: ${String(error)}`, 'error', 5000);
+            });
+    };
+
+    const handleResumeInTerminal = (session: SessionMeta) => {
+        if (!session.sessionId?.trim()) {
+            showToast(t('chat.sessionPanel.context.noSessionId', '会话 ID 无效'), 'error', 3000);
+            setContextMenu(null);
+            return;
+        }
+        void invoke<void>('chat_resume_session_in_terminal', {
+            provider: session.providerId || 'claude',
+            sessionId: session.sessionId,
+            projectDir: session.projectDir || null,
+        })
+            .then(() => {
+                setContextMenu(null);
+            })
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] resume in terminal failed:', error);
+                showToast(`${t('chat.sessionPanel.context.resumeInTerminalFailed', '恢复终端会话失败')}: ${String(error)}`, 'error', 5000);
+            });
     };
 
     const handleRenameSession = (session: SessionMeta) => {
@@ -744,6 +783,12 @@ export default function ChatSessionSidebar({
                 )}
                 {renderMenuButton('session-open-explorer', openInExplorerLabel, false, () => {
                     handleOpenExplorer(sessionExplorerPath);
+                })}
+                {renderMenuButton('session-open-terminal', openInTerminalLabel, false, () => {
+                    handleOpenInTerminal(session.projectDir);
+                })}
+                {renderMenuButton('session-resume-terminal', resumeInTerminalLabel, false, () => {
+                    handleResumeInTerminal(session);
                 })}
                 {renderMenuButton('session-fork-local', sessionForkLocalLabel, true)}
                 {renderMenuButton('session-fork-worktree', sessionForkWorktreeLabel, true)}
