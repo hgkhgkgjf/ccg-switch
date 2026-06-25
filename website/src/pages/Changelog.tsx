@@ -13,6 +13,14 @@ interface Version {
 
 const versions: Version[] = [
   {
+    version: '1.6.2',
+    date: '2026-06-25',
+    type: 'patch',
+    changes: [
+      { type: 'fix', text: '修复 Tauri 依赖版本不一致导致的发版失败' }
+    ]
+  },
+  {
     version: '1.6.1',
     date: '2026-06-25',
     type: 'minor',
