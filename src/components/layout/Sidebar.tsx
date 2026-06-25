@@ -1,12 +1,20 @@
-import { Link, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { Sun, Moon } from 'lucide-react';
-import { useConfigStore } from '../../stores/useConfigStore';
-import Logo from './Logo';
+import {Link, useLocation} from 'react-router-dom';
+import {useTranslation} from 'react-i18next';
 import {
-    LayoutDashboard, Key, Globe, FileText, Zap,
-    Bot, FolderOpen, Settings, Server, MessageSquare
+    Bot,
+    FileText,
+    Globe,
+    Key,
+    LayoutDashboard,
+    MessageSquare,
+    Moon,
+    Server,
+    Settings,
+    Sun,
+    Zap
 } from 'lucide-react';
+import {useConfigStore} from '../../stores/useConfigStore';
+import Logo from './Logo';
 
 interface SidebarProps {
     position: 'left' | 'right' | 'top';
@@ -21,7 +29,6 @@ const mainNavItems = [
     { path: '/prompts', icon: FileText, labelKey: 'nav.prompts' },
     { path: '/skills', icon: Zap, labelKey: 'nav.skills' },
     { path: '/subagents', icon: Bot, labelKey: 'nav.subagents' },
-    { path: '/workspaces', icon: FolderOpen, labelKey: 'nav.workspaces' },
 ];
 
 const bottomNavItems = [

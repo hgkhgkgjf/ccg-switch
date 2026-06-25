@@ -26,7 +26,6 @@
         "prompts": "Prompt 预设",
         "skills": "技能管理",
         "subagents": "子代理",
-        "workspaces": "工作区",
         "settings": "设置",
         "token_usage": "Token 用量"
     },
@@ -289,6 +288,7 @@
                 "resumeInTerminalFailed": "恢复终端会话失败",
                 "noProjectDir": "会话无有效工作目录",
                 "noSessionId": "会话 ID 无效",
+                "noResumeCommand": "会话无恢复命令",
                 "projectCreateWorktree": "创建永久工作树",
                 "projectRename": "重命名项目",
                 "projectMarkAllRead": "全部标为已读",
@@ -652,7 +652,6 @@
         "token_summary_top_model": "最常用模型",
         "token_summary_detail": "查看详情",
         "token_usage_desc": "查看 Token 消耗与费用分析",
-        "workspaces_desc": "管理项目工作区和会话",
         "project_token_title": "项目 Token 使用排行",
         "project_token_empty": "暂无项目 Token 数据"
     },
@@ -890,25 +889,6 @@
         "duration_minutes": "{{minutes}} 分钟",
         "messages": "条消息",
         "no_data": "暂无统计数据"
-    },
-    "workspaces": {
-        "title": "工作区",
-        "subtitle": "管理项目工作区和会话",
-        "search_placeholder": "搜索项目...",
-        "select_project": "选择一个项目查看会话",
-        "sessions_title": "会话列表",
-        "open_terminal": "在终端中打开",
-        "session_id": "会话 ID",
-        "last_modified": "最后修改",
-        "file_size": "大小",
-        "last_message": "最后消息",
-        "role_user": "用户",
-        "role_assistant": "助手",
-        "no_sessions": "暂无会话",
-        "session_preview_empty": "未提取到会话摘要",
-        "open_terminal_error": "打开终端失败",
-        "resume_success": "已启动 Claude 终端",
-        "resume_error": "启动终端失败"
     },
     "sessions": {
         "all_sessions": "全部会话",

@@ -150,6 +150,13 @@ See `src/components/providers/ProviderCard.tsx` and
   Recent project group headers must be real buttons with `aria-expanded`, and
   collapsing a group must hide its sessions without affecting cached session
   data or normal session selection behavior.
+  Session-level terminal actions belong in this same `ChatSessionSidebar`
+  context menu, not in a separate Workspaces page. Use each session's scanned
+  `resumeCommand` when invoking `chat_resume_session_in_terminal`; do not
+  reconstruct provider-specific CLI syntax from `providerId` and `sessionId` in
+  the component. Removing the independent `/workspaces` route must not remove
+  Chat's active workspace controls, because `currentCwd`, file completion, Git
+  branch status, and session filtering still depend on that workspace context.
   Open conversation tabs are snapshots, not a full history list. Render them as
   a compact browser-like strip at the top of the conversation pane below the
   global header and above transcript search. Tabs should show provider icon,

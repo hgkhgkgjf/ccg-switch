@@ -1,19 +1,18 @@
-import { createHashRouter, RouterProvider } from 'react-router-dom';
+import {createHashRouter, RouterProvider} from 'react-router-dom';
 import './App.css';
 import './styles/toolBlocks.css';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
-import { lazy, Suspense } from 'react';
+import {lazy, Suspense, useEffect} from 'react';
 import ThemeManager from './components/common/ThemeManager';
-import { DeepLinkImportDialog } from './components/providers/DeepLinkImportDialog';
-import { useEffect } from 'react';
-import { useConfigStore } from './stores/useConfigStore';
-import { useTokenStore } from './stores/useTokenStore';
-import { useAboutStore } from './stores/useAboutStore';
-import { useTranslation } from 'react-i18next';
-import { listen } from '@tauri-apps/api/event';
-import { showToast } from './components/common/ToastContainer';
-import { UpdateInfo } from './types/about';
+import {DeepLinkImportDialog} from './components/providers/DeepLinkImportDialog';
+import {useConfigStore} from './stores/useConfigStore';
+import {useTokenStore} from './stores/useTokenStore';
+import {useAboutStore} from './stores/useAboutStore';
+import {useTranslation} from 'react-i18next';
+import {listen} from '@tauri-apps/api/event';
+import {showToast} from './components/common/ToastContainer';
+import {UpdateInfo} from './types/about';
 
 
 // 懒加载非首屏页面，减少 Dashboard 切换到其他页面时的渲染开销
@@ -24,7 +23,6 @@ const McpPage = lazy(() => import('./pages/McpPage'));
 const PromptsPage = lazy(() => import('./pages/PromptsPage'));
 const SkillsPage = lazy(() => import('./pages/SkillsPage'));
 const SubagentsPage = lazy(() => import('./pages/SubagentsPage'));
-const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ProxyPage = lazy(() => import('./pages/ProxyPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
@@ -57,10 +55,6 @@ const router = createHashRouter([
       {
         path: 'proxy',
         element: <SuspenseWrapper><ProxyPage /></SuspenseWrapper>,
-      },
-      {
-        path: 'workspaces',
-        element: <SuspenseWrapper><WorkspacesPage /></SuspenseWrapper>,
       },
       {
         path: 'mcp',

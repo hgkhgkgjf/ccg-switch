@@ -476,14 +476,14 @@ export default function ChatSessionSidebar({
     };
 
     const handleResumeInTerminal = (session: SessionMeta) => {
-        if (!session.sessionId?.trim()) {
-            showToast(t('chat.sessionPanel.context.noSessionId', '会话 ID 无效'), 'error', 3000);
+        const resumeCmd = session.resumeCommand?.trim();
+        if (!resumeCmd) {
+            showToast(t('chat.sessionPanel.context.noResumeCommand', '会话无恢复命令'), 'error', 3000);
             setContextMenu(null);
             return;
         }
         void invoke<void>('chat_resume_session_in_terminal', {
-            provider: session.providerId || 'claude',
-            sessionId: session.sessionId,
+            resumeCommand: resumeCmd,
             projectDir: session.projectDir || null,
         })
             .then(() => {

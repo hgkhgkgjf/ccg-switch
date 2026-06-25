@@ -171,6 +171,12 @@ async function renderSidebarWithData(options: RenderSidebarOptions = {}) {
                 ? Promise.reject(options.openExplorerError)
                 : Promise.resolve(undefined);
         }
+        if (command === 'chat_open_project_in_terminal') {
+            return Promise.resolve(undefined);
+        }
+        if (command === 'chat_resume_session_in_terminal') {
+            return Promise.resolve(undefined);
+        }
         throw new Error(`Unexpected command: ${command}`);
     });
 
@@ -349,7 +355,54 @@ describe('chatSessionSidebarUtils', () => {
         expect(menu?.textContent).toContain('Fork locally');
         expect(menu?.textContent).toContain('Fork to new worktree');
         expect(menu?.querySelector('[data-chat-menu-action="session-rename"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="session-open-terminal"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="session-resume-terminal"]')?.getAttribute('aria-disabled')).toBe('false');
         expect(menu?.querySelector('[data-chat-menu-action="session-fork-worktree"]')?.getAttribute('aria-disabled')).toBe('true');
+    });
+
+    it('resumes a session in terminal using the scanned resume command', async () => {
+        const sessionsByProject = {
+            'C:/workspace/ccg-switch': [
+                createSession({
+                    providerId: 'codex',
+                    sessionId: 'thread-42',
+                    title: 'Resume Codex thread',
+                    projectDir: 'C:/workspace/ccg-switch',
+                    sourcePath: 'C:/sessions/codex-thread-42.jsonl',
+                    resumeCommand: 'codex resume thread-42',
+                }),
+            ],
+        };
+        const {container: rendered} = await renderSidebarWithData({sessionsByProject});
+        const sessionRow = rendered.querySelector('[data-chat-session-key="codex::C:/sessions/codex-thread-42.jsonl"]');
+        expect(sessionRow).toBeInstanceOf(HTMLButtonElement);
+
+        await act(async () => {
+            sessionRow?.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 120,
+                clientY: 260,
+            }));
+        });
+
+        await act(async () => {
+            rendered.querySelector<HTMLButtonElement>('[data-chat-menu-action="session-resume-terminal"]')
+                ?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+            await Promise.resolve();
+        });
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_resume_session_in_terminal', {
+            resumeCommand: 'codex resume thread-42',
+            projectDir: 'C:/workspace/ccg-switch',
+        });
+        expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+            'chat_resume_session_in_terminal',
+            expect.objectContaining({
+                provider: expect.anything(),
+                sessionId: expect.anything(),
+            }),
+        );
     });
 
     it('renames a session through the persistent title command and refreshes the list', async () => {

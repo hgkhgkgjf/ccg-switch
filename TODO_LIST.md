@@ -1,3 +1,12 @@
+## 本轮 PLAN 2026-06-25 migrate-session-actions-and-remove-page
+
+- 目标：把旧 WorkspacesPage 的终端会话动作收口到 Chat 侧边栏会话右键菜单，并删除独立 `/workspaces` 页面入口、路由、页面文件和页面专属 i18n；保留 Chat 内部 `currentCwd`、workspace switcher、Git 分支、文件补全和 workspace metadata 能力。
+- 功能点 1：RED 导航回归测试。验证方式：新增 `src/components/layout/Sidebar.test.tsx`，先运行 `npm test -- src/components/layout/Sidebar.test.tsx`，确认旧实现因 `href="/workspaces"` 失败。
+- 功能点 2：删除独立 Workspaces 页面模块。验证方式：删除 `src/pages/WorkspacesPage.tsx`，移除 `src/App.tsx` 路由与 `src/components/layout/Sidebar.tsx` 导航，清理 `nav.workspaces`、`dashboard.workspaces_desc`、顶层 `workspaces.*` locale；运行导航测试变绿，并搜索 `WorkspacesPage`、`/workspaces`、`nav.workspaces`、`workspaces_desc`。
+- 功能点 3：锁定 Chat 会话菜单终端恢复合同。验证方式：扩展 `src/components/chat/chatSessionSidebarUtils.test.ts`，断言 `session-resume-terminal` 调用 `chat_resume_session_in_terminal` 时传 `resumeCommand` + `projectDir`，不再传旧的 `provider/sessionId` 组合。
+- 功能点 4：任务文档与规范同步。验证方式：重写 `.trellis/tasks/06-25-migrate-session-actions-and-remove-page/prd.md`，删除冲突的“打开会话文件”旧内容；按 `trellis-update-spec` 判断并更新相关 spec。
+- 功能点 5：质量门禁。验证方式：运行定向测试、`npm test`、`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`trellis-check`、`git diff --check`，并清理 `dist` / `out` 构建产物。
+
 ## 本轮 PLAN 2026-06-25 Chat workspace/session actions/branch menu continuation
 
 - 目标：继续补齐当前 Trellis 任务剩余验收缺口，重点完成会话重命名持久化、工作目录菜单当前项选中态、资源管理器打开失败的可见反馈；不实现置顶/归档/派生等高风险动作。

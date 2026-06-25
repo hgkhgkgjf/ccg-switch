@@ -72,6 +72,21 @@ fn normalize_system_notification_payload(
     })
 }
 
+fn windows_terminal_start_args<'a>(
+    project_dir: Option<&'a str>,
+    command: Option<&'a str>,
+) -> Vec<&'a str> {
+    let mut args: Vec<&'a str> = vec!["/c", "start", ""];
+    if let Some(dir) = project_dir.filter(|dir| !dir.is_empty()) {
+        args.extend(["/D", dir]);
+    }
+    args.extend(["cmd", "/K"]);
+    if let Some(command) = command.filter(|command| !command.is_empty()) {
+        args.push(command);
+    }
+    args
+}
+
 fn empty_chat_workspace_status() -> ChatWorkspaceStatus {
     ChatWorkspaceStatus {
         is_git_repository: false,
@@ -645,7 +660,7 @@ pub async fn permission_respond_plan_approval(
 ///
 /// - 路径验证：拒绝空路径、不存在的目录、控制字符。
 /// - 根据平台调用系统终端：
-///   - Windows: cmd /c start cmd /K "cd /d <projectDir>"
+///   - Windows: cmd /c start "" /D <projectDir> cmd /K
 ///   - macOS: osascript -e 'tell app "Terminal" to do script "cd <projectDir>"'
 ///   - Linux: 检测常见终端（gnome-terminal / konsole / xterm）
 #[tauri::command]
@@ -670,9 +685,9 @@ pub fn chat_open_project_in_terminal(
 
     #[cfg(target_os = "windows")]
     {
-        let cmd = format!("cd /d \"{}\"", trimmed);
+        let args = windows_terminal_start_args(Some(trimmed), None);
         Command::new("cmd")
-            .args(&["/c", "start", "cmd", "/K", &cmd])
+            .args(args)
             .spawn()
             .map_err(|e| format!("无法打开终端: {}", e))?;
     }
@@ -717,61 +732,51 @@ pub fn chat_open_project_in_terminal(
 
 /// 在系统终端恢复会话继续对话。
 ///
-/// - 路径验证：拒绝空 sessionId、控制字符。
-/// - 根据 provider 选择 CLI 命令（claude / codex / gemini）。
-/// - 根据平台调用系统终端执行命令：
-///   - Windows: cmd /c start cmd /K "cd /d <projectDir> && <cli> --resume <sessionId>"
-///   - macOS: osascript -e 'tell app "Terminal" to do script "cd <projectDir> && <cli> --resume <sessionId>"'
-///   - Linux: 检测常见终端
+/// - 直接使用会话的 resume_command（如 "claude --resume <id>" / "codex resume <id>"）。
+/// - 如果提供 project_dir，Windows 通过 start /D 指定目录，其他平台先 cd 再执行命令。
+/// - 根据平台调用系统终端执行命令。
 #[tauri::command]
 pub fn chat_resume_session_in_terminal(
-    provider: String,
-    session_id: String,
+    resume_command: String,
     project_dir: Option<String>,
 ) -> Result<(), String> {
-    let trimmed_session = session_id.trim();
-    if trimmed_session.is_empty() {
-        return Err("会话 ID 为空".to_string());
+    let trimmed_cmd = resume_command.trim();
+    if trimmed_cmd.is_empty() {
+        return Err("恢复命令为空".to_string());
     }
-    if trimmed_session.contains(|c: char| c.is_control()) {
-        return Err("会话 ID 包含非法字符".to_string());
+    if trimmed_cmd.contains(|c: char| c.is_control()) {
+        return Err("恢复命令包含非法字符".to_string());
     }
 
-    // 根据 provider 选择 CLI 命令和参数
-    let (cli, resume_arg) = match provider.trim().to_lowercase().as_str() {
-        "claude" => ("claude", "--resume"),
-        "codex" => ("codex", "--session"),
-        "gemini" => ("gemini", "--session"),
-        _ => return Err(format!("不支持的 provider: {}", provider)),
-    };
-
-    // 构建命令：如果有 projectDir，先 cd；再执行 CLI 恢复
-    let mut cmd_parts = Vec::new();
-
-    if let Some(dir) = project_dir.as_ref() {
-        let trimmed_dir = dir.trim();
-        if !trimmed_dir.is_empty() {
-            let path = Path::new(trimmed_dir);
-            if path.exists() && path.is_dir() {
-                #[cfg(target_os = "windows")]
-                cmd_parts.push(format!("cd /d \"{}\"", trimmed_dir));
-
-                #[cfg(not(target_os = "windows"))]
-                cmd_parts.push(format!("cd \"{}\"", trimmed_dir));
+    let valid_project_dir = project_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|dir| {
+            if dir.is_empty() {
+                return false;
             }
-        }
-    }
-
-    cmd_parts.push(format!("{} {} \"{}\"", cli, resume_arg, trimmed_session));
-    let full_cmd = cmd_parts.join(" && ");
+            let path = Path::new(dir);
+            path.exists() && path.is_dir()
+        });
 
     #[cfg(target_os = "windows")]
     {
+        let args = windows_terminal_start_args(valid_project_dir, Some(trimmed_cmd));
         Command::new("cmd")
-            .args(&["/c", "start", "cmd", "/K", &full_cmd])
+            .args(args)
             .spawn()
             .map_err(|e| format!("无法打开终端: {}", e))?;
     }
+
+    #[cfg(not(target_os = "windows"))]
+    let full_cmd = {
+        let mut cmd_parts = Vec::new();
+        if let Some(dir) = valid_project_dir {
+            cmd_parts.push(format!("cd \"{}\"", dir));
+        }
+        cmd_parts.push(trimmed_cmd.to_string());
+        cmd_parts.join(" && ")
+    };
 
     #[cfg(target_os = "macos")]
     {
@@ -929,6 +934,48 @@ mod tests {
         assert!(normalize_chat_git_branch_name("feature\nbad").is_err());
         assert!(normalize_chat_git_branch_name("feature..bad").is_err());
         assert!(normalize_chat_git_branch_name("feature.lock").is_err());
+    }
+
+    #[test]
+    fn windows_terminal_args_open_project_use_start_directory() {
+        let project_dir = r"C:\guodevelop\ccg-switch\src-tauri";
+        let args = windows_terminal_start_args(Some(project_dir), None);
+
+        assert_eq!(
+            args,
+            vec![
+                "/c",
+                "start",
+                "",
+                "/D",
+                project_dir,
+                "cmd",
+                "/K",
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg.contains("cd /d")));
+    }
+
+    #[test]
+    fn windows_terminal_args_resume_use_start_directory_and_resume_command() {
+        let project_dir = r"C:\guodevelop\ccg-switch\src-tauri";
+        let resume_command = "codex resume abc123";
+        let args = windows_terminal_start_args(Some(project_dir), Some(resume_command));
+
+        assert_eq!(
+            args,
+            vec![
+                "/c",
+                "start",
+                "",
+                "/D",
+                project_dir,
+                "cmd",
+                "/K",
+                resume_command,
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg.contains("cd /d")));
     }
 
     #[test]
