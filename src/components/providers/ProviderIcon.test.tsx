@@ -19,7 +19,7 @@ describe('ProviderIcon', () => {
         expect(codexHtml).not.toContain('>C</div>');
 
         expect(geminiHtml).toContain('data-provider-brand-icon="gemini"');
-        expect(geminiHtml).toContain('data-provider-brand-icon-glyph="gemini-sparkle"');
+        expect(geminiHtml).toContain('data-chat-provider-icon-glyph="gemini-google"');
         expect(geminiHtml).toContain('<svg');
         expect(geminiHtml).not.toContain('>G</div>');
         expect(geminiHtml).not.toContain('base64');
