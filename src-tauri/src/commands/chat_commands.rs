@@ -4,6 +4,8 @@
 //! String. Follows the project's command-layer convention.
 
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::{AppHandle, State};
 
 use crate::chat::ChatManager;
@@ -14,6 +16,14 @@ pub struct ChatWorkspaceStatus {
     pub is_git_repository: bool,
     pub git_root: Option<String>,
     pub git_branch: Option<String>,
+}
+
+/// 一个 Git 本地分支。
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatGitBranch {
+    pub name: String,
+    pub current: bool,
 }
 
 /// 一个工作目录文件项（供 `@` 文件引用补全使用）。
@@ -70,7 +80,7 @@ fn empty_chat_workspace_status() -> ChatWorkspaceStatus {
     }
 }
 
-fn find_git_entry(start: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+fn find_git_entry(start: &Path) -> Option<(PathBuf, PathBuf)> {
     let mut current = if start.is_file() {
         start.parent()?.to_path_buf()
     } else {
@@ -89,9 +99,9 @@ fn find_git_entry(start: &std::path::Path) -> Option<(std::path::PathBuf, std::p
 }
 
 fn resolve_git_dir(
-    repo_root: &std::path::Path,
-    git_entry: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+    repo_root: &Path,
+    git_entry: &Path,
+) -> Option<PathBuf> {
     if git_entry.is_dir() {
         return Some(git_entry.to_path_buf());
     }
@@ -102,7 +112,7 @@ fn resolve_git_dir(
         return None;
     }
 
-    let path = std::path::PathBuf::from(git_dir);
+    let path = PathBuf::from(git_dir);
     Some(if path.is_absolute() {
         path
     } else {
@@ -110,7 +120,7 @@ fn resolve_git_dir(
     })
 }
 
-fn read_git_branch(git_dir: &std::path::Path) -> Option<String> {
+fn read_git_branch(git_dir: &Path) -> Option<String> {
     let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
     let head = head.trim();
     if head.is_empty() {
@@ -143,7 +153,7 @@ fn resolve_chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceSta
         return Ok(empty_chat_workspace_status());
     };
 
-    let path = std::path::PathBuf::from(cwd);
+    let path = PathBuf::from(cwd);
     if !path.exists() {
         return Ok(empty_chat_workspace_status());
     }
@@ -161,6 +171,144 @@ fn resolve_chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceSta
         git_root: Some(repo_root.to_string_lossy().to_string()),
         git_branch,
     })
+}
+
+fn resolve_existing_chat_path(path: String, label: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label}不能为空"));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err(format!("{label}包含非法控制字符"));
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(format!("{label}不存在: {trimmed}"));
+    }
+    Ok(path)
+}
+
+fn resolve_existing_chat_directory(path: String, label: &str) -> Result<PathBuf, String> {
+    let path = resolve_existing_chat_path(path, label)?;
+    if !path.is_dir() {
+        return Err(format!("{label}不是目录: {}", path.to_string_lossy()));
+    }
+    Ok(path)
+}
+
+fn normalize_chat_git_branch_name(branch_name: &str) -> Result<String, String> {
+    let branch = branch_name.trim();
+    if branch.is_empty() {
+        return Err("创建 Git 分支失败: 分支名不能为空".to_string());
+    }
+    if branch.starts_with('-') {
+        return Err("创建 Git 分支失败: 分支名不能以 - 开头".to_string());
+    }
+    if branch.chars().any(char::is_control) {
+        return Err("创建 Git 分支失败: 分支名包含非法控制字符".to_string());
+    }
+    if branch.contains("..")
+        || branch.contains("//")
+        || branch.contains('\\')
+        || branch.contains(' ')
+        || branch.contains('~')
+        || branch.contains('^')
+        || branch.contains(':')
+        || branch.contains('?')
+        || branch.contains('*')
+        || branch.contains('[')
+        || branch.ends_with('/')
+        || branch.ends_with('.')
+        || branch.ends_with(".lock")
+        || branch == "@{"
+        || branch.contains("@{")
+    {
+        return Err("创建 Git 分支失败: 分支名格式不合法".to_string());
+    }
+    Ok(branch.to_string())
+}
+
+fn resolve_git_repository(cwd: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let Some((repo_root, git_entry)) = find_git_entry(cwd) else {
+        return Err("当前工作目录不是 Git 仓库".to_string());
+    };
+    let Some(git_dir) = resolve_git_dir(&repo_root, &git_entry) else {
+        return Err("无法解析 Git 目录".to_string());
+    };
+    Ok((repo_root, git_dir))
+}
+
+fn collect_refs_heads(
+    root: &Path,
+    current_branch: Option<&str>,
+    prefix: &str,
+    out: &mut Vec<ChatGitBranch>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(root).map_err(|e| format!("读取 Git 分支失败: {e}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name.is_empty() {
+            continue;
+        }
+        let branch_name = if prefix.is_empty() {
+            file_name
+        } else {
+            format!("{prefix}/{file_name}")
+        };
+        if path.is_dir() {
+            collect_refs_heads(&path, current_branch, &branch_name, out)?;
+        } else {
+            out.push(ChatGitBranch {
+                current: current_branch == Some(branch_name.as_str()),
+                name: branch_name,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn list_chat_git_branches_for_path(cwd: &Path) -> Result<Vec<ChatGitBranch>, String> {
+    let (repo_root, git_dir) = resolve_git_repository(cwd)?;
+    let current_branch = read_git_branch(&git_dir);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["branch", "--format=%(if)%(HEAD)%(then)*%(else) %(end)%(refname:short)"])
+        .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            let mut branches: Vec<ChatGitBranch> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        return None;
+                    }
+                    let current = trimmed.starts_with('*');
+                    let name = trimmed.trim_start_matches('*').trim().to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(ChatGitBranch {name, current})
+                })
+                .collect();
+            branches.sort_by(|a, b| a.name.cmp(&b.name));
+            return Ok(branches);
+        }
+    }
+
+    let refs_heads = git_dir.join("refs").join("heads");
+    if !refs_heads.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut branches = Vec::new();
+    collect_refs_heads(&refs_heads, current_branch.as_deref(), "", &mut branches)?;
+    branches.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(branches)
 }
 
 /// Send a chat message and stream the response via "chat://stream"/"chat://done".
@@ -223,6 +371,54 @@ pub fn chat_show_system_notification(
 #[tauri::command]
 pub fn chat_workspace_status(cwd: Option<String>) -> Result<ChatWorkspaceStatus, String> {
     resolve_chat_workspace_status(cwd)
+}
+
+/// 在系统资源管理器中打开 Chat 相关路径。
+#[tauri::command]
+pub fn chat_open_path_in_explorer(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let path = resolve_existing_chat_path(path, "路径")?;
+    app.opener()
+        .open_path(path.to_string_lossy().as_ref(), None::<String>)
+        .map_err(|e| format!("在资源管理器中打开失败: {e}"))
+}
+
+/// 列出当前 Chat 工作目录所在 Git 仓库的本地分支。
+#[tauri::command]
+pub fn chat_git_list_branches(cwd: String) -> Result<Vec<ChatGitBranch>, String> {
+    let cwd = resolve_existing_chat_directory(cwd, "工作目录")?;
+    list_chat_git_branches_for_path(&cwd)
+}
+
+/// 创建并检出一个新的 Git 分支，成功后返回最新工作区状态。
+#[tauri::command]
+pub fn chat_git_create_and_checkout_branch(
+    cwd: String,
+    branch_name: String,
+) -> Result<ChatWorkspaceStatus, String> {
+    let cwd = resolve_existing_chat_directory(cwd, "工作目录")?;
+    let branch_name = normalize_chat_git_branch_name(&branch_name)?;
+    let (repo_root, _) = resolve_git_repository(&cwd)?;
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["checkout", "-b"])
+        .arg(&branch_name)
+        .output()
+        .map_err(|e| format!("创建 Git 分支失败: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "创建 Git 分支失败".to_string()
+        } else {
+            format!("创建 Git 分支失败: {stderr}")
+        });
+    }
+
+    resolve_chat_workspace_status(Some(repo_root.to_string_lossy().to_string()))
 }
 
 /// 列出所有 SDK 的安装状态（Claude / Codex）。
@@ -549,6 +745,49 @@ mod tests {
         assert_eq!(
             status.git_root.as_deref(),
             Some(dir.to_string_lossy().as_ref())
+        );
+
+        fs::remove_dir_all(dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn normalizes_chat_git_branch_name_rejects_unsafe_values() {
+        assert_eq!(
+            normalize_chat_git_branch_name(" feature/workspace-switch ").as_deref(),
+            Ok("feature/workspace-switch")
+        );
+        assert!(normalize_chat_git_branch_name(" ").is_err());
+        assert!(normalize_chat_git_branch_name("-danger").is_err());
+        assert!(normalize_chat_git_branch_name("feature\nbad").is_err());
+        assert!(normalize_chat_git_branch_name("feature..bad").is_err());
+        assert!(normalize_chat_git_branch_name("feature.lock").is_err());
+    }
+
+    #[test]
+    fn lists_chat_git_branches_from_refs_heads() -> Result<(), String> {
+        let dir = unique_test_dir("chat-git-list-branches");
+        write_file(&dir.join(".git").join("HEAD"), "ref: refs/heads/feature/chat-ui\n");
+        write_file(&dir.join(".git").join("refs").join("heads").join("main"), "0000000\n");
+        write_file(
+            &dir.join(".git").join("refs").join("heads").join("feature").join("chat-ui"),
+            "0000000\n",
+        );
+
+        let branches = list_chat_git_branches_for_path(&dir)?;
+
+        assert_eq!(
+            branches,
+            vec![
+                ChatGitBranch {
+                    name: "feature/chat-ui".to_string(),
+                    current: true,
+                },
+                ChatGitBranch {
+                    name: "main".to_string(),
+                    current: false,
+                },
+            ]
         );
 
         fs::remove_dir_all(dir).ok();

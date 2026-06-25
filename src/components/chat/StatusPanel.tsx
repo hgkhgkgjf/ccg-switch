@@ -1064,7 +1064,6 @@ export default function StatusPanel({
                         lines={previewLines}
                         mode={activeDiffViewMode}
                         surface="status"
-                        visible
                     />
                 )}
             </div>

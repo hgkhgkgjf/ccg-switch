@@ -1,3 +1,11 @@
+## 本轮 PLAN 2026-06-25 Chat workspace/session actions/branch menu continuation
+
+- 目标：继续补齐当前 Trellis 任务剩余验收缺口，重点完成会话重命名持久化、工作目录菜单当前项选中态、资源管理器打开失败的可见反馈；不实现置顶/归档/派生等高风险动作。
+- 功能点 1：RED 测试。验证方式：新增/扩展 `chatSessionSidebarUtils.test.ts`、`ContextBar.test.tsx`、Rust session title 测试，先跑失败确认测试能抓住缺口。
+- 功能点 2：会话重命名持久化。验证方式：Rust 对齐 `.codemoss/session-titles.json` 读写契约，前端右键菜单 prompt 后调用命令，成功后刷新同项目会话列表并显示新标题。
+- 功能点 3：工作目录菜单当前项与错误反馈。验证方式：当前项目菜单项有可访问选中态；打开资源管理器失败通过 Toast 显示错误，不只写 console。
+- 功能点 4：质量门禁与 spec 同步。验证方式：运行前端定向测试、`npm run build`、Rust 定向测试、`cargo check`、`git diff --check`，并更新 Trellis spec。
+
 ## 本轮 PLAN 2026-06-24 Provider brand icon alignment
 
 - 目标：将服务商管理界面的 Claude、Codex、Gemini 图标从首字母圆点改为与 Chat 模块一致的品牌 SVG 图标，同时保留 OpenCode/OpenClaw 等隐藏旧类型的首字母 fallback。

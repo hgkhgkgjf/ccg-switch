@@ -300,6 +300,9 @@ fn parse_session_file(
         last_active_at,
         source_path,
         resume_command: Some(resume_command),
+        pinned: false,
+        archived: false,
+        unread: false,
     })
 }
 

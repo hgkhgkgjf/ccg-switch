@@ -10,6 +10,9 @@ export interface SessionMeta {
     lastActiveAt: number;
     sourcePath: string;
     resumeCommand: string | null;
+    pinned?: boolean;
+    archived?: boolean;
+    unread?: boolean;
 }
 
 export interface UnifiedSessionMessage {

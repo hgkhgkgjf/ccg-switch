@@ -67,7 +67,9 @@
       "Read(//c/Users/Administrator/.codemoss/**)",
       "Bash(pkill *)",
       "Bash(npx vitest *)",
-      "Bash(dir *)"
+      "Bash(dir *)",
+      "Bash(cargo test *)",
+      "Bash([ -f \"$f\" ])"
     ]
   }
 }

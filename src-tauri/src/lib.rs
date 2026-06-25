@@ -744,6 +744,7 @@ fn handle_deeplink_url(app: &tauri::AppHandle, url: &str) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -792,6 +793,15 @@ pub fn run() {
             refresh_stats_cache,
             // Session Manager 命令
             session_commands::list_sessions,
+            session_commands::chat_session_rename,
+            session_commands::chat_project_set_pinned,
+            session_commands::chat_project_set_archived,
+            session_commands::chat_project_remove,
+            session_commands::chat_project_rename,
+            session_commands::chat_project_mark_all_read,
+            session_commands::chat_session_set_pinned,
+            session_commands::chat_session_set_archived,
+            session_commands::chat_session_set_unread,
             session_commands::get_project_provider_map,
             session_commands::get_unified_session_message_window,
             session_commands::get_unified_session_messages,
@@ -899,6 +909,9 @@ pub fn run() {
             chat_commands::chat_list_slash_commands,
             chat_commands::chat_show_system_notification,
             chat_commands::chat_workspace_status,
+            chat_commands::chat_open_path_in_explorer,
+            chat_commands::chat_git_list_branches,
+            chat_commands::chat_git_create_and_checkout_branch,
             // Permission 命令（权限审批响应）
             chat_commands::permission_respond_ask_user_question,
             chat_commands::permission_respond_tool,

@@ -1,5 +1,6 @@
 import {type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
+import {invoke} from '@tauri-apps/api/core';
 import {Package, PanelRightOpen, RefreshCw, Trash2} from 'lucide-react';
 import {useChatStore} from '../stores/useChatStore';
 import {useMcpStoreV2} from '../stores/useMcpStoreV2';
@@ -17,6 +18,7 @@ import ChatInputStatusTabs from '../components/chat/ChatInputStatusTabs';
 import ChatSessionSidebar from '../components/chat/ChatSessionSidebar';
 import ChatSessionTabs from '../components/chat/ChatSessionTabs';
 import ChatDiffReviewPane from '../components/chat/ChatDiffReviewPane';
+import type {ChatWorkspaceProjectOption} from '../components/chat/composer/ContextBar';
 import {ChatComposer} from '../components/chat/composer/ChatComposer';
 import ModalDialog from '../components/common/ModalDialog';
 import {
@@ -141,6 +143,7 @@ export default function ChatPage() {
         closeTab,
         closeOtherTabs,
         closeAllTabs,
+        setCurrentCwd,
         startNewSession,
         answerAskUserQuestion,
         answerToolPermission,
@@ -160,6 +163,7 @@ export default function ChatPage() {
     const [diffWrapLines, setDiffWrapLines] = useState(true);
     const [diffPaneCollapsed, setDiffPaneCollapsed] = useState(false);
     const [workspaceStatus, setWorkspaceStatus] = useState<ChatWorkspaceStatus>(EMPTY_CHAT_WORKSPACE_STATUS);
+    const [workspaceProjects, setWorkspaceProjects] = useState<ChatWorkspaceProjectOption[]>([]);
     const [fullHistorySearchRetryCount, setFullHistorySearchRetryCount] = useState(0);
     const [completeStatusSummaryState, setCompleteStatusSummaryState] = useState<{
         key: string;
@@ -190,6 +194,26 @@ export default function ChatPage() {
         void sdkInit();
         void loadMcpServers();
     }, [init, loadMcpServers, sdkInit]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        void invoke<Array<{name: string; path: string}>>('get_dashboard_projects')
+            .then((projects) => {
+                if (cancelled) return;
+                setWorkspaceProjects(projects.map((project) => ({
+                    name: project.name,
+                    path: project.path,
+                })));
+            })
+            .catch((error) => {
+                console.error('[ChatPage] load workspace projects failed:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -683,6 +707,23 @@ export default function ChatPage() {
         void startNewSession(cwd ?? currentCwd);
     }, [currentCwd, resetConversationNavigation, startNewSession]);
 
+    const handleWorkspaceChange = useCallback((nextCwd: string) => {
+        resetConversationNavigation();
+        setCurrentCwd(nextCwd);
+        // 把通过 "Open folder" 选中的目录补进切换器列表，方便下次直接切回，
+        // 避免它只能来自 get_dashboard_projects 的历史项目。
+        setWorkspaceProjects((current) => {
+            const normalized = nextCwd.trim().replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase();
+            if (!normalized) return current;
+            const exists = current.some(
+                (project) => project.path.trim().replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase() === normalized,
+            );
+            if (exists) return current;
+            const name = nextCwd.trim().split(/[\\/]+/).filter(Boolean).pop() ?? nextCwd.trim();
+            return [{name, path: nextCwd.trim()}, ...current];
+        });
+    }, [resetConversationNavigation, setCurrentCwd]);
+
     const handleCheckMcpConnectivity = useCallback(() => {
         if (mcpConnectivityTargetIds.length === 0) return;
         const requestKey = mcpConnectivityTargetKey;
@@ -972,7 +1013,10 @@ export default function ChatPage() {
                             sdkMissing={sdkMissing}
                             onSdkMissing={() => setSdkModalOpen(true)}
                             cwd={currentCwd ?? undefined}
+                            workspaceProjects={workspaceProjects}
+                            onWorkspaceChange={handleWorkspaceChange}
                             workspaceStatus={workspaceStatus}
+                            onWorkspaceStatusChange={setWorkspaceStatus}
                         />
                     </section>
 

@@ -9,6 +9,12 @@ pub struct ProjectInfo {
     pub path: String,
     pub session_count: usize,
     pub last_active: Option<String>,
+    /// 用户是否置顶该项目（来自 workspace 元数据）。
+    #[serde(default)]
+    pub pinned: bool,
+    /// 用户是否归档该项目（来自 workspace 元数据）。
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,11 +155,38 @@ pub fn list_projects() -> Result<Vec<ProjectInfo>, io::Error> {
             path: project_path,
             session_count,
             last_active,
+            pinned: false,
+            archived: false,
         });
     }
 
-    // 按最后活跃时间倒序排列
-    projects.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+    // 应用 workspace 元数据：移除项过滤、归档项过滤、重命名、置顶。
+    let metadata = crate::session_manager::workspace_metadata::load_project_metadata_map();
+    if !metadata.is_empty() {
+        projects.retain(|project| {
+            let key = crate::session_manager::workspace_metadata::normalize_project_key(&project.path);
+            !metadata.get(&key).map(|meta| meta.removed).unwrap_or(false)
+        });
+        for project in &mut projects {
+            let key = crate::session_manager::workspace_metadata::normalize_project_key(&project.path);
+            if let Some(meta) = metadata.get(&key) {
+                project.pinned = meta.pinned;
+                project.archived = meta.archived;
+                if let Some(name) = &meta.custom_name {
+                    project.name = name.clone();
+                }
+            }
+        }
+        // 归档项目从默认列表过滤。
+        projects.retain(|project| !project.archived);
+    }
+
+    // 先按置顶分组，再按最后活跃时间倒序排列。
+    projects.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then_with(|| b.last_active.cmp(&a.last_active))
+    });
 
     Ok(projects)
 }

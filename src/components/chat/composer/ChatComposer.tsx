@@ -14,7 +14,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {useChatStore} from '../../../stores/useChatStore';
 import {useProviderStore} from '../../../stores/useProviderStore';
 import type {ChatAttachment} from '../../../types/chat';
-import {ContextBar} from './ContextBar';
+import {ContextBar, type ChatWorkspaceProjectOption} from './ContextBar';
 import {ButtonArea} from './ButtonArea';
 import {CompletionMenu} from './CompletionMenu';
 import {PromptEnhancerDialog} from './PromptEnhancerDialog';
@@ -44,7 +44,10 @@ interface ChatComposerProps {
     onSdkMissing: () => void;
     /** 工作目录（@ 文件补全用） */
     cwd?: string;
+    workspaceProjects?: ChatWorkspaceProjectOption[];
+    onWorkspaceChange?: (cwd: string) => void;
     workspaceStatus?: ChatWorkspaceStatus;
+    onWorkspaceStatusChange?: (status: ChatWorkspaceStatus) => void;
 }
 
 type FileWithPath = File & {
@@ -176,7 +179,15 @@ export function shouldBlockPromptEnhance({
  * 发送控制台：顶部上下文栏 + 富输入框（@/#/!// 补全）+ 底部控制工具栏。
  * 整合自 jcc-gui ChatInputBox 的交互能力，用 ccg-switch 现有栈重写。
  */
-export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }: ChatComposerProps) {
+export function ChatComposer({
+    sdkMissing,
+    onSdkMissing,
+    cwd,
+    workspaceProjects,
+    onWorkspaceChange,
+    workspaceStatus,
+    onWorkspaceStatusChange,
+}: ChatComposerProps) {
     const { t } = useTranslation();
     const {
         provider,
@@ -711,7 +722,11 @@ export function ChatComposer({ sdkMissing, onSdkMissing, cwd, workspaceStatus }:
                     percentage={percentage}
                     usedTokens={contextTokens}
                     maxTokens={maxTokens}
+                    cwd={cwd}
+                    workspaceProjects={workspaceProjects}
+                    onWorkspaceChange={onWorkspaceChange}
                     workspaceStatus={workspaceStatus}
+                    onWorkspaceStatusChange={onWorkspaceStatusChange}
                     onRemoveAttachment={(index) => {
                         setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
                     }}

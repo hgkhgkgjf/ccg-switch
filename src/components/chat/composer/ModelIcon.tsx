@@ -14,12 +14,25 @@ interface ModelIconProps {
 }
 
 interface ProviderBrandIconProps {
-    provider: ChatProviderId;
+    provider: ChatProviderId | 'gemini';
     size?: number;
     colored?: boolean;
 }
 
 export function ProviderBrandIcon({provider, size = 16, colored = false}: ProviderBrandIconProps) {
+    if (provider === 'gemini') {
+        return (
+            <span
+                aria-label="Gemini provider"
+                className={`inline-flex shrink-0 items-center justify-center ${colored ? 'text-[#4285F4]' : 'text-base-content/80'}`}
+                data-chat-provider-icon={provider}
+                title="Gemini"
+            >
+                <BrandGlyphIcon glyph="gemini-google" size={size} colored={colored} providerIcon />
+            </span>
+        );
+    }
+
     const isClaude = provider === 'claude';
     const label = isClaude ? 'Claude Code' : 'Codex';
     const glyph: BrandGlyph = isClaude ? 'claude-lobehub' : 'codex-openai';

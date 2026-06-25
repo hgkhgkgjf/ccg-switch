@@ -486,6 +486,61 @@ describe('useChatStore session transitions', () => {
         expect(useChatStore.getState().openTabs[0].activeSession).not.toBeNull();
     });
 
+    it('switches the empty draft workspace without creating a fake tab', () => {
+        useChatStore.setState({
+            messages: [],
+            draft: '',
+            currentCwd: null,
+            activeSession: null,
+            sessionId: null,
+            openTabs: [],
+            activeTabKey: null,
+        });
+
+        useChatStore.getState().setCurrentCwd(' C:/workspace/new-project ');
+
+        expect(useChatStore.getState()).toMatchObject({
+            currentCwd: 'C:/workspace/new-project',
+            activeSession: null,
+            sessionId: null,
+            messages: [],
+        });
+        expect(useChatStore.getState().openTabs).toHaveLength(0);
+        expect(useChatStore.getState().activeTabKey).toBeNull();
+    });
+
+    it('opens a fresh conversation when switching workspace from a loaded session', () => {
+        const loadedSession = {
+            providerId: 'claude' as const,
+            sessionId: 'loaded-session',
+            title: 'Loaded session',
+            summary: null,
+            projectDir: 'C:/workspace/old-project',
+            createdAt: 1,
+            lastActiveAt: 2,
+            sourcePath: 'C:/sessions/loaded-session.jsonl',
+            resumeCommand: null,
+        };
+        useChatStore.setState({
+            messages: [{id: 'm1', role: 'user', content: 'old message', createdAt: 1}],
+            draft: '',
+            currentCwd: 'C:/workspace/old-project',
+            activeSession: loadedSession,
+            sessionId: loadedSession.sessionId,
+            openTabs: [],
+            activeTabKey: null,
+        });
+
+        useChatStore.getState().setCurrentCwd('C:/workspace/new-project');
+
+        expect(useChatStore.getState()).toMatchObject({
+            currentCwd: 'C:/workspace/new-project',
+            activeSession: null,
+            sessionId: null,
+            messages: [],
+        });
+    });
+
     it('keeps a non-empty startup draft tab when opening a history session', async () => {
         const history: UnifiedSessionMessage[] = [
             {

@@ -133,6 +133,9 @@ fn scan_sessions_in_dir(dir: &Path, project_path: &str) -> Vec<SessionMeta> {
             last_active_at,
             source_path,
             resume_command: Some(format!("claude --resume {}", session_id)),
+            pinned: false,
+            archived: false,
+            unread: false,
         });
     }
 

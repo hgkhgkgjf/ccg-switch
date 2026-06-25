@@ -169,6 +169,17 @@ See `src/components/providers/ProviderCard.tsx` and
   close other tabs or all tabs, but bulk close actions only close the UI
   snapshots; they must not abort background requests until targeted backend
   abort exists.
+  The composer context bar owns the active workspace and Git branch affordances
+  directly above the rich input. It must render a workspace switcher even when
+  `currentCwd` is null, using readable fallback text such as `No folder` and
+  `Open folder...`, so first-run users with no history can still choose a
+  workspace. Selecting a dashboard project or typed folder path updates
+  `useChatStore.currentCwd`; it must not create a fake history session by
+  itself. Git branch controls should be shown only for a Git workspace status,
+  list branches on demand, and run create-and-checkout through the typed
+  workspace status service. Keep the chip labels compact with full paths in
+  `title` / `aria-label`, and route all visible text through i18n keys with
+  readable fallback behavior.
   SDK dependency recovery UI follows this same rule. The SDK modal title,
   close action, panel heading, hint, refresh action, installed/not-installed
   state, install/uninstall action, and installing log placeholder must use a
@@ -1506,6 +1517,15 @@ See `src/components/providers/ProviderCard.tsx` and
   directly.
 - Tauri window dragging: top regions use `data-tauri-drag-region`; modals add a
   fixed drag strip so the window stays movable behind the overlay.
+- **Dropdowns inside an `overflow-hidden` ancestor must portal out.** A menu
+  positioned with `absolute` will be clipped by any ancestor that uses
+  `overflow-hidden` (e.g. the composer `ContextBar` truncation row), so clicking
+  the trigger toggles state but shows nothing. Render such menus through
+  `createPortal(..., document.body)` with `position: fixed`, anchor them off the
+  trigger's `getBoundingClientRect()`, and close them on outside `mousedown`
+  (checking both the trigger ref and the portaled menu ref, since the menu is no
+  longer a DOM descendant of the trigger) plus ESC. Component tests must query
+  the portaled menu via `document.querySelector`, not the render container.
 
 ### Event-Driven Modal Pattern (Backend → Frontend)
 

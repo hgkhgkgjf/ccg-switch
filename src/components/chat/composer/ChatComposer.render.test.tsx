@@ -37,6 +37,8 @@ vi.mock('../../../stores/useChatStore', () => ({
         setDraft: vi.fn(),
         send: vi.fn(),
         abort: vi.fn(),
+        activeSession: null,
+        setCurrentCwd: vi.fn(),
     }),
 }));
 
@@ -197,6 +199,44 @@ describe('ChatComposer render integration', () => {
         expect(html).toContain('title="Git: ai-report · C:/repo"');
         expect(html).not.toContain('max-w-2xl');
         expect(html).not.toContain('mx-auto w-full max-w-2xl');
+    });
+
+    it('renders workspace folder and git branch actions in the top composer bar', () => {
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd="C:/workspace/ccg-switch"
+                workspaceStatus={{
+                    gitBranch: 'cc-gui',
+                    gitRoot: 'C:/workspace/ccg-switch',
+                    isGitRepository: true,
+                }}
+            />,
+        );
+
+        expect(html).toContain('chat-composer-workspace-switcher');
+        expect(html).toContain('ccg-switch');
+        expect(html).toContain('title="Workspace: C:/workspace/ccg-switch"');
+        expect(html).toContain('aria-label="Switch workspace folder: C:/workspace/ccg-switch"');
+        expect(html).toContain('chat-composer-git-branch-button');
+        expect(html).toContain('aria-haspopup="menu"');
+        expect(html).toContain('cc-gui');
+    });
+
+    it('keeps a folder picker affordance visible when no workspace is selected', () => {
+        const html = renderToStaticMarkup(
+            <ChatComposer
+                sdkMissing={false}
+                onSdkMissing={() => undefined}
+                cwd={undefined}
+            />,
+        );
+
+        expect(html).toContain('chat-composer-workspace-switcher');
+        expect(html).toContain('No folder');
+        expect(html).toContain('Open folder...');
+        expect(html).toContain('aria-label="Switch workspace folder: No folder"');
     });
 
     it('renders completion menu loading and items with readable accessibility chrome', () => {

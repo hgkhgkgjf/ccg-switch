@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chat sidebar, composer context bar, tabs, i18n fallback, menu and visual density constraints."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Zustand patterns and Chat currentCwd/session/tab ownership rules."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend build gate, i18n, a11y, and forbidden patterns."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TypeScript invoke typing and shared model alignment."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "New Tauri command shape, naming, and error conventions."}
+{"file": ".trellis/spec/backend/cross-layer-protocol.md", "reason": "Frontend/Rust payload contracts for workspace and Git commands."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature crosses UI, store, Rust command, filesystem, and Git boundaries."}

@@ -31,9 +31,16 @@ import {
 const tauriMocks = vi.hoisted(() => ({
     invoke: vi.fn(),
 }));
+const toastMocks = vi.hoisted(() => ({
+    showToast: vi.fn(),
+}));
 
 vi.mock('@tauri-apps/api/core', () => ({
     invoke: tauriMocks.invoke,
+}));
+
+vi.mock('../common/ToastContainer', () => ({
+    showToast: toastMocks.showToast,
 }));
 
 const t = (key: string): string => {
@@ -84,9 +91,15 @@ afterEach(async () => {
     root = null;
     container = null;
     tauriMocks.invoke.mockReset();
+    toastMocks.showToast.mockReset();
 });
 
-async function renderSidebarWithData() {
+interface RenderSidebarOptions {
+    sessionsByProject?: Record<string, SessionMeta[]>;
+    openExplorerError?: unknown;
+}
+
+async function renderSidebarWithData(options: RenderSidebarOptions = {}) {
     const now = Date.now();
     const projects = [
         {
@@ -102,7 +115,7 @@ async function renderSidebarWithData() {
             last_active: null,
         },
     ];
-    const sessionsByProject: Record<string, SessionMeta[]> = {
+    const defaultSessionsByProject: Record<string, SessionMeta[]> = {
         'C:/workspace/ccg-switch': [
             createSession({
                 providerId: 'claude',
@@ -132,10 +145,31 @@ async function renderSidebarWithData() {
             }),
         ],
     };
-    tauriMocks.invoke.mockImplementation((command: string, args?: {projectPath?: string}) => {
+    const sessionsByProject = options.sessionsByProject ?? defaultSessionsByProject;
+    tauriMocks.invoke.mockImplementation((command: string, args?: {
+        projectPath?: string;
+        path?: string;
+        sessionId?: string;
+        title?: string;
+    }) => {
         if (command === 'get_dashboard_projects') return Promise.resolve(projects);
         if (command === 'list_sessions' && args?.projectPath) {
             return Promise.resolve(sessionsByProject[args.projectPath] ?? []);
+        }
+        if (command === 'chat_session_rename' && args?.sessionId && args?.title) {
+            Object.keys(sessionsByProject).forEach((projectPath) => {
+                sessionsByProject[projectPath] = sessionsByProject[projectPath].map((session) => (
+                    session.sessionId === args.sessionId
+                        ? {...session, title: args.title ?? null}
+                        : session
+                ));
+            });
+            return Promise.resolve({title: args.title});
+        }
+        if (command === 'chat_open_path_in_explorer') {
+            return options.openExplorerError
+                ? Promise.reject(options.openExplorerError)
+                : Promise.resolve(undefined);
         }
         throw new Error(`Unexpected command: ${command}`);
     });
@@ -161,7 +195,7 @@ async function renderSidebarWithData() {
         await Promise.resolve();
     });
 
-    return {container};
+    return {container, sessionsByProject};
 }
 
 describe('chatSessionSidebarUtils', () => {
@@ -258,6 +292,123 @@ describe('chatSessionSidebarUtils', () => {
         expect(rendered.textContent).toContain('Bridge follow up');
     });
 
+    it('opens a project context menu with safe actions and disabled placeholders', async () => {
+        const {container: rendered} = await renderSidebarWithData();
+        const projectRow = rendered.querySelector('[data-chat-project-path="C:/workspace/ccg-switch"]');
+        expect(projectRow).toBeInstanceOf(HTMLButtonElement);
+
+        await act(async () => {
+            projectRow?.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 80,
+                clientY: 120,
+            }));
+        });
+
+        const menu = rendered.querySelector('[data-chat-context-menu="project"]');
+        expect(menu).not.toBeNull();
+        expect(menu?.textContent).toContain('Pin project');
+        expect(menu?.textContent).toContain('Open in Explorer');
+        expect(menu?.textContent).toContain('Create permanent worktree');
+        expect(menu?.textContent).toContain('Rename project');
+        expect(menu?.textContent).toContain('Mark all as read');
+        expect(menu?.textContent).toContain('Archive conversations');
+        expect(menu?.textContent).toContain('Remove');
+        expect(menu?.querySelector('[data-chat-menu-action="project-open-explorer"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="project-pin"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="project-rename"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="project-archive-conversations"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="project-mark-all-read"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="project-remove"]')?.getAttribute('aria-disabled')).toBe('false');
+        // 工作树创建属于第二阶段高风险操作，仍保持禁用占位。
+        expect(menu?.querySelector('[data-chat-menu-action="project-create-worktree"]')?.getAttribute('aria-disabled')).toBe('true');
+    });
+
+    it('opens a session context menu with rename/open actions and disabled fork placeholders', async () => {
+        const {container: rendered} = await renderSidebarWithData();
+        const sessionRow = rendered.querySelector('[data-chat-session-key="claude::C:/sessions/recent-claude.jsonl"]');
+        expect(sessionRow).toBeInstanceOf(HTMLButtonElement);
+
+        await act(async () => {
+            sessionRow?.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 120,
+                clientY: 260,
+            }));
+        });
+
+        const menu = rendered.querySelector('[data-chat-context-menu="session"]');
+        expect(menu).not.toBeNull();
+        expect(menu?.textContent).toContain('Pin session');
+        expect(menu?.textContent).toContain('Rename session');
+        expect(menu?.textContent).toContain('Archive session');
+        expect(menu?.textContent).toContain('Mark as unread');
+        expect(menu?.textContent).toContain('Open in Explorer');
+        expect(menu?.textContent).toContain('Fork locally');
+        expect(menu?.textContent).toContain('Fork to new worktree');
+        expect(menu?.querySelector('[data-chat-menu-action="session-rename"]')?.getAttribute('aria-disabled')).toBe('false');
+        expect(menu?.querySelector('[data-chat-menu-action="session-fork-worktree"]')?.getAttribute('aria-disabled')).toBe('true');
+    });
+
+    it('renames a session through the persistent title command and refreshes the list', async () => {
+        vi.spyOn(window, 'prompt').mockReturnValue(' Renamed Trellis session ');
+        const {container: rendered} = await renderSidebarWithData();
+        const sessionRow = rendered.querySelector('[data-chat-session-key="claude::C:/sessions/recent-claude.jsonl"]');
+
+        await act(async () => {
+            sessionRow?.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 120,
+                clientY: 260,
+            }));
+        });
+
+        await act(async () => {
+            rendered.querySelector<HTMLButtonElement>('[data-chat-menu-action="session-rename"]')
+                ?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(tauriMocks.invoke).toHaveBeenCalledWith('chat_session_rename', {
+            providerId: 'claude',
+            sessionId: 'recent-claude',
+            title: 'Renamed Trellis session',
+        });
+        expect(rendered.textContent).toContain('Renamed Trellis session');
+    });
+
+    it('shows a toast when opening a project in Explorer fails', async () => {
+        const {container: rendered} = await renderSidebarWithData({
+            openExplorerError: new Error('path missing'),
+        });
+        const projectRow = rendered.querySelector('[data-chat-project-path="C:/workspace/ccg-switch"]');
+
+        await act(async () => {
+            projectRow?.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 80,
+                clientY: 120,
+            }));
+        });
+
+        await act(async () => {
+            rendered.querySelector<HTMLButtonElement>('[data-chat-menu-action="project-open-explorer"]')
+                ?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+            await Promise.resolve();
+        });
+
+        expect(toastMocks.showToast).toHaveBeenCalledWith(
+            expect.stringContaining('path missing'),
+            'error',
+            5000,
+        );
+    });
+
     it('renders Claude and Codex session providers with the shared provider icons', () => {
         const claudeHtml = renderToStaticMarkup(
             createElement(SessionProviderBadge, {
@@ -288,6 +439,20 @@ describe('chatSessionSidebarUtils', () => {
         expect(codexHtml).toContain('data-chat-provider-icon-glyph="codex-openai"');
         expect(codexHtml).not.toContain('>Codex<');
         expect(customHtml).toContain('>Internal Agent<');
+    });
+
+    it('renders Gemini sessions with the gemini provider glyph', () => {
+        const geminiHtml = renderToStaticMarkup(
+            createElement(SessionProviderBadge, {
+                providerId: 'gemini',
+                providerLabel: 'Gemini',
+                selected: false,
+            }),
+        );
+
+        expect(geminiHtml).toContain('data-chat-provider-icon="gemini"');
+        expect(geminiHtml).toContain('data-chat-provider-icon-glyph="gemini-google"');
+        expect(geminiHtml).not.toContain('>Gemini<');
     });
 
     it('prefers title then summary then shortened session id', () => {
@@ -602,6 +767,45 @@ describe('chatSessionSidebarUtils', () => {
 
         expect(groups).toHaveLength(1);
         expect(groups[0].sessions.map((session) => session.sessionId)).toEqual(['within-seven-days']);
+    });
+
+    it('sorts pinned recent chats first and drops archived ones', () => {
+        const now = Date.now();
+        const groups = buildRecentChatProjectGroups({
+            projects: [
+                {
+                    name: 'ccg-switch',
+                    path: 'C:/workspace/ccg-switch',
+                    session_count: 3,
+                    last_active: null,
+                },
+            ],
+            sessionsByProject: new Map([
+                ['c:/workspace/ccg-switch', [
+                    createSession({
+                        sessionId: 'newest-unpinned',
+                        projectDir: 'C:/workspace/ccg-switch',
+                        lastActiveAt: now,
+                    }),
+                    createSession({
+                        sessionId: 'older-pinned',
+                        projectDir: 'C:/workspace/ccg-switch',
+                        lastActiveAt: now - 5_000,
+                        pinned: true,
+                    }),
+                    createSession({
+                        sessionId: 'archived-hidden',
+                        projectDir: 'C:/workspace/ccg-switch',
+                        lastActiveAt: now - 1_000,
+                        archived: true,
+                    }),
+                ]],
+            ]),
+        });
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].sessions.map((session) => session.sessionId))
+            .toEqual(['older-pinned', 'newest-unpinned']);
     });
 
     it('does not sync current cwd over a manually selected different project', () => {

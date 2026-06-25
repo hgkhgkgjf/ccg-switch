@@ -182,9 +182,15 @@ export function buildRecentChatProjectGroups({
             const sessions = (sessionsByProject.get(projectKey) ?? [])
                 .filter((session) => isSupportedChatProvider(session.providerId))
                 .filter((session) => isSessionInProject(session, project.path))
+                .filter((session) => !session.archived)
                 .filter((session) => safeRecentSince === null || session.lastActiveAt >= safeRecentSince)
                 .slice()
-                .sort((left, right) => right.lastActiveAt - left.lastActiveAt)
+                .sort((left, right) => {
+                    if (Boolean(left.pinned) !== Boolean(right.pinned)) {
+                        return left.pinned ? -1 : 1;
+                    }
+                    return right.lastActiveAt - left.lastActiveAt;
+                })
                 .slice(0, safeLimit);
 
             return {

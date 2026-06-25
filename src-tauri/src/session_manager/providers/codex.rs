@@ -79,6 +79,9 @@ impl CachedCodexSessionFile {
             last_active_at: self.last_active_at,
             source_path: self.source_path.clone(),
             resume_command: Some(format!("codex resume {}", self.session_id)),
+            pinned: false,
+            archived: false,
+            unread: false,
         }
     }
 }

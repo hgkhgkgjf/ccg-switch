@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {type MouseEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
 import {
@@ -8,18 +8,30 @@ import {
     FolderOpen,
     History,
     MessageSquare,
+    Pin,
     Plus,
     RefreshCw,
     Search,
 } from 'lucide-react';
+import {showToast} from '../common/ToastContainer';
 import {getSessionSelectionKey, type SessionMeta} from '../../types/session';
+import {openChatPathInExplorer, renameChatSessionTitle} from '../../utils/chatWorkspaceStatus';
+import {
+    markProjectAllRead,
+    removeProject,
+    renameProject,
+    setProjectArchived,
+    setProjectPinned,
+    setSessionArchived,
+    setSessionPinned,
+    setSessionUnread,
+} from '../../services/workspaceMetadataService';
 import {
     buildRecentChatProjectGroups,
     formatShortDate,
     getCachedProjectSessions,
     getSessionProviderLabel,
     getVisibleProjectSessions,
-    isSupportedChatProvider,
     normalizeProjectPathForCache,
     rememberProjectSessions,
     sessionTitle,
@@ -35,6 +47,8 @@ interface ProjectInfo {
     path: string;
     session_count: number;
     last_active: string | null;
+    pinned?: boolean;
+    archived?: boolean;
 }
 
 interface ChatSessionSidebarProps {
@@ -52,6 +66,10 @@ interface SessionProviderBadgeProps {
 }
 
 type SessionPanelMode = 'project' | 'recent';
+type ContextMenuState =
+    | {type: 'project'; x: number; y: number; project: ProjectInfo}
+    | {type: 'session'; x: number; y: number; session: SessionMeta}
+    | null;
 const RECENT_CHAT_WINDOW_DAYS = 7;
 const RECENT_CHAT_WINDOW_MS = RECENT_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
@@ -61,18 +79,20 @@ export function SessionProviderBadge({
     selected,
 }: SessionProviderBadgeProps) {
     const normalizedProviderId = providerId.trim().toLowerCase();
-    const supportedProviderId = normalizedProviderId === 'claude' || normalizedProviderId === 'codex'
+    const iconProviderId = normalizedProviderId === 'claude'
+        || normalizedProviderId === 'codex'
+        || normalizedProviderId === 'gemini'
         ? normalizedProviderId
         : null;
 
-    if (supportedProviderId && isSupportedChatProvider(supportedProviderId)) {
+    if (iconProviderId) {
         return (
             <span
                 className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded ${selected ? 'bg-primary/10' : 'bg-base-200/80'}`}
                 title={providerLabel}
                 aria-label={providerLabel}
             >
-                <ProviderBrandIcon provider={supportedProviderId} size={14} colored />
+                <ProviderBrandIcon provider={iconProviderId} size={14} colored />
             </span>
         );
     }
@@ -102,6 +122,7 @@ export default function ChatSessionSidebar({
     const [loadingSessions, setLoadingSessions] = useState(false);
     const [panelMode, setPanelMode] = useState<SessionPanelMode>('project');
     const [collapsedRecentProjectKeys, setCollapsedRecentProjectKeys] = useState<Set<string>>(new Set());
+    const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
     const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
     const sessionRequestSeqRef = useRef(0);
     const sessionInFlightKeyRef = useRef<string | null>(null);
@@ -189,6 +210,18 @@ export default function ChatSessionSidebar({
     useEffect(() => {
         void loadProjects();
     }, [loadProjects]);
+
+    useEffect(() => {
+        if (!contextMenu) return undefined;
+
+        const closeMenu = () => setContextMenu(null);
+        window.addEventListener('click', closeMenu);
+        window.addEventListener('keydown', closeMenu);
+        return () => {
+            window.removeEventListener('click', closeMenu);
+            window.removeEventListener('keydown', closeMenu);
+        };
+    }, [contextMenu]);
 
     useEffect(() => {
         if (!currentCwd) return;
@@ -299,6 +332,49 @@ export default function ChatSessionSidebar({
         `${count} session${count === 1 ? '' : 's'}`,
         {count},
     );
+    const projectPinLabel = translateWithFallback('chat.sessionPanel.context.projectPin', 'Pin project');
+    const openInExplorerLabel = translateWithFallback('chat.sessionPanel.context.openInExplorer', 'Open in Explorer');
+    const projectCreateWorktreeLabel = translateWithFallback(
+        'chat.sessionPanel.context.projectCreateWorktree',
+        'Create permanent worktree',
+    );
+    const projectRenameLabel = translateWithFallback('chat.sessionPanel.context.projectRename', 'Rename project');
+    const projectMarkAllReadLabel = translateWithFallback('chat.sessionPanel.context.projectMarkAllRead', 'Mark all as read');
+    const projectArchiveConversationsLabel = translateWithFallback(
+        'chat.sessionPanel.context.projectArchiveConversations',
+        'Archive conversations',
+    );
+    const projectRemoveLabel = translateWithFallback('chat.sessionPanel.context.projectRemove', 'Remove');
+    const sessionPinLabel = translateWithFallback('chat.sessionPanel.context.sessionPin', 'Pin session');
+    const sessionRenameLabel = translateWithFallback('chat.sessionPanel.context.sessionRename', 'Rename session');
+    const sessionArchiveLabel = translateWithFallback('chat.sessionPanel.context.sessionArchive', 'Archive session');
+    const sessionMarkUnreadLabel = translateWithFallback('chat.sessionPanel.context.sessionMarkUnread', 'Mark as unread');
+    const sessionForkLocalLabel = translateWithFallback('chat.sessionPanel.context.sessionForkLocal', 'Fork locally');
+    const sessionForkWorktreeLabel = translateWithFallback(
+        'chat.sessionPanel.context.sessionForkWorktree',
+        'Fork to new worktree',
+    );
+    const renamePromptLabel = translateWithFallback('chat.sessionPanel.context.renamePrompt', 'Rename session');
+    const projectRenamePromptLabel = translateWithFallback('chat.sessionPanel.context.projectRenamePrompt', 'Rename project');
+    const projectUnpinLabel = translateWithFallback('chat.sessionPanel.context.projectUnpin', 'Unpin project');
+    const projectUnarchiveLabel = translateWithFallback('chat.sessionPanel.context.projectUnarchive', 'Unarchive');
+    const projectActionFailedLabel = translateWithFallback('chat.sessionPanel.context.projectActionFailed', 'Project action failed');
+    const projectRemoveConfirmLabel = translateWithFallback(
+        'chat.sessionPanel.context.projectRemoveConfirm',
+        'Remove this project from the list? Session files are not deleted.',
+    );
+    const sessionUnpinLabel = translateWithFallback('chat.sessionPanel.context.sessionUnpin', 'Unpin session');
+    const sessionUnarchiveLabel = translateWithFallback('chat.sessionPanel.context.sessionUnarchive', 'Unarchive session');
+    const sessionMarkReadLabel = translateWithFallback('chat.sessionPanel.context.sessionMarkRead', 'Mark as read');
+    const sessionActionFailedLabel = translateWithFallback('chat.sessionPanel.context.sessionActionFailed', 'Session action failed');
+    const openExplorerFailedLabel = translateWithFallback(
+        'chat.sessionPanel.context.openExplorerFailed',
+        'Open in Explorer failed',
+    );
+    const renameFailedLabel = translateWithFallback(
+        'chat.sessionPanel.context.renameFailed',
+        'Rename session failed',
+    );
 
     const handleProjectSelect = (project: ProjectInfo) => {
         const nextProjectKey = normalizeProjectPathForCache(project.path);
@@ -343,6 +419,120 @@ export default function ChatSessionSidebar({
         });
     };
 
+    const handleProjectContextMenu = (
+        event: MouseEvent<HTMLButtonElement>,
+        project: ProjectInfo,
+    ) => {
+        event.preventDefault();
+        setContextMenu({
+            type: 'project',
+            x: event.clientX,
+            y: event.clientY,
+            project,
+        });
+    };
+
+    const handleSessionContextMenu = (
+        event: MouseEvent<HTMLButtonElement>,
+        session: SessionMeta,
+    ) => {
+        event.preventDefault();
+        setContextMenu({
+            type: 'session',
+            x: event.clientX,
+            y: event.clientY,
+            session,
+        });
+    };
+
+    const handleOpenExplorer = (path: string | null | undefined) => {
+        const trimmedPath = path?.trim();
+        if (!trimmedPath) return;
+        void openChatPathInExplorer(trimmedPath)
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] open explorer failed:', error);
+                showToast(`${openExplorerFailedLabel}: ${String(error)}`, 'error', 5000);
+            });
+        setContextMenu(null);
+    };
+
+    const handleRenameSession = (session: SessionMeta) => {
+        if (typeof window === 'undefined') return;
+        const title = window.prompt(renamePromptLabel, sessionTitle(session))?.trim();
+        if (!title) {
+            setContextMenu(null);
+            return;
+        }
+
+        void renameChatSessionTitle(session.providerId, session.sessionId, title)
+            .then(() => {
+                const projectPath = session.projectDir ?? selectedProjectPath;
+                if (!projectPath) return;
+                sessionCacheRef.current.delete(normalizeProjectPathForCache(projectPath));
+                selectedProjectKeyRef.current = normalizeProjectPathForCache(projectPath);
+                void loadSessions(projectPath, {force: true});
+            })
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] rename session failed:', error);
+                showToast(`${renameFailedLabel}: ${String(error)}`, 'error', 5000);
+            });
+        setContextMenu(null);
+    };
+
+    const reloadSessionsForPath = (projectPath: string | null | undefined) => {
+        const trimmed = projectPath?.trim();
+        if (!trimmed) return;
+        sessionCacheRef.current.delete(normalizeProjectPathForCache(trimmed));
+        selectedProjectKeyRef.current = normalizeProjectPathForCache(trimmed);
+        void loadSessions(trimmed, {force: true});
+    };
+
+    const runProjectAction = (
+        project: ProjectInfo,
+        action: () => Promise<unknown>,
+        failureLabel: string,
+        options: {reloadSessions?: boolean} = {},
+    ) => {
+        setContextMenu(null);
+        void action()
+            .then(() => {
+                void loadProjects();
+                if (options.reloadSessions) {
+                    reloadSessionsForPath(project.path);
+                }
+            })
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] project action failed:', error);
+                showToast(`${failureLabel}: ${String(error)}`, 'error', 5000);
+            });
+    };
+
+    const runSessionAction = (
+        session: SessionMeta,
+        action: () => Promise<unknown>,
+        failureLabel: string,
+    ) => {
+        setContextMenu(null);
+        void action()
+            .then(() => {
+                reloadSessionsForPath(session.projectDir ?? selectedProjectPath);
+            })
+            .catch((error) => {
+                console.error('[ChatSessionSidebar] session action failed:', error);
+                showToast(`${failureLabel}: ${String(error)}`, 'error', 5000);
+            });
+    };
+
+    const handleRenameProject = (project: ProjectInfo) => {
+        if (typeof window === 'undefined') return;
+        const name = window.prompt(projectRenamePromptLabel, project.name)?.trim();
+        if (!name) {
+            setContextMenu(null);
+            return;
+        }
+        runProjectAction(project, () => renameProject(project.path, name), projectActionFailedLabel);
+    };
+
     const renderSessionRow = (session: SessionMeta, compact = false) => {
         const sessionKey = getSessionSelectionKey(session);
         const isPending = pendingSessionKey === sessionKey;
@@ -354,6 +544,8 @@ export default function ChatSessionSidebar({
                 key={sessionKey}
                 type="button"
                 onClick={() => handleSessionSelect(session)}
+                onContextMenu={(event) => handleSessionContextMenu(event, session)}
+                data-chat-session-key={sessionKey}
                 className={`${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'} w-full rounded-md border text-left transition-colors ${
                     selected
                         ? 'border-primary/25 bg-primary/10 text-base-content shadow-[inset_0_0_0_1px_rgba(59,130,246,0.05)]'
@@ -367,9 +559,23 @@ export default function ChatSessionSidebar({
                     ) : (
                         <MessageSquare size={compact ? 13 : 14} className={selected ? 'text-primary' : 'text-base-content/40'}/>
                     )}
-                    <span className={`${compact ? 'text-[11px]' : 'text-xs'} min-w-0 flex-1 truncate font-medium`}>
+                    {session.unread && (
+                        <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+                            aria-label={sessionMarkUnreadLabel}
+                            title={sessionMarkUnreadLabel}
+                        />
+                    )}
+                    <span className={`${compact ? 'text-[11px]' : 'text-xs'} min-w-0 flex-1 truncate ${session.unread ? 'font-semibold' : 'font-medium'}`}>
                         {sessionTitle(session)}
                     </span>
+                    {session.pinned && (
+                        <Pin
+                            size={compact ? 10 : 11}
+                            className="shrink-0 text-primary/70"
+                            aria-label={sessionPinLabel}
+                        />
+                    )}
                     <SessionProviderBadge
                         providerId={session.providerId}
                         providerLabel={providerLabel}
@@ -397,6 +603,151 @@ export default function ChatSessionSidebar({
                     <span className="shrink-0">{formatShortDate(session.lastActiveAt)}</span>
                 </div>
             </button>
+        );
+    };
+
+    const renderMenuButton = (
+        action: string,
+        label: string,
+        disabled: boolean,
+        onClick?: () => void,
+    ) => (
+        <button
+            key={action}
+            type="button"
+            role="menuitem"
+            data-chat-menu-action={action}
+            aria-disabled={disabled}
+            className={`block w-full rounded px-2 py-1.5 text-left text-xs ${
+                disabled
+                    ? 'cursor-not-allowed text-base-content/35'
+                    : 'text-base-content/75 hover:bg-base-200 hover:text-base-content'
+            }`}
+            onClick={(event) => {
+                event.stopPropagation();
+                if (disabled) return;
+                onClick?.();
+            }}
+        >
+            {label}
+        </button>
+    );
+
+    const renderContextMenu = () => {
+        if (!contextMenu) return null;
+
+        const style = {
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+        };
+
+        if (contextMenu.type === 'project') {
+            const project = contextMenu.project;
+            return (
+                <div
+                    className="fixed z-50 w-56 rounded-md border border-base-300 bg-base-100 p-1 shadow-lg"
+                    style={style}
+                    role="menu"
+                    data-chat-context-menu="project"
+                    onClick={(event) => event.stopPropagation()}
+                >
+                    {renderMenuButton(
+                        'project-pin',
+                        project.pinned ? projectUnpinLabel : projectPinLabel,
+                        false,
+                        () => runProjectAction(
+                            project,
+                            () => setProjectPinned(project.path, !project.pinned),
+                            projectActionFailedLabel,
+                        ),
+                    )}
+                    {renderMenuButton('project-open-explorer', openInExplorerLabel, false, () => {
+                        handleOpenExplorer(project.path);
+                    })}
+                    {renderMenuButton('project-create-worktree', projectCreateWorktreeLabel, true)}
+                    {renderMenuButton('project-rename', projectRenameLabel, false, () => {
+                        handleRenameProject(project);
+                    })}
+                    {renderMenuButton('project-mark-all-read', projectMarkAllReadLabel, false, () => {
+                        runProjectAction(
+                            project,
+                            () => markProjectAllRead(project.path),
+                            projectActionFailedLabel,
+                            {reloadSessions: true},
+                        );
+                    })}
+                    {renderMenuButton(
+                        'project-archive-conversations',
+                        project.archived ? projectUnarchiveLabel : projectArchiveConversationsLabel,
+                        false,
+                        () => runProjectAction(
+                            project,
+                            () => setProjectArchived(project.path, !project.archived),
+                            projectActionFailedLabel,
+                        ),
+                    )}
+                    {renderMenuButton('project-remove', projectRemoveLabel, false, () => {
+                        if (typeof window !== 'undefined' && !window.confirm(projectRemoveConfirmLabel)) {
+                            setContextMenu(null);
+                            return;
+                        }
+                        runProjectAction(project, () => removeProject(project.path), projectActionFailedLabel);
+                    })}
+                </div>
+            );
+        }
+
+        const session = contextMenu.session;
+        const sessionExplorerPath = session.sourcePath?.trim()
+            || session.projectDir;
+
+        return (
+            <div
+                className="fixed z-50 w-56 rounded-md border border-base-300 bg-base-100 p-1 shadow-lg"
+                style={style}
+                role="menu"
+                data-chat-context-menu="session"
+                onClick={(event) => event.stopPropagation()}
+            >
+                {renderMenuButton(
+                    'session-pin',
+                    session.pinned ? sessionUnpinLabel : sessionPinLabel,
+                    false,
+                    () => runSessionAction(
+                        session,
+                        () => setSessionPinned(session.sessionId, !session.pinned),
+                        sessionActionFailedLabel,
+                    ),
+                )}
+                {renderMenuButton('session-rename', sessionRenameLabel, false, () => {
+                    handleRenameSession(session);
+                })}
+                {renderMenuButton(
+                    'session-archive',
+                    session.archived ? sessionUnarchiveLabel : sessionArchiveLabel,
+                    false,
+                    () => runSessionAction(
+                        session,
+                        () => setSessionArchived(session.sessionId, !session.archived),
+                        sessionActionFailedLabel,
+                    ),
+                )}
+                {renderMenuButton(
+                    'session-mark-unread',
+                    session.unread ? sessionMarkReadLabel : sessionMarkUnreadLabel,
+                    false,
+                    () => runSessionAction(
+                        session,
+                        () => setSessionUnread(session.sessionId, !session.unread),
+                        sessionActionFailedLabel,
+                    ),
+                )}
+                {renderMenuButton('session-open-explorer', openInExplorerLabel, false, () => {
+                    handleOpenExplorer(sessionExplorerPath);
+                })}
+                {renderMenuButton('session-fork-local', sessionForkLocalLabel, true)}
+                {renderMenuButton('session-fork-worktree', sessionForkWorktreeLabel, true)}
+            </div>
         );
     };
 
@@ -540,6 +891,8 @@ export default function ChatSessionSidebar({
                                             key={project.path}
                                             type="button"
                                             onClick={() => handleProjectSelect(project)}
+                                            onContextMenu={(event) => handleProjectContextMenu(event, project)}
+                                            data-chat-project-path={project.path}
                                             className={`w-full rounded-md border px-2.5 py-1.5 text-left transition-colors ${
                                                 selected
                                                     ? 'border-primary/25 bg-primary/10 text-base-content'
@@ -552,6 +905,9 @@ export default function ChatSessionSidebar({
                                                 <span className="min-w-0 flex-1 truncate text-xs font-medium">
                                                     {project.name}
                                                 </span>
+                                                {project.pinned && (
+                                                    <Pin size={11} className="shrink-0 text-primary/70" aria-label={projectPinLabel}/>
+                                                )}
                                                 <ChevronRight size={13} className={selected ? 'text-primary' : 'text-base-content/25'}/>
                                             </div>
                                             <div className="mt-0.5 flex items-center gap-1 pl-5 text-[11px] text-base-content/40">
@@ -637,6 +993,7 @@ export default function ChatSessionSidebar({
                     )}
                 </div>
             </div>
+            {renderContextMenu()}
         </aside>
     );
 }

@@ -352,6 +352,35 @@ not cache partial windows; they must also cover that
 `get_unified_session_messages()`, caches the complete mapped transcript, and
 keeps the normal visible `messages` array windowed.
 
+### Chat Workspace CWD Contract
+
+`useChatStore.currentCwd` is the single frontend source of truth for the active
+Chat workspace. It is used by send payloads, `@` file completion
+(`chat_list_workspace_files`), workspace status loading, and relative file-open
+helpers. Do not keep an independent composer/sidebar cwd state that can diverge
+from the store.
+
+`setCurrentCwd(cwd: string | null)` must trim input, convert blank strings to
+`null`, and update the active tab projection only when an active tab already
+exists. In the startup empty draft state (`messages = []`, `draft = ""`,
+`sessionId = null`, `activeSession = null`, `activeRequestId = null`,
+`activeTabKey = null`), changing only `currentCwd` must not create or save a
+fake "New chat" tab. The first real send after a workspace switch should still
+pass the new cwd through `chat_send`.
+
+`startNewSession(cwd)` may create a draft tab because the user explicitly asked
+for a new session. Plain workspace switching is different: it changes the
+workspace context for the current empty draft without implying historical
+session creation.
+
+Required tests:
+- Store test: empty startup draft `setCurrentCwd(" C:/workspace/app ")` updates
+  `currentCwd` and leaves `openTabs` empty.
+- Store or composer integration test: the next send after a workspace switch
+  invokes `chat_send` with the trimmed cwd.
+- Component test: the composer workspace switcher remains visible when
+  `currentCwd` is `null`, so a user with no history can still select a folder.
+
 ### Chat Model List Loading Contract
 
 `ChatComposer` owns the Chat model-list loading boundary. It should reuse the

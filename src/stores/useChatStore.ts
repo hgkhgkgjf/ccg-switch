@@ -382,6 +382,7 @@ interface ChatState {
     setLongContextEnabled: (enabled: boolean) => void;
     setReasoningEffort: (e: ReasoningEffort) => void;
     setDraft: (text: string) => void;
+    setCurrentCwd: (cwd: string | null) => void;
     send: (text: string, opts?: {
         cwd?: string;
         model?: string;
@@ -1476,6 +1477,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // ignore
         }
         set((state) => applyActiveTabProjection(state, {draft: text}));
+    },
+
+    setCurrentCwd: (cwd) => {
+        const normalizedCwd = cwd?.trim() || null;
+        const state = get();
+        const currentNormalized = state.currentCwd?.trim() || null;
+        if (currentNormalized === normalizedCwd) return;
+
+        // 当前 tab 已经绑定历史会话、或已有消息 / 进行中的请求时，切换工作目录
+        // 等同于开启该目录下的新会话上下文，而不是把旧会话内容留在新目录下。
+        const hasLoadedConversation = Boolean(state.activeSession)
+            || state.messages.length > 0
+            || Boolean(state.pendingSessionKey)
+            || Boolean(state.activeRequestId);
+
+        if (hasLoadedConversation) {
+            latestSessionLoadToken += 1;
+            set((current) => {
+                const newTab = createEmptyTabFromState(current, normalizedCwd);
+                return {
+                    openTabs: upsertTab(saveProjectionBeforeSwitch(current), newTab),
+                    activeTabKey: newTab.key,
+                    ...projectTabToState(newTab),
+                };
+            });
+            return;
+        }
+
+        set((current) => applyActiveTabProjection(current, {currentCwd: normalizedCwd}));
     },
 
     send: async (text, opts) => {

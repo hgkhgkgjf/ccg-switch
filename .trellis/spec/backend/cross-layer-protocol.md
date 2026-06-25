@@ -178,6 +178,134 @@ app.notification()
 
 ---
 
+## Scenario: Chat Workspace Git and Explorer Commands
+
+### 1. Scope / Trigger
+
+- Trigger: the Chat composer context bar needs workspace/Git operations that
+  cross from TypeScript UI into the local filesystem and Git CLI.
+- This is a frontend-to-backend command boundary with external side effects:
+  opening Explorer and creating/checking out a Git branch.
+
+### 2. Signatures
+
+```ts
+export interface ChatGitBranch {
+    name: string;
+    current: boolean;
+}
+
+await invoke<void>('chat_open_path_in_explorer', {path});
+await invoke<ChatGitBranch[]>('chat_git_list_branches', {cwd});
+await invoke<RawChatWorkspaceStatus>('chat_git_create_and_checkout_branch', {
+    cwd,
+    branchName,
+});
+```
+
+```rust
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatGitBranch {
+    pub name: String,
+    pub current: bool,
+}
+
+#[tauri::command]
+pub fn chat_open_path_in_explorer(app: AppHandle, path: String) -> Result<(), String>
+
+#[tauri::command]
+pub fn chat_git_list_branches(cwd: String) -> Result<Vec<ChatGitBranch>, String>
+
+#[tauri::command]
+pub fn chat_git_create_and_checkout_branch(
+    cwd: String,
+    branch_name: String,
+) -> Result<ChatWorkspaceStatus, String>
+```
+
+### 3. Contracts
+
+- `cwd` must be a trimmed, non-empty existing directory. Non-directories are
+  rejected before any Git command runs.
+- `path` must be a trimmed, non-empty existing file or directory and must not
+  contain control characters. The command opens it through
+  `tauri-plugin-opener`; it must not create missing paths.
+- Branch list responses use camelCase fields (`name`, `current`) because Rust
+  uses `#[serde(rename_all = "camelCase")]`.
+- Branch names must be trimmed and validated before invoking Git. Reject empty
+  names, leading `-`, control characters, backslashes, spaces, `..`, `//`,
+  `~`, `^`, `:`, `?`, `*`, `[`, trailing `/`, trailing `.`, `.lock`, and
+  `@{`.
+- Git must always be called through `std::process::Command` with argument
+  arrays, never through a shell string. The branch name is passed as its own
+  argument after `git -C <repoRoot> checkout -b`.
+- Creating a branch returns the fresh `ChatWorkspaceStatus` so the frontend can
+  update the composer branch chip without inferring Git state locally.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| `cwd` is blank | Return `Err("工作目录不能为空")`; do not run Git. |
+| `cwd` does not exist | Return an error that includes `工作目录不存在`. |
+| `cwd` is not a directory | Return an error that includes `工作目录不是目录`. |
+| `cwd` is not inside a Git repository | Return `Err("当前工作目录不是 Git 仓库")` for branch commands. |
+| `branchName` is blank or unsafe | Return a `创建 Git 分支失败: ...` validation error; do not run Git. |
+| Git exits non-zero during create/checkout | Return `Err("创建 Git 分支失败: {stderr}")` when stderr exists. |
+| `path` is blank/nonexistent/control-character-bearing | Return a path validation error; do not call opener. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `cwd = C:/repo/packages/app`, current repository root is `C:/repo`, and
+  the user creates `feature/workspace-switch`; Rust validates the name, runs
+  `git -C C:/repo checkout -b feature/workspace-switch`, then returns
+  `gitBranch = "feature/workspace-switch"`.
+- Base: user opens the branch menu in a repository; frontend calls
+  `chat_git_list_branches`, renders the returned list, and marks exactly the
+  branch where `current === true`.
+- Bad: frontend concatenates `git checkout -b ${branchName}` into a shell
+  command. A branch name beginning with `-` or containing shell metacharacters
+  can change command behavior or create platform-specific regressions.
+
+### 6. Tests Required
+
+- Frontend utility test: `listChatGitBranches(cwd)` trims cwd and filters blank
+  branch names from the response.
+- Frontend utility test: `createAndCheckoutChatGitBranch(cwd, branchName)`
+  trims both arguments and normalizes the returned workspace status.
+- Frontend component test: composer Git menu calls branch list on demand and
+  calls create-and-checkout before updating the displayed workspace status.
+- Rust unit test: branch-name validation accepts a normal slash branch and
+  rejects blank/control/leading-dash/double-dot/lock suffix cases.
+- Rust unit test: branch listing can read refs under `.git/refs/heads` and mark
+  the current branch based on `HEAD`, so tests do not require mutating the real
+  repository.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+Command::new("cmd")
+    .args(["/C", &format!("git -C {repo} checkout -b {branch_name}")])
+    .output()?;
+```
+
+#### Correct
+
+```rust
+let branch_name = normalize_chat_git_branch_name(&branch_name)?;
+Command::new("git")
+    .arg("-C")
+    .arg(&repo_root)
+    .args(["checkout", "-b"])
+    .arg(&branch_name)
+    .output()?;
+```
+
+---
+
 ## 2. Tauri 事件协议
 
 ### 事件命名规范
@@ -2001,6 +2129,125 @@ truth through the IPC text protocol (`[USAGE]`, `[MESSAGE]`, `chat://*` events)
 rather than maintaining a parallel frontend lookup table that has to guess.
 Frontend static tables remain valid only as last-resort fallbacks for
 backward-compatible payloads.
+
+---
+
+## Scenario: Chat Workspace / Session Metadata (Pin / Archive / Unread / Rename / Remove)
+
+### 1. Scope / Trigger
+
+- Trigger: project and session context menus in `ChatSessionSidebar` need to
+  persist pin / archive / unread / rename / remove state that is NOT part of any
+  provider's native history (Claude / Codex / Gemini).
+- These are app-owned derived states. They must never be written into provider
+  native logs. They live in `~/.codemoss/workspace-metadata.json`, sibling to
+  `session-titles.json`, and aligned with the same atomic temp-file + rename
+  write the ai-bridge `session-titles-service.cjs` uses.
+
+### 2. Storage Contract
+
+```jsonc
+// ~/.codemoss/workspace-metadata.json
+{
+  "projects": {
+    "<normalizedPath>": { "pinned": true, "archived": false, "removed": false,
+                           "customName": "My Proj", "updatedAt": 1750000000000 }
+  },
+  "sessions": {
+    "<sessionId>": { "pinned": true, "archived": false, "unread": true,
+                     "updatedAt": 1750000000000 }
+  }
+}
+```
+
+- Project key is the normalized path: trim, `\\` → `/`, strip trailing `/`,
+  lowercase. This MUST match the frontend `normalizeProjectPathForCache` so a
+  project keyed by Rust resolves to the same row the UI selected.
+- Records that become empty (all flags false, no `customName`) are deleted, not
+  left as `{}`, to keep the file from accumulating dead rows.
+- Custom project name: trim, reject empty / control chars / >80 chars.
+- Custom session title (rename) stays in `session-titles.json` (existing
+  `{ customTitle, updatedAt }` shape, ≤50 chars), NOT in this file.
+
+### 3. Signatures
+
+```rust
+// session_commands.rs — thin command layer, snake_case args via #[allow(non_snake_case)]
+chat_project_set_pinned(projectPath, pinned) -> Result<(), String>
+chat_project_set_archived(projectPath, archived) -> Result<(), String>
+chat_project_remove(projectPath) -> Result<(), String>
+chat_project_rename(projectPath, name) -> Result<RenameProjectResult, String> // { name }
+chat_project_mark_all_read(projectPath) -> Result<(), String>
+chat_session_set_pinned(sessionId, pinned) -> Result<(), String>
+chat_session_set_archived(sessionId, archived) -> Result<(), String>
+chat_session_set_unread(sessionId, unread) -> Result<(), String>
+```
+
+### 4. Application Rules (read path)
+
+- `dashboard_service::list_projects` applies project metadata AFTER scanning:
+  filter `removed`, filter `archived`, override `name` with `customName`, set
+  `pinned`; then sort `pinned` first, then by `last_active` desc.
+- `session_manager::scan_sessions_for_project` applies session metadata after
+  `apply_session_custom_titles`: set pinned/archived/unread, drop archived from
+  the default list, sort pinned first then `last_active_at` desc.
+- `ProjectInfo` MUST NOT use `rename_all` — the frontend reads `session_count`
+  and `last_active` in snake_case. New fields `pinned` / `archived` are single
+  words and serialize identically; add them as `#[serde(default)]`.
+- `SessionMeta` keeps `rename_all = "camelCase"`; new single-word fields
+  `pinned` / `archived` / `unread` map cleanly and are `#[serde(default)]`.
+- Frontend recent-chat grouping (`buildRecentChatProjectGroups`) MUST mirror the
+  backend: pinned-first ordering and archived filtering, so the recent view and
+  the project-session view agree.
+
+### 5. Validation Matrix
+
+| Case | Behavior |
+| --- | --- |
+| Empty project key / session id | Return an error; do not write. |
+| Custom name empty / >80 / control chars | Return validation error; do not write. |
+| Metadata file missing or unparsable | Treat as empty map; reads degrade to no overrides, never throw. |
+| Action against a project with no prior record | Create the record only if a flag is set true; toggling back to all-false deletes it. |
+
+### 6. Tests Required
+
+- Rust unit: project pin + rename roundtrip, empty record cleanup, session
+  unread/mark-read, project name validation — all against a temp metadata file,
+  never the real `~/.codemoss`.
+- Frontend: recent groups sort pinned first and drop archived; sidebar context
+  menu enables the wired actions and keeps only worktree/fork as disabled
+  placeholders (phase-2 split).
+
+---
+
+## Scenario: Tauri Plugin Permissions Live in the Inline Capability
+
+### 1. Scope / Trigger
+
+- Trigger: a new Tauri plugin command (e.g. `dialog.open` for the native folder
+  picker) is added and the frontend gets
+  `<command> not allowed. Permissions associated with this command: ...`.
+
+### 2. Contract
+
+- This app declares an INLINE capability `main-capability` in
+  `src-tauri/tauri.conf.json` under `app.security.capabilities`. When an inline
+  capability exists, the permission a command needs MUST be added there.
+  Adding it only to `capabilities/default.json` is not reliable.
+- Register the plugin in `lib.rs` (`.plugin(tauri_plugin_dialog::init())`), add
+  the Rust crate to `Cargo.toml`, the JS package to `package.json`, AND the
+  permission strings (`dialog:default`, `dialog:allow-open`) to the inline
+  `main-capability.permissions` array.
+- Rust changes require restarting `tauri dev`; the running binary will reject
+  the command until rebuilt.
+
+### 3. Frontend Fallback Rule
+
+- A picker helper that wraps a Tauri plugin (e.g. `pickWorkspaceFolder`) MUST
+  gate on `isTauri()`: in the Tauri runtime use ONLY the native plugin and let
+  failures surface, so a missing permission is visible instead of silently
+  degrading. Fall back to `window.prompt` ONLY when not running in Tauri
+  (browser/test), so the prompt never masks a real ACL/registration bug.
 
 ---
 

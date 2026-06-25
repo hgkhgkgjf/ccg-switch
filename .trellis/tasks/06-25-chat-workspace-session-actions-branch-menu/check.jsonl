@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify Chat UI remains consistent with sidebar/composer/tab constraints."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify currentCwd, activeSession, and tab projection do not regress."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify i18n, a11y, strict TypeScript, and build expectations."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Verify TS/Rust command payload type alignment."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Verify new commands remain thin and return Result<T, String>."}
+{"file": ".trellis/spec/backend/cross-layer-protocol.md", "reason": "Verify command signatures and response contracts are documented and matched."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify boundary, empty state, and state synchronization cases."}
