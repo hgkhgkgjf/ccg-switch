@@ -363,3 +363,37 @@ Archived the Chat completion dropdown UI and context-window task after validatin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Chat workspace switch, session/project actions, branch menu + gemini icon fix
+
+**Date**: 2026-06-25
+**Task**: Chat workspace switch, session/project actions, branch menu + gemini icon fix
+**Branch**: `cc-gui`
+
+### Summary
+
+实现 Chat 工作目录切换、项目/会话右键菜单（置顶/归档/移除/重命名等 8 个命令）、Git 分支菜单，修复 ContextBar 下拉被裁切、切目录不清空会话、gemini 图标空白（会话侧栏 + ProvidersPage 两处）。新增 ~/.codemoss/workspace-metadata.json 元数据层，dialog 权限接入原生文件选择器。前端 615 + 后端 132 测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `548adeb` | (see git log) |
+| `8f6ffc1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
