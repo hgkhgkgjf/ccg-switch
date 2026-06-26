@@ -14,7 +14,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {useChatStore} from '../../../stores/useChatStore';
 import {useProviderStore} from '../../../stores/useProviderStore';
 import type {ChatAttachment} from '../../../types/chat';
-import {ContextBar, type ChatWorkspaceProjectOption} from './ContextBar';
+import {type ChatWorkspaceProjectOption, ContextBar} from './ContextBar';
 import {ButtonArea} from './ButtonArea';
 import {CompletionMenu} from './CompletionMenu';
 import {PromptEnhancerDialog} from './PromptEnhancerDialog';
@@ -223,7 +223,7 @@ export function ChatComposer({
         getText,
         insertTag,
         clearEditor,
-        setEditorText,
+        setEditorText: setEditorContentText,
         focus: focusEditor,
     } = useContentEditable();
 
@@ -242,6 +242,7 @@ export function ChatComposer({
     const [modelConfigVersion, setModelConfigVersion] = useState(0);
     const [modelsRefreshing, setModelsRefreshing] = useState(false);
     const [modelsRefreshError, setModelsRefreshError] = useState<string | null>(null);
+    const [editorText, setEditorPlainText] = useState(draft);
 
     // Prompt 增强弹窗状态
     const [enhancerOpen, setEnhancerOpen] = useState(false);
@@ -335,6 +336,34 @@ export function ChatComposer({
 
     // Sync external draft changes into contenteditable (e.g. history navigation)
     const lastSyncedDraftRef = useRef(draft);
+    const syncTextFromEditor = useCallback((el: HTMLElement, persistDraft = true): string => {
+        const text = getPlainText(el);
+        setEditorPlainText((current) => current === text ? current : text);
+        if (persistDraft) {
+            lastSyncedDraftRef.current = text;
+            setDraft(text);
+        }
+        return text;
+    }, [setDraft]);
+
+    useEffect(() => {
+        const el = editorRef.current;
+        if (!el || typeof MutationObserver === 'undefined') return undefined;
+
+        const syncObservedText = () => {
+            syncTextFromEditor(el, !composingRef.current);
+        };
+        syncObservedText();
+
+        const observer = new MutationObserver(syncObservedText);
+        observer.observe(el, {
+            characterData: true,
+            childList: true,
+            subtree: true,
+        });
+        return () => observer.disconnect();
+    }, [composingRef, editorRef, syncTextFromEditor]);
+
     useEffect(() => {
         const el = editorRef.current;
         if (!el) return;
@@ -345,6 +374,7 @@ export function ChatComposer({
                 // External change — set text content
                 el.textContent = draft;
             }
+            setEditorPlainText(draft);
             lastSyncedDraftRef.current = draft;
         }
     }, [draft, editorRef]);
@@ -391,24 +421,26 @@ export function ChatComposer({
     const syncDraftFromEditor = useCallback(() => {
         const el = editorRef.current;
         if (!el) return;
-        const text = getPlainText(el);
-        lastSyncedDraftRef.current = text;
-        setDraft(text);
-    }, [editorRef, setDraft]);
+        syncTextFromEditor(el);
+    }, [editorRef, syncTextFromEditor]);
 
     const handleInput = useCallback(() => {
         const el = editorRef.current;
         if (!el) return;
-        const text = getPlainText(el);
+        const text = syncTextFromEditor(el);
         const caret = getCaretOffset(el);
-        lastSyncedDraftRef.current = text;
-        setDraft(text);
         completions.onTextChange(text, caret);
         requestAnimationFrame(() => autosize());
-    }, [editorRef, setDraft, completions, autosize]);
+    }, [editorRef, syncTextFromEditor, completions, autosize]);
 
     const handleSend = async () => {
-        const text = getText().trim();
+        const rawText = getText();
+        const text = rawText.trim();
+        setEditorPlainText((current) => current === rawText ? current : rawText);
+        if (lastSyncedDraftRef.current !== rawText) {
+            lastSyncedDraftRef.current = rawText;
+            setDraft(rawText);
+        }
         if (shouldBlockChatComposerSubmit({
             hasPromptText: text.length > 0,
             hasAttachments: attachments.length > 0,
@@ -447,6 +479,8 @@ export function ChatComposer({
             } else {
                 // Clear the contenteditable on successful send
                 clearEditor();
+                setEditorPlainText('');
+                lastSyncedDraftRef.current = '';
             }
         } finally {
             sendInFlightRef.current = false;
@@ -464,8 +498,9 @@ export function ChatComposer({
         const nextDraft = historyIndex === null ? '' : draftHistoryRef.current[historyIndex] ?? '';
         historyCursorRef.current = historyIndex;
         setDraft(nextDraft);
+        setEditorPlainText(nextDraft);
         requestAnimationFrame(() => {
-            setEditorText(nextDraft);
+            setEditorContentText(nextDraft);
             focusEditor();
             autosize();
         });
@@ -506,7 +541,8 @@ export function ChatComposer({
             syncDraftFromEditor();
         } else {
             // Other completions: plain text replacement
-            setEditorText(result.text);
+            setEditorContentText(result.text);
+            setEditorPlainText(result.text);
             lastSyncedDraftRef.current = result.text;
             setDraft(result.text);
             requestAnimationFrame(() => {
@@ -514,7 +550,7 @@ export function ChatComposer({
                 autosize();
             });
         }
-    }, [editorRef, completions, insertTag, syncDraftFromEditor, setEditorText, setDraft, focusEditor, autosize]);
+    }, [editorRef, completions, insertTag, syncDraftFromEditor, setEditorContentText, setDraft, focusEditor, autosize]);
 
     const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
         // 补全菜单优先消费方向键 / Esc / Enter
@@ -624,7 +660,7 @@ export function ChatComposer({
     }, [editorRef, syncDraftFromEditor, autosize]);
 
     const handleEnhance = async () => {
-        const text = draft.trim();
+        const text = getText().trim();
         if (shouldBlockPromptEnhance({
             hasPromptText: text.length > 0,
             isEnhancing: enhancing,
@@ -678,7 +714,8 @@ export function ChatComposer({
     const applyEnhanced = () => {
         if (enhancedText) {
             setDraft(enhancedText);
-            setEditorText(enhancedText);
+            setEditorContentText(enhancedText);
+            setEditorPlainText(enhancedText);
             requestAnimationFrame(() => autosize());
         }
         setEnhancerOpen(false);
@@ -712,6 +749,7 @@ export function ChatComposer({
         control: 'history-hint',
         translate: t,
     });
+    const hasEditorPromptText = editorText.trim().length > 0;
 
     return (
         <div className="bg-base-200/20 px-2 pb-4 pt-2 sm:px-3">
@@ -800,7 +838,7 @@ export function ChatComposer({
                             {dropFileHint}
                         </div>
                     )}
-                    {!draft.trim() && draftHistoryRef.current.length > 0 && !isDraggingFile && (
+                    {!hasEditorPromptText && draftHistoryRef.current.length > 0 && !isDraggingFile && (
                         <div className="mt-1 px-1 text-[11px] text-base-content/35">
                             {historyHint}
                         </div>
@@ -824,12 +862,12 @@ export function ChatComposer({
                     isSubmitting={isSending}
                     isEnhancing={enhancing}
                     canSubmit={!shouldBlockChatComposerSubmit({
-                        hasPromptText: draft.trim().length > 0,
+                        hasPromptText: hasEditorPromptText,
                         hasAttachments: attachments.length > 0,
                         isStreaming,
                         isSending,
                     })}
-                    hasPromptText={draft.trim().length > 0}
+                    hasPromptText={hasEditorPromptText}
                     onProviderChange={(p) => setProvider(p)}
                     onModeChange={setPermissionMode}
                     onModelChange={setModel}

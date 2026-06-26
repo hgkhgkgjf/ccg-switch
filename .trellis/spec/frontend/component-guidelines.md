@@ -150,6 +150,12 @@ See `src/components/providers/ProviderCard.tsx` and
   Recent project group headers must be real buttons with `aria-expanded`, and
   collapsing a group must hide its sessions without affecting cached session
   data or normal session selection behavior.
+  Recent project group headers must expose hierarchy, not only the final folder
+  name. Render the project name as the primary line, the parent path as a muted
+  secondary line, and the recent session count as a compact right-side badge.
+  Expanded recent groups should render their sessions in an indented child list
+  with a subtle guide line so users can distinguish project folders from
+  conversation rows when many projects share similar names.
   The user's selected session sidebar view (`Project sessions` or
   `Recent chats`) and collapsed recent-chat project groups are local UI
   preferences and must survive page refreshes. Store these preferences in
@@ -1196,7 +1202,16 @@ See `src/components/providers/ProviderCard.tsx` and
   selectable rows as `role="option"` with accurate `aria-selected` state.
   Option accessible labels should include both the item label and its
   description when present, so slash commands, files, agents, and prompt presets
-  stay understandable without requiring visual tooltip inspection. Prompt
+  stay understandable without requiring visual tooltip inspection. For the
+  contenteditable rich input, the submit and prompt-enhance enablement state
+  must be derived from the editor's current plain text, not only from the
+  persisted Zustand `draft`. WebKit/macOS can leave React `onInput` / IME
+  composition timing out of step with the editable DOM; keep a local plain-text
+  mirror updated through normal input handlers plus a `MutationObserver`
+  fallback, and have the final submit path read the DOM via `getText()` again.
+  Regression tests for composer submission should cover the case where the DOM
+  contains text while `draft` is still empty so the send button cannot remain
+  disabled and silently drop the user's click. Prompt
   enhancer modal chrome follows the same fallback rule: the modal title, close
   button title, original/enhanced column headings, loading text, and footer
   actions must stay readable as `Enhance prompt`, `Close`, `Original prompt`,

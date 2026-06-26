@@ -10,6 +10,7 @@ import {ChatComposer} from './ChatComposer';
 
 const loadAllProviders = vi.fn();
 const setDraft = vi.fn();
+const send = vi.fn(async () => true);
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
@@ -36,7 +37,7 @@ vi.mock('../../../stores/useChatStore', () => {
         setModel: vi.fn(),
         setReasoningEffort: vi.fn(),
         setDraft,
-        send: vi.fn(),
+        send,
         abort: vi.fn(),
     });
     useChatStore.getState = () => ({draft: ''});
@@ -103,6 +104,27 @@ async function renderComposer(): Promise<{container: HTMLDivElement; editor: HTM
 }
 
 describe('ChatComposer image paste', () => {
+    it('keeps the send button usable when contenteditable text exists before draft syncs', async () => {
+        const {container, editor} = await renderComposer();
+        editor.textContent = '你好';
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        const sendButton = container.querySelector<HTMLButtonElement>('.chat-composer-primary-action');
+        expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+        expect(sendButton?.disabled).toBe(false);
+
+        await act(async () => {
+            sendButton?.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+            await Promise.resolve();
+        });
+
+        expect(send).toHaveBeenCalledWith('你好', expect.objectContaining({
+            cwd: 'C:\\\\repo',
+        }));
+    });
+
     it('attaches pasted images while canceling native editor insertion', async () => {
         const {container, editor} = await renderComposer();
         const imageFile = new File(['image-bytes'], 'screenshot.png', {type: 'image/png'});

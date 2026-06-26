@@ -15,17 +15,17 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawnSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
+import {spawnSync} from 'child_process';
+import {fileURLToPath, pathToFileURL} from 'url';
 import readline from 'readline';
 
 import {
-  colors,
-  generateTagMessage,
-  getTodayString,
-  updateProjectVersions,
-  validReleaseTypes,
-  versionRegex,
+    colors,
+    generateTagMessage,
+    getTodayString,
+    updateProjectVersions,
+    validReleaseTypes,
+    versionRegex,
 } from './bump-version.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -117,12 +117,24 @@ function commandToString(command, args) {
   return [command, ...args].join(' ');
 }
 
+export function resolveSpawnCommand(command, args) {
+  if (process.platform === 'win32' && command === 'npm') {
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', 'npm', ...args],
+    };
+  }
+
+  return { command, args };
+}
+
 function run(command, args, { cwd = projectRoot, stdio = 'inherit', allowFailure = false } = {}) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveSpawnCommand(command, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd,
     stdio,
     encoding: stdio === 'pipe' ? 'utf-8' : undefined,
-    shell: process.platform === 'win32',
+    shell: false,
   });
 
   if (result.error && !allowFailure) {
@@ -237,6 +249,16 @@ function createAnnotatedTag(tagName, tagMessage) {
   fs.writeFileSync(tempPath, tagMessage, 'utf-8');
   try {
     run('git', ['tag', '-a', tagName, '--cleanup=verbatim', '-F', tempPath]);
+  } finally {
+    fs.rmSync(tempPath, { force: true });
+  }
+}
+
+export function createVersionCommit(version, runner = run) {
+  const tempPath = path.join(os.tmpdir(), `ccg-switch-${version}-commit-message-${process.pid}.txt`);
+  fs.writeFileSync(tempPath, `chore: bump version to ${version}\n`, 'utf-8');
+  try {
+    runner('git', ['commit', '-F', tempPath]);
   } finally {
     fs.rmSync(tempPath, { force: true });
   }
@@ -364,7 +386,7 @@ export async function runRelease(rawArgs = process.argv.slice(2)) {
     stageReleaseFiles();
 
     log(colors.cyan, '\n📝 创建版本提交...');
-    run('git', ['commit', '-m', `chore: bump version to ${options.version}`]);
+    createVersionCommit(options.version);
     versionCommitCreated = true;
 
     log(colors.cyan, `\n🏷️  创建注释标签 ${tagName}...`);

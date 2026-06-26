@@ -31,6 +31,7 @@ import {
     buildRecentChatProjectGroups,
     formatShortDate,
     getCachedProjectSessions,
+    getProjectParentPath,
     getSessionProviderLabel,
     getVisibleProjectSessions,
     normalizeProjectPathForCache,
@@ -932,25 +933,56 @@ export default function ChatSessionSidebar({
                                 <div className="space-y-2 px-2">
                                     {recentChatGroups.map((group) => {
                                         const projectKey = normalizeProjectPathForCache(group.projectPath);
+                                        const parentPath = getProjectParentPath(group.projectPath);
                                         const expanded = !collapsedRecentProjectKeys.has(projectKey);
                                         return (
-                                            <div key={group.projectPath} className="space-y-0.5">
+                                            <div
+                                                key={group.projectPath}
+                                                className="space-y-0.5"
+                                                data-chat-recent-project-group={group.projectPath}
+                                            >
                                                 <button
                                                     type="button"
-                                                    className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] font-medium text-base-content/55 hover:bg-base-200/60"
+                                                    className="flex w-full items-start gap-1.5 rounded-md px-1.5 py-1.5 text-left text-[11px] font-medium text-base-content/55 hover:bg-base-200/60"
                                                     title={group.projectPath}
                                                     data-chat-recent-project-toggle={group.projectPath}
                                                     aria-expanded={expanded}
                                                     onClick={() => toggleRecentProject(group.projectPath)}
                                                 >
-                                                    {expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
-                                                    <FolderOpen size={12}/>
-                                                    <span className="min-w-0 flex-1 truncate">{group.projectName}</span>
-                                                    <span className="shrink-0 text-[10px] text-base-content/35">
+                                                    {expanded ? (
+                                                        <ChevronDown size={12} className="mt-0.5 shrink-0"/>
+                                                    ) : (
+                                                        <ChevronRight size={12} className="mt-0.5 shrink-0"/>
+                                                    )}
+                                                    <FolderOpen size={12} className="mt-0.5 shrink-0"/>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-base-content/70">
+                                                            {group.projectName}
+                                                        </span>
+                                                        {parentPath && (
+                                                            <span
+                                                                className="mt-0.5 block truncate text-[10px] font-normal text-base-content/35"
+                                                                data-chat-recent-project-parent-path
+                                                            >
+                                                                {parentPath}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <span
+                                                        className="mt-0.5 shrink-0 rounded-full border border-base-300 bg-base-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-base-content/45 dark:border-base-200 dark:bg-base-200/80"
+                                                        data-chat-recent-project-count-badge
+                                                    >
                                                         {group.sessions.length}
                                                     </span>
                                                 </button>
-                                                {expanded && group.sessions.map((session) => renderSessionRow(session, true))}
+                                                {expanded && (
+                                                    <div
+                                                        className="ml-3 border-l border-base-300/70 pl-2"
+                                                        data-chat-recent-session-list
+                                                    >
+                                                        {group.sessions.map((session) => renderSessionRow(session, true))}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}

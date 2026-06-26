@@ -33,6 +33,16 @@ export function normalizeProjectPathForCache(projectPath: string | null | undefi
         .toLowerCase();
 }
 
+export function getProjectParentPath(projectPath: string | null | undefined): string {
+    const trimmed = projectPath?.trim().replace(/[\\/]+$/g, '') ?? '';
+    if (!trimmed) return '';
+
+    const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+    if (separatorIndex <= 0) return '';
+
+    return trimmed.slice(0, separatorIndex);
+}
+
 export function isSupportedChatProvider(providerId: string): boolean {
     return providerId === 'claude' || providerId === 'codex';
 }

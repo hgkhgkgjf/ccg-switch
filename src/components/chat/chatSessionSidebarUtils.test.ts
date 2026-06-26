@@ -16,6 +16,7 @@ import {
     filterProjectChatSessions,
     filterSupportedChatSessions,
     getCachedProjectSessions,
+    getProjectParentPath,
     getSessionProviderLabel,
     getVisibleProjectSessions,
     normalizeProjectPathForCache,
@@ -252,6 +253,34 @@ describe('chatSessionSidebarUtils', () => {
         expect(html).not.toContain('chat.sessionPanel.sessions');
         expect(html).not.toContain('chat.sessionPanel.noSessions');
         expect(html).not.toContain('common.refresh');
+    });
+
+    it('derives a readable parent path for project hierarchy display', () => {
+        expect(getProjectParentPath('C:/workspace/ccg-switch')).toBe('C:/workspace');
+        expect(getProjectParentPath('C:\\workspace\\ccg-switch\\')).toBe('C:\\workspace');
+        expect(getProjectParentPath('ccg-switch')).toBe('');
+    });
+
+    it('renders recent chat project hierarchy with parent paths and child sessions', async () => {
+        const {container: rendered} = await renderSidebarWithData();
+
+        const recentModeButton = rendered.querySelector('[data-chat-session-panel-mode="recent"]');
+        expect(recentModeButton).toBeInstanceOf(HTMLButtonElement);
+        await act(async () => {
+            recentModeButton?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        const projectGroup = rendered.querySelector('[data-chat-recent-project-group="C:/workspace/ccg-switch"]');
+        expect(projectGroup).not.toBeNull();
+
+        const groupToggle = projectGroup?.querySelector('[data-chat-recent-project-toggle="C:/workspace/ccg-switch"]');
+        expect(groupToggle).toBeInstanceOf(HTMLButtonElement);
+        expect(groupToggle?.querySelector('[data-chat-recent-project-parent-path]')?.textContent).toBe('C:/workspace');
+        expect(groupToggle?.querySelector('[data-chat-recent-project-count-badge]')?.textContent).toBe('2');
+
+        const childList = projectGroup?.querySelector('[data-chat-recent-session-list]');
+        expect(childList).not.toBeNull();
+        expect(childList?.querySelector('[data-chat-session-key="claude::C:/sessions/recent-claude.jsonl"]')).toBeInstanceOf(HTMLButtonElement);
     });
 
     it('renders the collapse action inside the session sidebar header actions', () => {
