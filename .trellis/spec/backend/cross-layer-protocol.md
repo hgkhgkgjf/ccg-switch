@@ -1780,6 +1780,11 @@ pub async fn chat_uninstall_sdk(
 - Installing or switching a version uses the same command path. On success,
   Rust emits `chat://sdk-install-done`, refreshes through the store, and
   restarts the daemon so the newly installed SDK is loaded.
+- The Rust installer/status path and the Node daemon loader path must share the
+  same dependency root. `DaemonClient::start()` must pass
+  `AI_BRIDGE_DEPS_DIR = deps_dir` to the ai-bridge process; otherwise
+  `path-utils.js` falls back to legacy `~/.codemoss`, making fresh machines
+  report SDKs as installed while runtime SDK imports fail.
 - Uninstalling must stop the cached ai-bridge daemon before removing the SDK
   directory so Windows releases `node_modules` file handles. The delete path
   must clear read-only file attributes and retry `remove_dir_all` for short
@@ -1796,6 +1801,7 @@ pub async fn chat_uninstall_sdk(
 | Registry query fails | `chat_sdk_status` still succeeds with local fallback state. |
 | UI sends `version = "1.2.3"` | Install command uses `<package>@1.2.3`. |
 | UI sends `version = "latest"`, `^1.2.3`, `file:...`, git/url/path, or whitespace | Backend rejects before spawning npm. |
+| SDK exists under `~/.ccg-switch/ai-bridge-deps` on a fresh machine | Daemon receives `AI_BRIDGE_DEPS_DIR` and imports from that same dependency root. |
 | User uninstalls SDK while daemon has loaded it | Backend stops the cached daemon before deleting the dependency directory. |
 | SDK directory contains Windows read-only files | Backend clears read-only attributes and removes the directory. |
 | SDK directory remains locked after retries | Backend returns a clear error mentioning likely process/permission ownership. |
@@ -1813,6 +1819,9 @@ pub async fn chat_uninstall_sdk(
   files.
 - Rust unit test: SDK uninstall preparation stops an already-running cached
   daemon before dependency deletion.
+- Rust unit test: daemon startup environment includes `AI_BRIDGE_DEPS_DIR`,
+  `CLAUDE_PERMISSION_DIR`, `CLAUDE_SESSION_ID`, and provider runtime config when
+  present.
 - Frontend unit test: SDK panel renders target version, current/latest metadata,
   update/current/switch/install action labels, and key-only fallback text.
 - Frontend store test: `useSdkStore.install(sdkId, version)` invokes

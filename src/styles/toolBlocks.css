@@ -1541,6 +1541,67 @@
   background-color: var(--fallback-b1, oklch(var(--b1) / 1));
 }
 
+.chat-session-sidebar-shell {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.chat-session-sidebar-collapsed-rail,
+.chat-status-sidebar-collapsed-rail {
+  width: 36px;
+  min-width: 36px;
+  min-height: 0;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: center;
+  background: oklch(var(--b1) / 0.96);
+  padding-top: 8px;
+}
+
+.chat-session-sidebar-collapsed-rail {
+  border-right: 1px solid oklch(var(--b3));
+}
+
+.chat-status-sidebar-collapsed-rail {
+  border-left: 1px solid oklch(var(--b3));
+}
+
+.chat-sidebar-toggle-button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 7px;
+  background: oklch(var(--b1) / 0.94);
+  color: oklch(var(--bc) / 0.56);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.chat-sidebar-toggle-button:hover,
+.chat-sidebar-toggle-button:focus-visible {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: oklch(var(--b1));
+  color: #2563eb;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
+.chat-sidebar-toggle-button:focus-visible {
+  outline: 2px solid oklch(var(--p) / 0.32);
+  outline-offset: 2px;
+}
+
+.chat-status-sidebar-collapse-button {
+  position: absolute;
+  right: 8px;
+  top: 10px;
+  z-index: 70;
+}
+
 .chat-diff-pane-reopen-floating {
   position: absolute;
   right: 10px;
@@ -1589,6 +1650,7 @@
 }
 
 .chat-status-pane-shell {
+  position: relative;
   min-width: 260px;
   max-width: 520px;
   min-height: 0;

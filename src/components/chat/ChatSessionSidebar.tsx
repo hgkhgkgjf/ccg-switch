@@ -8,6 +8,7 @@ import {
     FolderOpen,
     History,
     MessageSquare,
+    PanelLeftClose,
     Pin,
     Plus,
     RefreshCw,
@@ -41,6 +42,12 @@ import {
     shouldSyncProjectFromCurrentCwd,
 } from './chatSessionSidebarUtils';
 import {ProviderBrandIcon} from './composer/ModelIcon';
+import {
+    type ChatSessionSidebarPanelMode,
+    type ChatSessionSidebarState,
+    loadChatSessionSidebarState,
+    saveChatSessionSidebarState,
+} from '../../utils/chatSessionSidebarState';
 
 interface ProjectInfo {
     name: string;
@@ -57,6 +64,8 @@ interface ChatSessionSidebarProps {
     pendingSessionKey: string | null;
     onSessionSelect: (session: SessionMeta) => void;
     onNewSession: (cwd?: string | null) => void;
+    onCollapse?: () => void;
+    collapseLabel?: string;
 }
 
 interface SessionProviderBadgeProps {
@@ -65,7 +74,6 @@ interface SessionProviderBadgeProps {
     selected: boolean;
 }
 
-type SessionPanelMode = 'project' | 'recent';
 type ContextMenuState =
     | {type: 'project'; x: number; y: number; project: ProjectInfo}
     | {type: 'session'; x: number; y: number; session: SessionMeta}
@@ -110,6 +118,8 @@ export default function ChatSessionSidebar({
     pendingSessionKey,
     onSessionSelect,
     onNewSession,
+    onCollapse,
+    collapseLabel,
 }: ChatSessionSidebarProps) {
     const {t} = useTranslation();
     const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -120,8 +130,7 @@ export default function ChatSessionSidebar({
     const [sessionQuery, setSessionQuery] = useState('');
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
-    const [panelMode, setPanelMode] = useState<SessionPanelMode>('project');
-    const [collapsedRecentProjectKeys, setCollapsedRecentProjectKeys] = useState<Set<string>>(new Set());
+    const [sidebarState, setSidebarState] = useState(loadChatSessionSidebarState);
     const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
     const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
     const sessionRequestSeqRef = useRef(0);
@@ -129,6 +138,28 @@ export default function ChatSessionSidebar({
     const selectedProjectKeyRef = useRef(normalizeProjectPathForCache(currentCwd));
     const hasManualProjectSelectionRef = useRef(false);
     const recentProjectPrefetchKeysRef = useRef<Set<string>>(new Set());
+    const panelMode = sidebarState.panelMode;
+    const collapsedRecentProjectKeys = useMemo(
+        () => new Set(sidebarState.collapsedRecentProjectKeys),
+        [sidebarState.collapsedRecentProjectKeys],
+    );
+
+    const updateSidebarState = useCallback((
+        resolveNextState: (current: ChatSessionSidebarState) => ChatSessionSidebarState,
+    ) => {
+        setSidebarState((current) => {
+            const next = resolveNextState(current);
+            saveChatSessionSidebarState(next);
+            return next;
+        });
+    }, []);
+
+    const handlePanelModeChange = useCallback((mode: ChatSessionSidebarPanelMode) => {
+        updateSidebarState((current) => ({
+            ...current,
+            panelMode: mode,
+        }));
+    }, [updateSidebarState]);
 
     const loadProjects = useCallback(async () => {
         setLoadingProjects(true);
@@ -410,14 +441,17 @@ export default function ChatSessionSidebar({
 
     const toggleRecentProject = (projectPath: string) => {
         const projectKey = normalizeProjectPathForCache(projectPath);
-        setCollapsedRecentProjectKeys((current) => {
-            const next = new Set(current);
+        updateSidebarState((current) => {
+            const next = new Set(current.collapsedRecentProjectKeys);
             if (next.has(projectKey)) {
                 next.delete(projectKey);
             } else {
                 next.add(projectKey);
             }
-            return next;
+            return {
+                ...current,
+                collapsedRecentProjectKeys: Array.from(next),
+            };
         });
     };
 
@@ -803,7 +837,7 @@ export default function ChatSessionSidebar({
                     <MessageSquare size={15}/>
                     {panelTitleLabel}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1" data-chat-session-sidebar-header-actions="true">
                     <button
                         type="button"
                         className="btn btn-ghost btn-xs btn-square"
@@ -823,6 +857,18 @@ export default function ChatSessionSidebar({
                     >
                         <Plus size={14}/>
                     </button>
+                    {onCollapse && collapseLabel && (
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-xs btn-square"
+                            data-chat-session-sidebar-action="collapse"
+                            onClick={onCollapse}
+                            title={collapseLabel}
+                            aria-label={collapseLabel}
+                        >
+                            <PanelLeftClose size={14}/>
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -836,7 +882,7 @@ export default function ChatSessionSidebar({
                                 ? 'bg-base-100 text-base-content shadow-sm'
                                 : 'text-base-content/55 hover:text-base-content'
                         }`}
-                        onClick={() => setPanelMode('project')}
+                        onClick={() => handlePanelModeChange('project')}
                         aria-pressed={panelMode === 'project'}
                     >
                         {projectSessionsLabel}
@@ -849,7 +895,7 @@ export default function ChatSessionSidebar({
                                 ? 'bg-base-100 text-base-content shadow-sm'
                                 : 'text-base-content/55 hover:text-base-content'
                         }`}
-                        onClick={() => setPanelMode('recent')}
+                        onClick={() => handlePanelModeChange('recent')}
                         aria-pressed={panelMode === 'recent'}
                     >
                         {recentChatsLabel}

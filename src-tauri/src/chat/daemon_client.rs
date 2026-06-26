@@ -6,7 +6,8 @@
 //! flight.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -49,6 +50,30 @@ pub struct DaemonClient {
 struct ProviderRuntimeConfig {
     api_key: Option<String>,
     base_url: Option<String>,
+}
+
+fn daemon_env_vars(
+    permission_dir: &Path,
+    deps_dir: &Path,
+    provider_config: &ProviderRuntimeConfig,
+) -> Vec<(&'static str, OsString)> {
+    let mut vars = vec![
+        ("AI_BRIDGE_DEPS_DIR", deps_dir.as_os_str().to_owned()),
+        (
+            "CLAUDE_PERMISSION_DIR",
+            permission_dir.as_os_str().to_owned(),
+        ),
+        ("CLAUDE_SESSION_ID", OsString::from(SESSION_ID)),
+    ];
+
+    if let Some(ref key) = provider_config.api_key {
+        vars.push(("ANTHROPIC_AUTH_TOKEN", OsString::from(key)));
+    }
+    if let Some(ref url) = provider_config.base_url {
+        vars.push(("ANTHROPIC_BASE_URL", OsString::from(url)));
+    }
+
+    vars
 }
 
 impl DaemonClient {
@@ -125,18 +150,13 @@ impl DaemonClient {
         let mut cmd = Command::new(&self.node_path);
         cmd.arg(&daemon_js_normalized)
             .current_dir(&bridge_dir_normalized)
-            .env("CLAUDE_PERMISSION_DIR", &self.permission_dir)
-            .env("CLAUDE_SESSION_ID", SESSION_ID)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let provider_config = self.provider_config.read().await.clone();
-        if let Some(ref key) = provider_config.api_key {
-            cmd.env("ANTHROPIC_AUTH_TOKEN", key);
-        }
-        if let Some(ref url) = provider_config.base_url {
-            cmd.env("ANTHROPIC_BASE_URL", url);
+        for (key, value) in daemon_env_vars(&self.permission_dir, &self.deps_dir, &provider_config) {
+            cmd.env(key, value);
         }
 
         #[cfg(windows)]
@@ -404,9 +424,10 @@ impl DaemonClient {
 #[cfg(test)]
 mod tests {
     use super::super::protocol::{DaemonEvent, DaemonRequest, RawLine, StreamLine};
-    use super::{DaemonClient, EventSink, Inner};
+    use super::{daemon_env_vars, DaemonClient, EventSink, Inner, ProviderRuntimeConfig};
     use serde_json::json;
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex as StdMutex};
     use tokio::sync::{mpsc, Mutex};
@@ -469,6 +490,39 @@ mod tests {
         assert_eq!(
             raw.extra.get("ts").and_then(|v| v.as_u64()),
             Some(1700000000000)
+        );
+    }
+
+    #[test]
+    fn daemon_env_vars_include_sdk_deps_dir_and_provider_config() {
+        let deps_dir = PathBuf::from(r"C:\Users\alice\.ccg-switch\ai-bridge-deps");
+        let permission_dir = PathBuf::from(r"C:\Users\alice\AppData\Roaming\ccg-switch\permissions");
+        let provider_config = ProviderRuntimeConfig {
+            api_key: Some("secret-token".into()),
+            base_url: Some("https://api.example.invalid".into()),
+        };
+
+        let vars: HashMap<_, _> = daemon_env_vars(&permission_dir, &deps_dir, &provider_config)
+            .into_iter()
+            .map(|(key, value)| (key, value.to_string_lossy().into_owned()))
+            .collect();
+
+        assert_eq!(
+            vars.get("AI_BRIDGE_DEPS_DIR").map(String::as_str),
+            deps_dir.to_str()
+        );
+        assert_eq!(
+            vars.get("CLAUDE_PERMISSION_DIR").map(String::as_str),
+            permission_dir.to_str()
+        );
+        assert_eq!(vars.get("CLAUDE_SESSION_ID").map(String::as_str), Some("default"));
+        assert_eq!(
+            vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("secret-token")
+        );
+        assert_eq!(
+            vars.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.example.invalid")
         );
     }
 

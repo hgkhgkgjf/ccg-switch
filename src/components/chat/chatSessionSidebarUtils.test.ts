@@ -8,6 +8,10 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {SessionMeta} from '../../types/session';
 import ChatSessionSidebar, {SessionProviderBadge} from './ChatSessionSidebar';
 import {
+    CHAT_SESSION_SIDEBAR_STATE_STORAGE_KEY,
+    type ChatSessionSidebarState,
+} from '../../utils/chatSessionSidebarState';
+import {
     buildRecentChatProjectGroups,
     filterProjectChatSessions,
     filterSupportedChatSessions,
@@ -92,6 +96,7 @@ afterEach(async () => {
     container = null;
     tauriMocks.invoke.mockReset();
     toastMocks.showToast.mockReset();
+    window.localStorage.clear();
 });
 
 interface RenderSidebarOptions {
@@ -249,6 +254,33 @@ describe('chatSessionSidebarUtils', () => {
         expect(html).not.toContain('common.refresh');
     });
 
+    it('renders the collapse action inside the session sidebar header actions', () => {
+        const html = renderToStaticMarkup(createElement(
+            I18nextProvider,
+            {i18n: createKeyOnlyI18n()},
+            createElement(ChatSessionSidebar, {
+                activeSession: null,
+                currentCwd: 'C:/guodevelop/ccg-switch',
+                pendingSessionKey: null,
+                onSessionSelect: () => undefined,
+                onNewSession: () => undefined,
+                onCollapse: () => undefined,
+                collapseLabel: 'Collapse session sidebar',
+            }),
+        ));
+
+        expect(html).toContain('data-chat-session-sidebar-header-actions="true"');
+        expect(html).toContain('data-chat-session-sidebar-action="collapse"');
+        expect(html).toContain('title="Collapse session sidebar"');
+        expect(html).toContain('aria-label="Collapse session sidebar"');
+        expect(html).not.toContain('chat-session-sidebar-collapse-button');
+
+        const newChatButtonIndex = html.indexOf('aria-label="New chat"');
+        const collapseButtonIndex = html.indexOf('data-chat-session-sidebar-action="collapse"');
+        expect(newChatButtonIndex).toBeGreaterThan(-1);
+        expect(collapseButtonIndex).toBeGreaterThan(newChatButtonIndex);
+    });
+
     it('renders a compact mode switch instead of stacking recent chats above projects', () => {
         const html = renderToStaticMarkup(createElement(
             I18nextProvider,
@@ -296,6 +328,49 @@ describe('chatSessionSidebarUtils', () => {
         expect(rendered.textContent).not.toContain('Continue Trellis work');
         expect(rendered.textContent).not.toContain('Review multi session UI');
         expect(rendered.textContent).toContain('Bridge follow up');
+    });
+
+    it('persists the selected session panel mode and collapsed recent chat project groups', async () => {
+        let renderResult = await renderSidebarWithData();
+        const rendered = renderResult.container;
+        const recentModeButton = rendered.querySelector('[data-chat-session-panel-mode="recent"]');
+        expect(recentModeButton).toBeInstanceOf(HTMLButtonElement);
+
+        await act(async () => {
+            recentModeButton?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        const groupToggle = rendered.querySelector('[data-chat-recent-project-toggle="C:/workspace/ccg-switch"]');
+        expect(groupToggle).toBeInstanceOf(HTMLButtonElement);
+        await act(async () => {
+            groupToggle?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        const stored = JSON.parse(
+            window.localStorage.getItem(CHAT_SESSION_SIDEBAR_STATE_STORAGE_KEY) ?? '{}',
+        ) as ChatSessionSidebarState;
+        expect(stored).toEqual({
+            panelMode: 'recent',
+            collapsedRecentProjectKeys: ['c:/workspace/ccg-switch'],
+        });
+
+        await act(async () => {
+            root?.unmount();
+        });
+        rendered.remove();
+        root = null;
+        container = null;
+        tauriMocks.invoke.mockReset();
+
+        renderResult = await renderSidebarWithData({sessionsByProject: renderResult.sessionsByProject});
+        const remounted = renderResult.container;
+        const restoredRecentModeButton = remounted.querySelector('[data-chat-session-panel-mode="recent"]');
+        const restoredGroupToggle = remounted.querySelector('[data-chat-recent-project-toggle="C:/workspace/ccg-switch"]');
+
+        expect(restoredRecentModeButton?.getAttribute('aria-pressed')).toBe('true');
+        expect(restoredGroupToggle?.getAttribute('aria-expanded')).toBe('false');
+        expect(remounted.textContent).not.toContain('Continue Trellis work');
+        expect(remounted.textContent).toContain('Bridge follow up');
     });
 
     it('opens a project context menu with safe actions and disabled placeholders', async () => {

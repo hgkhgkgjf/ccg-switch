@@ -150,6 +150,18 @@ See `src/components/providers/ProviderCard.tsx` and
   Recent project group headers must be real buttons with `aria-expanded`, and
   collapsing a group must hide its sessions without affecting cached session
   data or normal session selection behavior.
+  The user's selected session sidebar view (`Project sessions` or
+  `Recent chats`) and collapsed recent-chat project groups are local UI
+  preferences and must survive page refreshes. Store these preferences in
+  `localStorage` separately from the session-list data cache, using normalized
+  project keys for collapsed recent groups.
+  Chat's left session sidebar and right status sidebar may be collapsed from the
+  page shell. Treat these as local layout preferences: persist
+  `sessionSidebarCollapsed` and `statusSidebarCollapsed` in `localStorage`, keep
+  a narrow restore rail visible on desktop breakpoints, and give each icon-only
+  collapse/expand button readable `title` and `aria-label` text with fallback
+  behavior. When the status sidebar is collapsed, do not render resize handles
+  that target the absent status pane.
   Session-level terminal actions belong in this same `ChatSessionSidebar`
   context menu, not in a separate Workspaces page. Use each session's scanned
   `resumeCommand` when invoking `chat_resume_session_in_terminal`; do not

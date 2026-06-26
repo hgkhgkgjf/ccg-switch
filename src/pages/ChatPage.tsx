@@ -1,7 +1,7 @@
 import {type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {invoke} from '@tauri-apps/api/core';
-import {Package, PanelRightOpen, RefreshCw, Trash2} from 'lucide-react';
+import {Package, PanelLeftOpen, PanelRightClose, PanelRightOpen, RefreshCw, Trash2} from 'lucide-react';
 import {useChatStore} from '../stores/useChatStore';
 import {useMcpStoreV2} from '../stores/useMcpStoreV2';
 import {useSdkStore} from '../stores/useSdkStore';
@@ -81,6 +81,12 @@ import {
     EMPTY_CHAT_WORKSPACE_STATUS,
     loadChatWorkspaceStatus,
 } from '../utils/chatWorkspaceStatus';
+import {
+    type ChatSidebarLayoutState,
+    getChatSidebarLayoutActionLabel,
+    loadChatSidebarLayoutState,
+    saveChatSidebarLayoutState,
+} from '../utils/chatSidebarLayout';
 import {getSessionSelectionKey, type SessionMeta} from '../types/session';
 import type {ChatMessage} from '../types/chat';
 import type {EditDiffPreviewMode} from '../components/toolBlocks/EditDiffPreview';
@@ -158,6 +164,7 @@ export default function ChatPage() {
     const [conversationPaneWidth, setConversationPaneWidth] = useState(600);
     const [diffPaneWidth, setDiffPaneWidth] = useState(520);
     const [statusPaneWidth, setStatusPaneWidth] = useState(320);
+    const [sidebarLayoutState, setSidebarLayoutState] = useState(loadChatSidebarLayoutState);
     const [selectedEditKey, setSelectedEditKey] = useState<string | null>(null);
     const [diffViewMode, setDiffViewMode] = useState<EditDiffPreviewMode>('unified');
     const [diffWrapLines, setDiffWrapLines] = useState(true);
@@ -435,6 +442,24 @@ export default function ChatPage() {
         edge: 'conversation-status',
         translate: t,
     });
+    const collapseSessionSidebarLabel = getChatSidebarLayoutActionLabel({
+        action: 'collapse-session-sidebar',
+        translate: t,
+    });
+    const expandSessionSidebarLabel = getChatSidebarLayoutActionLabel({
+        action: 'expand-session-sidebar',
+        translate: t,
+    });
+    const collapseStatusSidebarLabel = getChatSidebarLayoutActionLabel({
+        action: 'collapse-status-sidebar',
+        translate: t,
+    });
+    const expandStatusSidebarLabel = getChatSidebarLayoutActionLabel({
+        action: 'expand-status-sidebar',
+        translate: t,
+    });
+    const sessionSidebarCollapsed = sidebarLayoutState.sessionSidebarCollapsed;
+    const statusSidebarCollapsed = sidebarLayoutState.statusSidebarCollapsed;
     const activeAnchorLabel = useMemo(
         () => {
             const activeAnchor = anchorItems.find((anchor) => anchor.id === activeAnchorId);
@@ -778,6 +803,30 @@ export default function ChatPage() {
         queueDiffPaneFocusAfterOpen(() => diffReviewPaneRef.current);
     }, []);
 
+    const updateSidebarLayoutState = useCallback((
+        resolveNextState: (current: ChatSidebarLayoutState) => ChatSidebarLayoutState,
+    ) => {
+        setSidebarLayoutState((current) => {
+            const next = resolveNextState(current);
+            saveChatSidebarLayoutState(next);
+            return next;
+        });
+    }, []);
+
+    const setSessionSidebarCollapsed = useCallback((collapsed: boolean) => {
+        updateSidebarLayoutState((current) => ({
+            ...current,
+            sessionSidebarCollapsed: collapsed,
+        }));
+    }, [updateSidebarLayoutState]);
+
+    const setStatusSidebarCollapsed = useCallback((collapsed: boolean) => {
+        updateSidebarLayoutState((current) => ({
+            ...current,
+            statusSidebarCollapsed: collapsed,
+        }));
+    }, [updateSidebarLayoutState]);
+
     const startPaneResize = useCallback((
         edge: PaneResizeHandleEdge,
         event: ReactPointerEvent<HTMLButtonElement>,
@@ -935,13 +984,31 @@ export default function ChatPage() {
 
             {/* 消息区：预留 cc-gui 风格的搜索、锚点和状态扩展槽 */}
             <div className="chat-workspace-surface relative flex min-h-0 flex-1 overflow-hidden">
-                <ChatSessionSidebar
-                    activeSession={activeSession}
-                    currentCwd={currentCwd}
-                    pendingSessionKey={pendingSessionKey}
-                    onSessionSelect={handleSessionSelect}
-                    onNewSession={handleNewSession}
-                />
+                {sessionSidebarCollapsed ? (
+                    <div className="chat-session-sidebar-collapsed-rail hidden lg:flex">
+                        <button
+                            type="button"
+                            className="chat-sidebar-toggle-button"
+                            title={expandSessionSidebarLabel}
+                            aria-label={expandSessionSidebarLabel}
+                            onClick={() => setSessionSidebarCollapsed(false)}
+                        >
+                            <PanelLeftOpen size={15} />
+                        </button>
+                    </div>
+                ) : (
+                    <div className="chat-session-sidebar-shell">
+                        <ChatSessionSidebar
+                            activeSession={activeSession}
+                            currentCwd={currentCwd}
+                            pendingSessionKey={pendingSessionKey}
+                            onSessionSelect={handleSessionSelect}
+                            onNewSession={handleNewSession}
+                            onCollapse={() => setSessionSidebarCollapsed(true)}
+                            collapseLabel={collapseSessionSidebarLabel}
+                        />
+                    </div>
+                )}
 
                 <MessageAnchorRail
                     hasMessages={hasMessages}
@@ -1046,17 +1113,19 @@ export default function ChatPage() {
                                 />
                             </section>
 
-                            <button
-                                type="button"
-                                className="chat-pane-resizer hidden xl:flex"
-                                title={resizeDiffStatusLabel}
-                                aria-label={resizeDiffStatusLabel}
-                                onPointerDown={(event) => startPaneResize('diff-status', event)}
-                            />
+                            {!statusSidebarCollapsed && (
+                                <button
+                                    type="button"
+                                    className="chat-pane-resizer hidden xl:flex"
+                                    title={resizeDiffStatusLabel}
+                                    aria-label={resizeDiffStatusLabel}
+                                    onPointerDown={(event) => startPaneResize('diff-status', event)}
+                                />
+                            )}
                         </>
                     )}
 
-                    {!shouldShowDiffPane && (
+                    {!shouldShowDiffPane && !statusSidebarCollapsed && (
                         <button
                             type="button"
                             className="chat-pane-resizer hidden xl:flex"
@@ -1066,40 +1135,63 @@ export default function ChatPage() {
                         />
                     )}
 
-                    <div
-                        className="chat-status-pane-shell hidden xl:block"
-                        style={{flex: `0 0 ${statusPaneWidth}px`, width: statusPaneWidth}}
-                    >
-                        <StatusPanel
-                            provider={provider}
-                            messageCount={renderableMessageCount}
-                            daemonReady={daemonReady}
-                            model={model}
-                            permissionMode={permissionMode}
-                            reasoningEffort={reasoningEffort}
-                            sdkStatus={currentSdk ?? null}
-                            daemonStatus={daemonStatus}
-                            daemonReconnecting={daemonReconnecting}
-                            daemonError={error}
-                            mcpStatus={mcpStatus}
-                            mcpConnectivity={mcpConnectivity}
-                            sessionLoadMetrics={lastSessionLoadMetrics}
-                            anchorCount={anchorCount}
-                            activeAnchorLabel={activeAnchorLabel}
-                            currentCwd={currentCwd}
-                            isStreaming={isStreaming}
-                            statusSummary={statusSummary}
-                            selectedEditKey={activeSelectedEditKey}
-                            isDiffPaneCollapsed={diffPaneCollapsed}
-                            diffViewMode={diffViewMode}
-                            onSelectedEditChange={handleSelectedEditChange}
-                            onOpenDiffPanel={handleOpenDiffPane}
-                            onDiffViewModeChange={setDiffViewMode}
-                            onSelectTool={handleSelectStatusTool}
-                            onReconnectDaemon={() => void reconnectDaemon()}
-                            onCheckMcpConnectivity={handleCheckMcpConnectivity}
-                        />
-                    </div>
+                    {statusSidebarCollapsed ? (
+                        <div className="chat-status-sidebar-collapsed-rail hidden xl:flex">
+                            <button
+                                type="button"
+                                className="chat-sidebar-toggle-button"
+                                title={expandStatusSidebarLabel}
+                                aria-label={expandStatusSidebarLabel}
+                                onClick={() => setStatusSidebarCollapsed(false)}
+                            >
+                                <PanelRightOpen size={15} />
+                            </button>
+                        </div>
+                    ) : (
+                        <div
+                            className="chat-status-pane-shell hidden xl:block"
+                            style={{flex: `0 0 ${statusPaneWidth}px`, width: statusPaneWidth}}
+                        >
+                            <button
+                                type="button"
+                                className="chat-sidebar-toggle-button chat-status-sidebar-collapse-button"
+                                title={collapseStatusSidebarLabel}
+                                aria-label={collapseStatusSidebarLabel}
+                                onClick={() => setStatusSidebarCollapsed(true)}
+                            >
+                                <PanelRightClose size={15} />
+                            </button>
+                            <StatusPanel
+                                provider={provider}
+                                messageCount={renderableMessageCount}
+                                daemonReady={daemonReady}
+                                model={model}
+                                permissionMode={permissionMode}
+                                reasoningEffort={reasoningEffort}
+                                sdkStatus={currentSdk ?? null}
+                                daemonStatus={daemonStatus}
+                                daemonReconnecting={daemonReconnecting}
+                                daemonError={error}
+                                mcpStatus={mcpStatus}
+                                mcpConnectivity={mcpConnectivity}
+                                sessionLoadMetrics={lastSessionLoadMetrics}
+                                anchorCount={anchorCount}
+                                activeAnchorLabel={activeAnchorLabel}
+                                currentCwd={currentCwd}
+                                isStreaming={isStreaming}
+                                statusSummary={statusSummary}
+                                selectedEditKey={activeSelectedEditKey}
+                                isDiffPaneCollapsed={diffPaneCollapsed}
+                                diffViewMode={diffViewMode}
+                                onSelectedEditChange={handleSelectedEditChange}
+                                onOpenDiffPanel={handleOpenDiffPane}
+                                onDiffViewModeChange={setDiffViewMode}
+                                onSelectTool={handleSelectStatusTool}
+                                onReconnectDaemon={() => void reconnectDaemon()}
+                                onCheckMcpConnectivity={handleCheckMcpConnectivity}
+                            />
+                        </div>
+                    )}
 
                     {showDiffReopenControl && (
                         <button
