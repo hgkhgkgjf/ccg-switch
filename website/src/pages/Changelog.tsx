@@ -13,6 +13,14 @@ interface Version {
 
 const versions: Version[] = [
   {
+    version: '1.6.3',
+    date: '2026-06-26',
+    type: 'minor',
+    changes: [
+      { type: 'feature', text: '新增聊天页面侧边栏折叠和状态持久化' }
+    ]
+  },
+  {
     version: '1.6.2',
     date: '2026-06-25',
     type: 'patch',
