@@ -2,6 +2,39 @@
 
 ## 快速开始
 
+### 推荐：一键发布
+
+```bash
+# 预演发布流程：不修改文件、不提交、不打 tag、不推送
+npm run release:dry -- 1.6.4 minor "新增一键发布脚本"
+
+# 正式发布：自动更新版本、验证、提交、打 tag、推送 main 和 tag
+npm run release -- 1.6.4 minor "新增一键发布脚本"
+
+# 非交互发布：适合你已经确认参数无误时使用
+npm run release -- 1.6.4 minor "新增一键发布脚本" --yes
+```
+
+一键发布脚本默认会执行：
+
+1. 检查当前分支是 `main`。
+2. 检查工作区干净。
+3. 检查目标 tag 不存在。
+4. 更新版本号和官网 Changelog。
+5. 同步 `package-lock.json` / `website/package-lock.json` 的根版本号。
+6. 清理 `dist`、`website/dist`、`out`、`website/out`。
+7. 运行验证命令：
+   - `git diff --check`
+   - `npm test`
+   - `npm run build`
+   - `cargo check --manifest-path src-tauri/Cargo.toml`
+   - `cd website && npm run build`
+8. 提交 `chore: bump version to <version>`。
+9. 创建注释 tag `v<version>`，并保留 Markdown 标题格式。
+10. 推送 `main` 和 `v<version>`，触发 GitHub Actions 自动构建 Release。
+
+### 仅更新版本号
+
 ```bash
 # 使用 npm 命令 (推荐)
 npm run bump 1.2.15 minor "新增 macOS 自动更新功能"
@@ -17,7 +50,9 @@ node scripts/bump-version.js 1.2.15 minor "新增 macOS 自动更新功能"
 | 文件 | 说明 |
 |------|------|
 | `package.json` | 主应用版本号 |
+| `package-lock.json` | 主应用 lockfile 根版本号 |
 | `website/package.json` | 网站版本号 |
+| `website/package-lock.json` | 网站 lockfile 根版本号 |
 | `src-tauri/tauri.conf.json` | Tauri 配置 (决定安装包版本) |
 | `website/src/pages/Changelog.tsx` | 新增版本条目 |
 
@@ -52,7 +87,7 @@ npm run bump 2.0.0 major "全新架构重构"
 npm run bump 1.2.15 minor
 ```
 
-## 完整发布流程
+## 手动发布流程
 
 ```bash
 # 步骤 1: 运行版本更新脚本
@@ -65,18 +100,8 @@ git diff
 git add .
 git commit -m "chore: bump version to 1.2.15"
 
-# 步骤 4: 创建 tag (使用脚本输出的消息模板)
-git tag -a v1.2.15 -m "v1.2.15
-
-发布日期: 2025-03-12
-
-### 新增功能
-- 新增 macOS 自动更新功能
-
-### 下载说明
-- **Windows**: 下载 `.exe` (NSIS安装包) 或 `.msi`
-- **macOS**: 下载 `.dmg`
-- **Linux**: 下载 `.deb` 或 `.AppImage`"
+# 步骤 4: 创建 tag (使用脚本输出的消息模板，保留 Markdown 标题)
+git tag -a v1.2.15 --cleanup=verbatim -F tag-message.txt
 
 # 步骤 5: 推送 (触发 GitHub Actions 自动构建)
 git push origin main
@@ -100,6 +125,40 @@ git tag v1.2.15
 ```
 
 **原因：** GitHub Actions 构建时使用 `tauri.conf.json` 中的版本号，而非 tag 名称。
+
+## 失败恢复
+
+### main 已推送，但 tag 推送失败
+
+不要重新 bump 版本，直接推送同一个 tag：
+
+```bash
+git push origin v1.6.4
+```
+
+### 本地已经提交并打 tag，但完全没有推送成功
+
+```bash
+git push origin main
+git push origin v1.6.4
+```
+
+### 验证失败
+
+一键发布脚本会在提交和打 tag 之前停止。修复问题后重新运行同一条 `npm run release -- ...` 命令即可。
+
+### 只想本地提交和打 tag，暂不推送
+
+```bash
+npm run release -- 1.6.4 minor "新增一键发布脚本" --no-push
+```
+
+之后手动推送：
+
+```bash
+git push origin main
+git push origin v1.6.4
+```
 
 ## 脚本输出示例
 
