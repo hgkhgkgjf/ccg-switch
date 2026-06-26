@@ -12,7 +12,15 @@ interface Version {
 }
 
 const versions: Version[] = [
-  {
+    {
+    version: '1.6.4',
+    date: '2026-06-26',
+    type: 'patch',
+    changes: [
+      { type: 'fix', text: '修复mac安裝问题' }
+    ]
+  },
+{
     version: '1.6.3',
     date: '2026-06-26',
     type: 'minor',
