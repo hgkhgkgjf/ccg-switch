@@ -424,6 +424,13 @@
             "updateToVersion": "Update to {{version}}",
             "switchToVersion": "Switch to {{version}}",
             "noVersions": "No versions available",
+            "nodeRuntime": {
+                "title": "Node.js runtime",
+                "missing": "Node.js is required before installing SDKs.",
+                "privateInstall": "Install private runtime",
+                "installing": "Installing runtime...",
+                "noSystemChange": "Uses CCG Switch private data only and does not modify system PATH."
+            },
             "missingBanner": "{{name}} is not installed yet. Install it to start chatting."
         }
     },

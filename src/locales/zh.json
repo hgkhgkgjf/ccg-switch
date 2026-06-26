@@ -413,6 +413,13 @@
             "updateToVersion": "更新到 {{version}}",
             "switchToVersion": "切换到 {{version}}",
             "noVersions": "暂无可用版本",
+            "nodeRuntime": {
+                "title": "Node.js 运行环境",
+                "missing": "安装 SDK 前需要可用的 Node.js 运行环境。",
+                "privateInstall": "安装私有运行环境",
+                "installing": "正在安装运行环境...",
+                "noSystemChange": "仅使用 CCG Switch 私有数据目录，不会修改系统 PATH。"
+            },
             "missingBanner": "{{name}} 尚未安装，安装后才能开始对话。"
         }
     },

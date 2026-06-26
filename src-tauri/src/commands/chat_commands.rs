@@ -113,10 +113,7 @@ fn find_git_entry(start: &Path) -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-fn resolve_git_dir(
-    repo_root: &Path,
-    git_entry: &Path,
-) -> Option<PathBuf> {
+fn resolve_git_dir(repo_root: &Path, git_entry: &Path) -> Option<PathBuf> {
     if git_entry.is_dir() {
         return Some(git_entry.to_path_buf());
     }
@@ -290,7 +287,10 @@ fn list_chat_git_branches_for_path(cwd: &Path) -> Result<Vec<ChatGitBranch>, Str
     let output = Command::new("git")
         .arg("-C")
         .arg(&repo_root)
-        .args(["branch", "--format=%(if)%(HEAD)%(then)*%(else) %(end)%(refname:short)"])
+        .args([
+            "branch",
+            "--format=%(if)%(HEAD)%(then)*%(else) %(end)%(refname:short)",
+        ])
         .output();
 
     if let Ok(output) = output {
@@ -307,7 +307,7 @@ fn list_chat_git_branches_for_path(cwd: &Path) -> Result<Vec<ChatGitBranch>, Str
                     if name.is_empty() {
                         return None;
                     }
-                    Some(ChatGitBranch {name, current})
+                    Some(ChatGitBranch { name, current })
                 })
                 .collect();
             branches.sort_by(|a, b| a.name.cmp(&b.name));
@@ -442,6 +442,22 @@ pub async fn chat_sdk_status(
     state: State<'_, ChatState>,
 ) -> Result<Vec<crate::chat::SdkStatus>, String> {
     state.manager.sdk_status().await
+}
+
+/// 返回 Node.js 运行环境状态。系统 Node 可用或私有 runtime 已安装时为 installed。
+#[tauri::command]
+pub async fn chat_node_runtime_status(
+    state: State<'_, ChatState>,
+) -> Result<crate::chat::NodeRuntimeStatus, String> {
+    state.manager.node_runtime_status().await
+}
+
+/// 安装 CCG Switch 私有 Node.js runtime。
+#[tauri::command]
+pub async fn chat_install_node_runtime(
+    state: State<'_, ChatState>,
+) -> Result<crate::chat::NodeRuntimeStatus, String> {
+    state.manager.install_node_runtime().await
 }
 
 /// 安装指定 SDK。npm 日志通过 "chat://sdk-install-log" 事件流式推送，
@@ -664,9 +680,7 @@ pub async fn permission_respond_plan_approval(
 ///   - macOS: osascript -e 'tell app "Terminal" to do script "cd <projectDir>"'
 ///   - Linux: 检测常见终端（gnome-terminal / konsole / xterm）
 #[tauri::command]
-pub fn chat_open_project_in_terminal(
-    project_dir: String,
-) -> Result<(), String> {
+pub fn chat_open_project_in_terminal(project_dir: String) -> Result<(), String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
         return Err("工作目录路径为空".to_string());
@@ -694,7 +708,10 @@ pub fn chat_open_project_in_terminal(
 
     #[cfg(target_os = "macos")]
     {
-        let script = format!("tell app \"Terminal\" to do script \"cd \\\"{}\\\"\"", trimmed);
+        let script = format!(
+            "tell app \"Terminal\" to do script \"cd \\\"{}\\\"\"",
+            trimmed
+        );
         Command::new("osascript")
             .args(&["-e", &script])
             .spawn()
@@ -748,16 +765,13 @@ pub fn chat_resume_session_in_terminal(
         return Err("恢复命令包含非法字符".to_string());
     }
 
-    let valid_project_dir = project_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|dir| {
-            if dir.is_empty() {
-                return false;
-            }
-            let path = Path::new(dir);
-            path.exists() && path.is_dir()
-        });
+    let valid_project_dir = project_dir.as_deref().map(str::trim).filter(|dir| {
+        if dir.is_empty() {
+            return false;
+        }
+        let path = Path::new(dir);
+        path.exists() && path.is_dir()
+    });
 
     #[cfg(target_os = "windows")]
     {
@@ -780,7 +794,10 @@ pub fn chat_resume_session_in_terminal(
 
     #[cfg(target_os = "macos")]
     {
-        let script = format!("tell app \"Terminal\" to do script \"{}\"", full_cmd.replace("\"", "\\\""));
+        let script = format!(
+            "tell app \"Terminal\" to do script \"{}\"",
+            full_cmd.replace("\"", "\\\"")
+        );
         Command::new("osascript")
             .args(&["-e", &script])
             .spawn()
@@ -790,10 +807,22 @@ pub fn chat_resume_session_in_terminal(
     #[cfg(target_os = "linux")]
     {
         let terminals = vec![
-            ("gnome-terminal", vec!["--", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
-            ("konsole", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
-            ("xterm", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
-            ("x-terminal-emulator", vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)]),
+            (
+                "gnome-terminal",
+                vec!["--", "bash", "-c", &format!("{}; exec bash", full_cmd)],
+            ),
+            (
+                "konsole",
+                vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)],
+            ),
+            (
+                "xterm",
+                vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)],
+            ),
+            (
+                "x-terminal-emulator",
+                vec!["-e", "bash", "-c", &format!("{}; exec bash", full_cmd)],
+            ),
         ];
 
         let mut opened = false;
@@ -943,15 +972,7 @@ mod tests {
 
         assert_eq!(
             args,
-            vec![
-                "/c",
-                "start",
-                "",
-                "/D",
-                project_dir,
-                "cmd",
-                "/K",
-            ]
+            vec!["/c", "start", "", "/D", project_dir, "cmd", "/K",]
         );
         assert!(!args.iter().any(|arg| arg.contains("cd /d")));
     }
@@ -981,10 +1002,20 @@ mod tests {
     #[test]
     fn lists_chat_git_branches_from_refs_heads() -> Result<(), String> {
         let dir = unique_test_dir("chat-git-list-branches");
-        write_file(&dir.join(".git").join("HEAD"), "ref: refs/heads/feature/chat-ui\n");
-        write_file(&dir.join(".git").join("refs").join("heads").join("main"), "0000000\n");
         write_file(
-            &dir.join(".git").join("refs").join("heads").join("feature").join("chat-ui"),
+            &dir.join(".git").join("HEAD"),
+            "ref: refs/heads/feature/chat-ui\n",
+        );
+        write_file(
+            &dir.join(".git").join("refs").join("heads").join("main"),
+            "0000000\n",
+        );
+        write_file(
+            &dir.join(".git")
+                .join("refs")
+                .join("heads")
+                .join("feature")
+                .join("chat-ui"),
             "0000000\n",
         );
 

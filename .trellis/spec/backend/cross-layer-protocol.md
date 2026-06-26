@@ -67,6 +67,76 @@ pub struct AskUserQuestionRequest {
 - 字段顺序无关紧要，但类型必须匹配（`string` ↔ `String`，`number` ↔ `u32/i64`）
 - 可选字段：`Option<T>` ↔ `T | null | undefined`
 
+## Scenario: Chat SDK Node Runtime Recovery
+
+### 1. Scope / Trigger
+
+- Trigger: Chat SDK installation needs `node` + `npm`, but a packaged Tauri GUI
+  app may start with a reduced `PATH` on macOS/Linux, or the user's machine may
+  not have Node.js installed at all.
+- Rust owns runtime detection, private runtime download, SHA256 verification,
+  extraction, and process environment preparation. The frontend owns only the
+  visible recovery UI and the user-clicked install action.
+
+### 2. Commands and Events
+
+```ts
+await invoke<NodeRuntimeStatus>('chat_node_runtime_status');
+await invoke<NodeRuntimeStatus>('chat_install_node_runtime');
+
+listen<NodeRuntimeInstallLogEvent>('chat://node-runtime-install-log', ...);
+listen<NodeRuntimeInstallDoneEvent>('chat://node-runtime-install-done', ...);
+```
+
+```rust
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeRuntimeStatus {
+    pub installed: bool,
+    pub node_path: Option<String>,
+    pub npm_path: Option<String>,
+    pub version: String,
+    pub install_dir: String,
+    pub source: String, // "private" | "system" | "missing"
+}
+```
+
+### 3. Contracts
+
+- `installed: true` requires both `node` and `npm` to resolve to real files.
+  A machine with only `node` but no `npm` is not SDK-install ready.
+- Detection order is `AI_BRIDGE_NODE` → CCG Switch private runtime →
+  GUI-missing/common Node directories (`/opt/homebrew/bin`, `/usr/local/bin`,
+  nvm/fnm/volta/n locations, Windows Program Files/AppData npm) → existing
+  `PATH`.
+- `chat_install_node_runtime` installs the official pinned Node.js archive into
+  `~/.ccg-switch/runtime/node/<version>/<platform-arch>/`. It must not modify
+  system `PATH`, shell profiles, Homebrew, global Node, or privileged system
+  locations.
+- Runtime archives must be downloaded from `https://nodejs.org/dist/<version>/`
+  and verified against pinned SHA256 values before extraction.
+- SDK install and daemon/prompt-enhancer child processes must receive an
+  enhanced `PATH` that prepends the selected `node` directory and `npm`
+  directory. This prevents `/usr/bin/env node` npm wrappers from failing when a
+  GUI app did not inherit the user's shell `PATH`.
+- Runtime install events must not include provider API keys, tokens, or other
+  chat credentials. Log payload is `{ line: string }`; done payload is
+  `{ success, error?, status? }`.
+
+### 4. Tests Required
+
+- Rust unit test: enhanced Node execution `PATH` prepends node/npm directories
+  and de-duplicates entries.
+- Rust unit test: private runtime status reports installed only when both
+  private `node` and `npm` exist.
+- Rust unit test: platform asset mapping is pinned to an official archive and
+  SHA256 digest.
+- Rust unit test: SHA256 mismatch is rejected before extraction.
+- Frontend unit test: missing runtime renders the private runtime install card
+  and disables SDK install/version controls.
+- Frontend store test: refresh calls both `chat_sdk_status` and
+  `chat_node_runtime_status`; install calls `chat_install_node_runtime`.
+
 ## Scenario: Chat Turn-Stopped System Notification
 
 ### 1. Scope / Trigger

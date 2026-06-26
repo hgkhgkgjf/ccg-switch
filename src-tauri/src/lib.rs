@@ -903,6 +903,8 @@ pub fn run() {
             chat_commands::chat_is_running,
             chat_commands::chat_start_daemon,
             chat_commands::chat_sdk_status,
+            chat_commands::chat_node_runtime_status,
+            chat_commands::chat_install_node_runtime,
             chat_commands::chat_install_sdk,
             chat_commands::chat_uninstall_sdk,
             chat_commands::chat_restart_daemon,

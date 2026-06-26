@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Check, Download, Loader2, Package, RefreshCw, RotateCw, Trash2} from 'lucide-react';
+import {Check, Cpu, Download, Loader2, Package, RefreshCw, RotateCw, Trash2} from 'lucide-react';
 import {useSdkStore} from '../../stores/useSdkStore';
 import type {SdkStatus} from '../../types/chat';
 
@@ -29,6 +29,11 @@ const SDK_DEPENDENCY_PANEL_FALLBACKS = {
     updateToVersion: 'Update to {{version}}',
     switchToVersion: 'Switch to {{version}}',
     noVersions: 'No versions available',
+    nodeRuntimeTitle: 'Node.js runtime',
+    nodeRuntimeMissing: 'Node.js is required before installing SDKs.',
+    nodeRuntimePrivateInstall: 'Install private runtime',
+    nodeRuntimeInstalling: 'Installing runtime...',
+    nodeRuntimeNoSystemChange: 'Uses CCG Switch private data only and does not modify system PATH.',
 };
 
 type TranslateOptions = Record<string, string>;
@@ -131,6 +136,19 @@ export function getSdkDependencyPanelLabels(t: TranslateFn) {
             {version: formatVersion(version)},
         ),
         noVersions: translateWithFallback(t, 'chat.sdk.noVersions', SDK_DEPENDENCY_PANEL_FALLBACKS.noVersions),
+        nodeRuntimeTitle: translateWithFallback(t, 'chat.sdk.nodeRuntime.title', SDK_DEPENDENCY_PANEL_FALLBACKS.nodeRuntimeTitle),
+        nodeRuntimeMissing: translateWithFallback(t, 'chat.sdk.nodeRuntime.missing', SDK_DEPENDENCY_PANEL_FALLBACKS.nodeRuntimeMissing),
+        nodeRuntimePrivateInstall: translateWithFallback(
+            t,
+            'chat.sdk.nodeRuntime.privateInstall',
+            SDK_DEPENDENCY_PANEL_FALLBACKS.nodeRuntimePrivateInstall,
+        ),
+        nodeRuntimeInstalling: translateWithFallback(t, 'chat.sdk.nodeRuntime.installing', SDK_DEPENDENCY_PANEL_FALLBACKS.nodeRuntimeInstalling),
+        nodeRuntimeNoSystemChange: translateWithFallback(
+            t,
+            'chat.sdk.nodeRuntime.noSystemChange',
+            SDK_DEPENDENCY_PANEL_FALLBACKS.nodeRuntimeNoSystemChange,
+        ),
     };
 }
 
@@ -261,10 +279,28 @@ function getPrimaryActionClass(action: SdkVersionAction, installed: boolean): st
  */
 export default function SdkDependencyPanel() {
     const { t } = useTranslation();
-    const { statuses, installing, logs, error, init, install, uninstall, refresh } =
+    const {
+        statuses,
+        installing,
+        logs,
+        error,
+        nodeRuntimeStatus,
+        nodeRuntimeInstalling,
+        nodeRuntimeLogs,
+        init,
+        install,
+        uninstall,
+        installNodeRuntime,
+        refresh,
+    } =
         useSdkStore();
     const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
     const labels = getSdkDependencyPanelLabels(t);
+    const nodeRuntimeMissing = nodeRuntimeStatus?.installed === false;
+    const showNodeRuntimeCard = nodeRuntimeInstalling || nodeRuntimeMissing;
+    const sdkInstallBlocked = nodeRuntimeMissing || nodeRuntimeInstalling;
+    const activeLogs = (nodeRuntimeInstalling || nodeRuntimeLogs.length > 0) ? nodeRuntimeLogs : logs;
+    const activeLogPlaceholder = nodeRuntimeInstalling ? labels.nodeRuntimeInstalling : labels.installing;
 
     useEffect(() => {
         init();
@@ -285,6 +321,52 @@ export default function SdkDependencyPanel() {
                 </button>
             </div>
 
+            {showNodeRuntimeCard && (
+                <div className="sdk-node-runtime-card rounded-lg border border-amber-200 bg-amber-50/70 p-4 shadow-sm dark:border-warning/25 dark:bg-warning/10 dark:shadow-none">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-700 dark:text-warning">
+                            {nodeRuntimeInstalling ? (
+                                <Loader2 size={15} className="animate-spin" />
+                            ) : (
+                                <Cpu size={15} />
+                            )}
+                        </span>
+                        <span className="min-w-0 truncate text-base font-semibold leading-5 text-slate-900 dark:text-base-content">
+                            {labels.nodeRuntimeTitle}
+                        </span>
+                        <span className="rounded border border-amber-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold leading-4 text-amber-800 dark:border-transparent dark:bg-warning/15 dark:text-warning">
+                            {nodeRuntimeStatus?.version ?? 'v24.11.1'}
+                        </span>
+                    </div>
+                    <p className="mt-1 text-sm leading-5 text-slate-700 dark:text-base-content/70">
+                        {labels.nodeRuntimeMissing}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-base-content/55">
+                        {labels.nodeRuntimeNoSystemChange}
+                    </p>
+                    {nodeRuntimeStatus?.installDir && (
+                        <p className="mt-1 truncate text-xs leading-5 text-slate-500 dark:text-base-content/45" title={nodeRuntimeStatus.installDir}>
+                            {nodeRuntimeStatus.installDir}
+                        </p>
+                    )}
+                    <button
+                        type="button"
+                        className="btn btn-sm mt-3 h-9 min-h-9 justify-center gap-2 border-none bg-amber-100 px-4 text-amber-800 shadow-none hover:bg-amber-200 disabled:bg-amber-100 disabled:text-amber-800 disabled:opacity-60 dark:bg-warning/15 dark:text-warning dark:hover:bg-warning/20 dark:disabled:bg-warning/15 dark:disabled:text-warning"
+                        title={labels.nodeRuntimePrivateInstall}
+                        aria-label={labels.nodeRuntimePrivateInstall}
+                        onClick={installNodeRuntime}
+                        disabled={nodeRuntimeInstalling}
+                    >
+                        {nodeRuntimeInstalling ? (
+                            <Loader2 size={15} className="animate-spin" />
+                        ) : (
+                            <Download size={15} />
+                        )}
+                        <span>{nodeRuntimeInstalling ? labels.nodeRuntimeInstalling : labels.nodeRuntimePrivateInstall}</span>
+                    </button>
+                </div>
+            )}
+
             <div className="sdk-dependency-list space-y-4">
                 {statuses.map((sdk) => {
                     const isInstalling = installing === sdk.id;
@@ -296,7 +378,7 @@ export default function SdkDependencyPanel() {
                         targetVersion,
                         labels,
                     });
-                    const actionDisabled = !!installing || action.disabled;
+                    const actionDisabled = !!installing || sdkInstallBlocked || action.disabled;
                     const primaryActionLabel = isInstalling ? labels.installing : action.label;
                     const currentChipText = sdk.currentVersion
                         ? formatVersion(sdk.currentVersion)
@@ -359,7 +441,7 @@ export default function SdkDependencyPanel() {
                                 <select
                                     className="select select-bordered select-sm h-8 min-h-8 w-full rounded-md border-slate-200 bg-white text-sm text-slate-900 shadow-none dark:border-base-300 dark:bg-base-100/60 dark:text-base-content"
                                     value={targetVersion}
-                                    disabled={!!installing || versionOptions.length === 0}
+                                    disabled={!!installing || sdkInstallBlocked || versionOptions.length === 0}
                                     aria-label={`${labels.targetVersion}: ${sdk.displayName}`}
                                     onChange={(event) => {
                                         setSelectedVersions((prev) => ({
@@ -405,7 +487,7 @@ export default function SdkDependencyPanel() {
                                         title={labels.uninstall}
                                         aria-label={`${labels.uninstall}: ${sdk.displayName}`}
                                         onClick={() => uninstall(sdk.id)}
-                                        disabled={!!installing}
+                                        disabled={!!installing || sdkInstallBlocked}
                                     >
                                         <Trash2 size={15} />
                                         {labels.uninstall}
@@ -430,19 +512,19 @@ export default function SdkDependencyPanel() {
 
             {error && <div className="alert alert-error py-2 text-sm">{error}</div>}
 
-            {(installing || logs.length > 0) && (
+            {(installing || nodeRuntimeInstalling || activeLogs.length > 0) && (
                 <details
-                    open={!!installing}
+                    open={!!installing || nodeRuntimeInstalling}
                     className="sdk-install-log rounded-lg border border-slate-200 bg-white text-xs text-slate-600 shadow-sm dark:border-base-300 dark:bg-base-200/60 dark:text-base-content/70 dark:shadow-none"
                 >
                     <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-700 marker:text-slate-400 dark:text-base-content dark:marker:text-base-content/45">
                         {labels.installLog}
                     </summary>
                     <div className="max-h-28 overflow-y-auto border-t border-slate-100 px-3 py-2 font-mono leading-5 text-slate-500 dark:border-base-300/60 dark:text-base-content/60">
-                        {logs.length === 0 ? (
-                            <div className="whitespace-pre-wrap">{labels.installing}</div>
+                        {activeLogs.length === 0 ? (
+                            <div className="whitespace-pre-wrap">{activeLogPlaceholder}</div>
                         ) : (
-                            logs.map((line, i) => (
+                            activeLogs.map((line, i) => (
                                 <div key={i} className="whitespace-pre-wrap">
                                     {line}
                                 </div>

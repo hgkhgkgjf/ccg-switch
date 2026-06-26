@@ -248,7 +248,13 @@ where
     // .cmd directly, so route it through `cmd.exe /C`. On Unix, invoke npm
     // directly.
     let mut cmd = build_npm_command(&npm, &sdk_dir, sdk, &package_spec);
+    let path_env = resources::node_execution_path_env(
+        node_path,
+        Some(&npm),
+        std::env::var_os("PATH").as_deref(),
+    );
     cmd.current_dir(&sdk_dir)
+        .env("PATH", path_env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

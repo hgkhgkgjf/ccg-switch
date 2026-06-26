@@ -1,7 +1,14 @@
 import {create} from 'zustand';
 import {invoke} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
-import type {SdkInstallDoneEvent, SdkInstallLogEvent, SdkStatus,} from '../types/chat';
+import type {
+    NodeRuntimeInstallDoneEvent,
+    NodeRuntimeInstallLogEvent,
+    NodeRuntimeStatus,
+    SdkInstallDoneEvent,
+    SdkInstallLogEvent,
+    SdkStatus,
+} from '../types/chat';
 
 interface SdkState {
     statuses: SdkStatus[];
@@ -10,12 +17,16 @@ interface SdkState {
     installing: string | null;
     /** 安装日志（按行累积，最多保留最近 200 行） */
     logs: string[];
+    nodeRuntimeStatus: NodeRuntimeStatus | null;
+    nodeRuntimeInstalling: boolean;
+    nodeRuntimeLogs: string[];
     error: string | null;
     initialized: boolean;
 
     init: () => Promise<void>;
     refresh: () => Promise<void>;
     install: (sdkId: string, version?: string) => Promise<void>;
+    installNodeRuntime: () => Promise<void>;
     uninstall: (sdkId: string) => Promise<void>;
     clearLogs: () => void;
 }
@@ -28,6 +39,9 @@ export const useSdkStore = create<SdkState>((set, get) => ({
     loading: false,
     installing: null,
     logs: [],
+    nodeRuntimeStatus: null,
+    nodeRuntimeInstalling: false,
+    nodeRuntimeLogs: [],
     error: null,
     initialized: false,
 
@@ -59,15 +73,42 @@ export const useSdkStore = create<SdkState>((set, get) => ({
             },
         );
 
-        unlisteners = [logUn, doneUn];
+        const runtimeLogUn = await listen<NodeRuntimeInstallLogEvent>(
+            'chat://node-runtime-install-log',
+            (event) => {
+                set((state) => {
+                    const next = [...state.nodeRuntimeLogs, event.payload.line];
+                    if (next.length > MAX_LOG_LINES) next.splice(0, next.length - MAX_LOG_LINES);
+                    return { nodeRuntimeLogs: next };
+                });
+            },
+        );
+
+        const runtimeDoneUn = await listen<NodeRuntimeInstallDoneEvent>(
+            'chat://node-runtime-install-done',
+            (event) => {
+                const { success, error, status } = event.payload;
+                set({
+                    nodeRuntimeInstalling: false,
+                    nodeRuntimeStatus: status ?? get().nodeRuntimeStatus,
+                    error: success ? null : error || 'Node.js 运行环境安装失败',
+                });
+                get().refresh();
+            },
+        );
+
+        unlisteners = [logUn, doneUn, runtimeLogUn, runtimeDoneUn];
         await get().refresh();
     },
 
     refresh: async () => {
         set({ loading: true });
         try {
-            const statuses = await invoke<SdkStatus[]>('chat_sdk_status');
-            set({ statuses, loading: false });
+            const [statuses, nodeRuntimeStatus] = await Promise.all([
+                invoke<SdkStatus[]>('chat_sdk_status'),
+                invoke<NodeRuntimeStatus>('chat_node_runtime_status'),
+            ]);
+            set({ statuses, nodeRuntimeStatus, loading: false });
         } catch (e) {
             set({ error: String(e), loading: false });
         }
@@ -85,6 +126,16 @@ export const useSdkStore = create<SdkState>((set, get) => ({
         }
     },
 
+    installNodeRuntime: async () => {
+        if (get().nodeRuntimeInstalling) return;
+        set({ nodeRuntimeInstalling: true, nodeRuntimeLogs: [], error: null });
+        try {
+            await invoke('chat_install_node_runtime');
+        } catch (e) {
+            set({ nodeRuntimeInstalling: false, error: String(e) });
+        }
+    },
+
     uninstall: async (sdkId) => {
         try {
             await invoke('chat_uninstall_sdk', { sdkId });
@@ -94,5 +145,5 @@ export const useSdkStore = create<SdkState>((set, get) => ({
         }
     },
 
-    clearLogs: () => set({ logs: [] }),
+    clearLogs: () => set({ logs: [], nodeRuntimeLogs: [] }),
 }));

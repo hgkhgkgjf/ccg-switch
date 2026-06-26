@@ -1,16 +1,20 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import SdkDependencyPanel, {getSdkDependencyPanelLabels, getSdkDependencyVersionAction,} from './SdkDependencyPanel';
-import type {SdkStatus} from '../../types/chat';
+import type {NodeRuntimeStatus, SdkStatus} from '../../types/chat';
 
 const storeState = vi.hoisted(() => ({
     statuses: [] as SdkStatus[],
     installing: null as string | null,
     logs: [] as string[],
     error: null as string | null,
+    nodeRuntimeStatus: null as NodeRuntimeStatus | null,
+    nodeRuntimeInstalling: false,
+    nodeRuntimeLogs: [] as string[],
     init: vi.fn(),
     install: vi.fn(),
     uninstall: vi.fn(),
+    installNodeRuntime: vi.fn(),
     refresh: vi.fn(),
 }));
 
@@ -53,6 +57,11 @@ vi.mock('react-i18next', () => ({
                 'chat.sdk.switchToVersion': 'Switch to {{version}}',
                 'chat.sdk.noVersions': 'No versions available',
                 'chat.sdk.installLog': 'Install log',
+                'chat.sdk.nodeRuntime.title': 'Node.js runtime',
+                'chat.sdk.nodeRuntime.missing': 'Node.js is required before installing SDKs.',
+                'chat.sdk.nodeRuntime.privateInstall': 'Install private runtime',
+                'chat.sdk.nodeRuntime.installing': 'Installing runtime...',
+                'chat.sdk.nodeRuntime.noSystemChange': 'Uses CCG Switch private data only and does not modify system PATH.',
                 'common.close': 'Close panel',
                 'common.cancel': 'Cancel panel',
             };
@@ -90,9 +99,20 @@ function resetStoreState() {
     storeState.installing = null;
     storeState.logs = [];
     storeState.error = null;
+    storeState.nodeRuntimeStatus = {
+        installed: true,
+        nodePath: 'C:/node/node.exe',
+        npmPath: 'C:/node/npm.cmd',
+        version: 'v24.11.1',
+        installDir: 'C:/node',
+        source: 'system',
+    };
+    storeState.nodeRuntimeInstalling = false;
+    storeState.nodeRuntimeLogs = [];
     storeState.init.mockClear();
     storeState.install.mockClear();
     storeState.uninstall.mockClear();
+    storeState.installNodeRuntime.mockClear();
     storeState.refresh.mockClear();
 }
 
@@ -256,6 +276,48 @@ describe('SdkDependencyPanel', () => {
         expect(html).toContain('Current version');
         expect(html).toContain('disabled=""');
         expect(html).toContain('sdk-action-current');
+    });
+
+    it('shows a private Node runtime install card and disables SDK install when runtime is missing', () => {
+        resetStoreState();
+        storeState.nodeRuntimeStatus = {
+            installed: false,
+            nodePath: null,
+            npmPath: null,
+            version: 'v24.11.1',
+            installDir: 'C:/Users/tester/.ccg-switch/runtime/node/v24.11.1/win-x64',
+            source: 'missing',
+        };
+
+        const html = renderToStaticMarkup(<SdkDependencyPanel/>);
+
+        expect(html).toContain('sdk-node-runtime-card');
+        expect(html).toContain('Node.js runtime');
+        expect(html).toContain('Node.js is required before installing SDKs.');
+        expect(html).toContain('Install private runtime');
+        expect(html).toContain('does not modify system PATH');
+        expect(html).toContain('disabled=""');
+    });
+
+    it('keeps runtime install logs expanded while private Node runtime is installing', () => {
+        resetStoreState();
+        storeState.nodeRuntimeStatus = {
+            installed: false,
+            nodePath: null,
+            npmPath: null,
+            version: 'v24.11.1',
+            installDir: 'C:/Users/tester/.ccg-switch/runtime/node/v24.11.1/win-x64',
+            source: 'missing',
+        };
+        storeState.nodeRuntimeInstalling = true;
+        storeState.nodeRuntimeLogs = ['Downloading Node.js...', 'Verifying SHA256...'];
+
+        const html = renderToStaticMarkup(<SdkDependencyPanel/>);
+
+        expect(html).toContain('<details open="" class="sdk-install-log');
+        expect(html).toContain('Installing runtime...');
+        expect(html).toContain('Downloading Node.js...');
+        expect(html).toContain('Verifying SHA256...');
     });
 
     it('labels non-current selected installed versions as switch actions', () => {

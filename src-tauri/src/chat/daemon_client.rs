@@ -17,6 +17,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use super::protocol::{DaemonEvent, DaemonRequest, RawLine, StreamLine};
+use super::resources;
 
 /// Session ID for permission file IPC. Hardcoded for now; can be randomized later.
 pub const SESSION_ID: &str = "default";
@@ -148,14 +149,21 @@ impl DaemonClient {
         let bridge_dir_normalized = normalize_path(&self.bridge_dir);
 
         let mut cmd = Command::new(&self.node_path);
+        let path_env = resources::node_execution_path_env(
+            &self.node_path,
+            None,
+            std::env::var_os("PATH").as_deref(),
+        );
         cmd.arg(&daemon_js_normalized)
             .current_dir(&bridge_dir_normalized)
+            .env("PATH", path_env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let provider_config = self.provider_config.read().await.clone();
-        for (key, value) in daemon_env_vars(&self.permission_dir, &self.deps_dir, &provider_config) {
+        for (key, value) in daemon_env_vars(&self.permission_dir, &self.deps_dir, &provider_config)
+        {
             cmd.env(key, value);
         }
 
@@ -235,11 +243,7 @@ impl DaemonClient {
         Ok(())
     }
 
-    pub async fn update_provider_config(
-        &self,
-        api_key: Option<String>,
-        base_url: Option<String>,
-    ) {
+    pub async fn update_provider_config(&self, api_key: Option<String>, base_url: Option<String>) {
         *self.provider_config.write().await = ProviderRuntimeConfig { api_key, base_url };
     }
 
@@ -496,7 +500,8 @@ mod tests {
     #[test]
     fn daemon_env_vars_include_sdk_deps_dir_and_provider_config() {
         let deps_dir = PathBuf::from(r"C:\Users\alice\.ccg-switch\ai-bridge-deps");
-        let permission_dir = PathBuf::from(r"C:\Users\alice\AppData\Roaming\ccg-switch\permissions");
+        let permission_dir =
+            PathBuf::from(r"C:\Users\alice\AppData\Roaming\ccg-switch\permissions");
         let provider_config = ProviderRuntimeConfig {
             api_key: Some("secret-token".into()),
             base_url: Some("https://api.example.invalid".into()),
@@ -515,7 +520,10 @@ mod tests {
             vars.get("CLAUDE_PERMISSION_DIR").map(String::as_str),
             permission_dir.to_str()
         );
-        assert_eq!(vars.get("CLAUDE_SESSION_ID").map(String::as_str), Some("default"));
+        assert_eq!(
+            vars.get("CLAUDE_SESSION_ID").map(String::as_str),
+            Some("default")
+        );
         assert_eq!(
             vars.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
             Some("secret-token")

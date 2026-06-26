@@ -206,6 +206,15 @@ See `src/components/providers/ProviderCard.tsx` and
   `Close`, `Refresh`, `Installed`, `Not installed`, `Install`, `Uninstall`, and
   `Installing...` instead of `chat.sdk.*` / `common.close` keys while i18n is
   still loading or incomplete.
+  The same modal owns Node.js runtime recovery for Chat SDK installation. When
+  `chat_node_runtime_status` reports `installed: false`, render a compact
+  runtime card before the SDK cards, disable SDK install/version controls, and
+  offer `chat_install_node_runtime` as a user-clicked one-key install path.
+  The copy must state that this installs a CCG Switch private runtime in the
+  user data directory and does not modify system `PATH`, shell profiles,
+  Homebrew, or global Node. Runtime download/install logs may reuse the SDK log
+  panel styling, but keep runtime installing state separate from SDK installing
+  state in the store.
   The SDK dependency panel also owns version-management presentation. It should
   render target-version selects, current/latest/default version metadata,
   update availability, and install/update/current/switch action labels through

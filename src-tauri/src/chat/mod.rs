@@ -17,6 +17,7 @@
 
 mod daemon_client;
 mod manager;
+mod node_runtime;
 mod permission_watcher;
 mod protocol;
 mod resources;
@@ -24,6 +25,7 @@ mod sdk_installer;
 mod slash_commands;
 
 pub use manager::ChatManager;
+pub use node_runtime::NodeRuntimeStatus;
 pub use permission_watcher::{
     permission_response_session_id, write_ask_user_question_response, write_plan_approval_response,
     write_tool_permission_response,

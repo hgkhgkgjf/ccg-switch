@@ -159,3 +159,25 @@ export interface SdkInstallDoneEvent {
     success: boolean;
     error?: string | null;
 }
+
+/** Node.js runtime 状态（对应 Rust NodeRuntimeStatus） */
+export interface NodeRuntimeStatus {
+    installed: boolean;
+    nodePath?: string | null;
+    npmPath?: string | null;
+    version: string;
+    installDir: string;
+    source: 'private' | 'system' | 'missing' | string;
+}
+
+/** "chat://node-runtime-install-log" 事件载荷 */
+export interface NodeRuntimeInstallLogEvent {
+    line: string;
+}
+
+/** "chat://node-runtime-install-done" 事件载荷 */
+export interface NodeRuntimeInstallDoneEvent {
+    success: boolean;
+    error?: string | null;
+    status?: NodeRuntimeStatus | null;
+}

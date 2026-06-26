@@ -325,6 +325,36 @@ impl ChatManager {
         Ok(super::sdk_installer::all_status(&deps).await)
     }
 
+    /// 返回 Node.js 运行环境状态。优先报告 CCG Switch 私有 runtime。
+    pub async fn node_runtime_status(
+        &self,
+    ) -> Result<super::node_runtime::NodeRuntimeStatus, String> {
+        super::node_runtime::status()
+    }
+
+    /// 一键安装 CCG Switch 私有 Node.js runtime。不会修改系统 PATH 或全局 Node。
+    pub async fn install_node_runtime(
+        &self,
+    ) -> Result<super::node_runtime::NodeRuntimeStatus, String> {
+        let app = self.app.clone();
+        let result = super::node_runtime::install(move |line| {
+            let _ = app.emit("chat://node-runtime-install-log", json!({ "line": line }));
+        })
+        .await;
+
+        let status_for_event = result.as_ref().ok().cloned();
+        let _ = self.app.emit(
+            "chat://node-runtime-install-done",
+            json!({
+                "success": result.is_ok(),
+                "error": result.as_ref().err(),
+                "status": status_for_event,
+            }),
+        );
+
+        result
+    }
+
     /// 安装指定 SDK，npm 日志通过 "chat://sdk-install-log" 事件推送。
     /// 安装成功后重启 daemon 以加载新装的 SDK。
     pub async fn install_sdk(&self, sdk_id: String, version: Option<String>) -> Result<(), String> {
@@ -366,9 +396,7 @@ impl ChatManager {
         super::sdk_installer::uninstall_sdk(sdk, &deps)
     }
 
-    async fn stop_cached_daemon_before_sdk_uninstall(
-        client: Option<Arc<dyn ManagerDaemonClient>>,
-    ) {
+    async fn stop_cached_daemon_before_sdk_uninstall(client: Option<Arc<dyn ManagerDaemonClient>>) {
         if let Some(client) = client {
             if client.is_running() {
                 client.stop().await;
@@ -437,10 +465,13 @@ impl ChatManager {
         .to_string();
 
         let mut cmd = tokio::process::Command::new(&node);
+        let path_env =
+            resources::node_execution_path_env(&node, None, std::env::var_os("PATH").as_deref());
         cmd.arg(&script)
             .current_dir(&bridge_norm)
             .env("AI_BRIDGE_DEPS_DIR", &deps)
             .env("CLAUDE_SESSION_ID", "default")
+            .env("PATH", path_env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
