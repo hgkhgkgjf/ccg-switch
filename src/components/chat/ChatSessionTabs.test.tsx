@@ -45,6 +45,7 @@ function createTab(overrides: Partial<ChatSessionTab>): ChatSessionTab {
         handoffContextProvider: null,
         status: 'idle',
         error: null,
+        subagentRuns: {},
         createdAt: 1,
         updatedAt: 1,
         ...overrides,

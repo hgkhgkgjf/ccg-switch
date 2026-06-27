@@ -47,6 +47,29 @@ export function isSupportedChatProvider(providerId: string): boolean {
     return providerId === 'claude' || providerId === 'codex';
 }
 
+export type SessionProviderFilter = 'all' | 'claude' | 'codex';
+
+/**
+ * Toggle the provider filter: clicking the active provider clears it back to `all`,
+ * otherwise switches to the clicked provider (the two providers are mutually exclusive).
+ */
+export function toggleSessionProviderFilter(
+    current: SessionProviderFilter,
+    target: Exclude<SessionProviderFilter, 'all'>,
+): SessionProviderFilter {
+    return current === target ? 'all' : target;
+}
+
+export function filterSessionsByProvider<T extends Pick<SessionMeta, 'providerId'>>(
+    sessions: T[],
+    providerFilter: SessionProviderFilter,
+): T[] {
+    if (providerFilter === 'all') return sessions;
+    return sessions.filter(
+        (session) => session.providerId.trim().toLowerCase() === providerFilter,
+    );
+}
+
 export function filterSupportedChatSessions(sessions: SessionMeta[]): SessionMeta[] {
     return sessions.filter((session) => isSupportedChatProvider(session.providerId));
 }
@@ -173,7 +196,7 @@ export function shouldShowSessionRefreshStatus(loadingSessions: boolean, visible
 export function buildRecentChatProjectGroups({
     projects,
     sessionsByProject,
-    limitPerProject = 5,
+    limitPerProject,
     recentSince,
 }: {
     projects: ChatSessionProjectInfo[];
@@ -181,7 +204,11 @@ export function buildRecentChatProjectGroups({
     limitPerProject?: number;
     recentSince?: number;
 }): RecentChatProjectGroup[] {
-    const safeLimit = Math.max(1, Math.floor(limitPerProject));
+    // When limitPerProject is omitted, return the full recent list per project so
+    // the UI can offer a "show more" affordance instead of silently truncating.
+    const safeLimit = typeof limitPerProject === 'number' && Number.isFinite(limitPerProject)
+        ? Math.max(1, Math.floor(limitPerProject))
+        : null;
     const safeRecentSince = typeof recentSince === 'number' && Number.isFinite(recentSince)
         ? recentSince
         : null;
@@ -189,7 +216,7 @@ export function buildRecentChatProjectGroups({
     return projects
         .map((project) => {
             const projectKey = normalizeProjectPathForCache(project.path);
-            const sessions = (sessionsByProject.get(projectKey) ?? [])
+            const recentSessions = (sessionsByProject.get(projectKey) ?? [])
                 .filter((session) => isSupportedChatProvider(session.providerId))
                 .filter((session) => isSessionInProject(session, project.path))
                 .filter((session) => !session.archived)
@@ -200,8 +227,10 @@ export function buildRecentChatProjectGroups({
                         return left.pinned ? -1 : 1;
                     }
                     return right.lastActiveAt - left.lastActiveAt;
-                })
-                .slice(0, safeLimit);
+                });
+            const sessions = safeLimit === null
+                ? recentSessions
+                : recentSessions.slice(0, safeLimit);
 
             return {
                 projectName: project.name,

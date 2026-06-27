@@ -89,6 +89,7 @@ describe('useProviderStore', () => {
     it('defers chat daemon restart when another tab is still streaming', async () => {
         const runningTab: ChatSessionTab = {
             key: 'session:background',
+            subagentRuns: {},
             messages: [{
                 id: 'assistant-1',
                 role: 'assistant',

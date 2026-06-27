@@ -13,6 +13,7 @@ import EnvCheckerPanel from '../components/settings/EnvCheckerPanel';
 import AboutPanel from '../components/settings/AboutPanel';
 import BackupPanel from '../components/settings/BackupPanel';
 import WebDavBackupPanel from '../components/settings/WebDavBackupPanel';
+import DebugModePanel from '../components/settings/DebugModePanel';
 
 type SettingsTab = 'general' | 'proxy' | 'advanced' | 'about';
 
@@ -342,6 +343,7 @@ function Settings() {
                     <BackupPanel />
                     <WebDavBackupPanel />
                     <EnvCheckerPanel />
+                    <DebugModePanel />
                 </div>
 
                 <div className={activeTab !== 'about' ? 'hidden' : ''}>

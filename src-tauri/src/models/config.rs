@@ -16,6 +16,10 @@ fn default_check_update_interval_hours() -> u32 {
     24
 }
 
+fn default_debug_mode() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub theme: String,
@@ -31,6 +35,11 @@ pub struct Config {
         rename = "checkUpdateIntervalHours"
     )]
     pub check_update_interval_hours: u32,
+    /// When enabled, the chat daemon runs with verbose diagnostics
+    /// (`CLAUDE_DEBUG=1`) so SDK/Node failures surface their root cause in the
+    /// debug log instead of failing silently.
+    #[serde(default = "default_debug_mode", rename = "debugMode")]
+    pub debug_mode: bool,
 }
 
 impl Default for Config {
@@ -42,6 +51,7 @@ impl Default for Config {
             preferred_terminal: "powershell".to_string(),
             auto_check_update: default_auto_check_update(),
             check_update_interval_hours: default_check_update_interval_hours(),
+            debug_mode: default_debug_mode(),
         }
     }
 }

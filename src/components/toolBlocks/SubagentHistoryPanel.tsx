@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {
     ArrowUpRight,
@@ -34,6 +34,8 @@ interface SubagentHistoryPanelProps {
     enabled: boolean;
     hasVisibleMeta?: boolean;
     result?: ToolResultBlock | null;
+    /** 父 Task 工具块 id；子代理 live 消息按它路由(== 子代理消息的 parent_tool_use_id)。 */
+    toolId?: string | null;
 }
 
 interface SubagentProcessSummaryProps {
@@ -297,6 +299,7 @@ export default function SubagentHistoryPanel({
     enabled,
     hasVisibleMeta = false,
     result,
+    toolId,
 }: SubagentHistoryPanelProps) {
     const { t } = useTranslation();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -307,6 +310,10 @@ export default function SubagentHistoryPanel({
     const sessionId = useChatStore((state) => state.sessionId);
     const sourcePath = useChatStore((state) => state.activeSession?.sourcePath ?? null);
     const currentCwd = useChatStore((state) => state.currentCwd);
+    // Live trajectory streamed into this Task card (keyed by the Task tool_use id).
+    // When present it takes over from the on-disk history load.
+    const liveMessages = useChatStore((state) => (toolId ? state.subagentRuns[toolId] : undefined));
+    const hasLive = Boolean(liveMessages && liveMessages.length > 0);
     const historyRequest = resolveSubagentHistoryRequest({
         sessionId,
         sourcePath,
@@ -320,27 +327,45 @@ export default function SubagentHistoryPanel({
         canLoad: canLoadHistory,
     } = historyRequest;
     const runtimeMeta = extractSubagentResultRuntimeMeta(result);
-    const process = buildSubagentProcessModel(messages, runtimeMeta);
+    const renderMessages = hasLive ? (liveMessages as ChatMessage[]) : messages;
+    const process = buildSubagentProcessModel(renderMessages, runtimeMeta);
+    // Identity of the on-disk load; used to dedupe + recover from mid-flight
+    // dep changes without leaving `loading` stuck true (the previous bug).
+    const loadKey = `${activeProvider}|${requestSessionId ?? ''}|${requestSourcePath ?? ''}|${agentId ?? ''}|${description ?? ''}`;
+    const loadedKeyRef = useRef<string>('');
 
     useEffect(() => {
         setMessages([]);
         setLoaded(false);
         setError(null);
-    }, [agentId, description, sessionId, sourcePath, currentCwd]);
+        loadedKeyRef.current = '';
+    }, [loadKey]);
 
     useEffect(() => {
-        if (!enabled || loaded || loading) {
+        // Live data wins — never disk-load while streaming into the card.
+        if (!enabled || hasLive) {
             return;
         }
         if (activeProvider !== 'claude') {
             setLoaded(true);
             return;
         }
+        // Still running (no tool_result yet): show a "running" state instead of
+        // loading an incomplete on-disk session. Disk load only for finished runs.
+        if (!result) {
+            return;
+        }
         if (!canLoadHistory) {
             setLoaded(true);
             return;
         }
+        // Dedupe by identity (not by `loading`), so a cancelled in-flight load
+        // can always be superseded by a fresh one for the settled identity.
+        if (loadedKeyRef.current === loadKey) {
+            return;
+        }
 
+        loadedKeyRef.current = loadKey;
         const resolvedRequestSessionId = requestSessionId ?? 'subagent';
         let cancelled = false;
         setLoading(true);
@@ -365,6 +390,7 @@ export default function SubagentHistoryPanel({
                 }
                 setLoaded(true);
                 setError(String(err));
+                loadedKeyRef.current = ''; // allow retry on a later render
             })
             .finally(() => {
                 if (!cancelled) {
@@ -375,17 +401,22 @@ export default function SubagentHistoryPanel({
         return () => {
             cancelled = true;
         };
-    }, [activeProvider, agentId, canLoadHistory, description, enabled, loaded, loading, requestSessionId, requestSourcePath]);
+    }, [
+        enabled,
+        hasLive,
+        result,
+        activeProvider,
+        agentId,
+        canLoadHistory,
+        description,
+        loadKey,
+        requestSessionId,
+        requestSourcePath,
+    ]);
 
-    if (loading) {
-        return (
-            <div className="agent-history-placeholder agent-history-placeholder-inline">
-                <div className="agent-history-placeholder-text">
-                    <Loader2 className="agent-history-placeholder-icon animate-spin" aria-hidden="true" />
-                    <span>{t('tools.subagentHistoryLoading')}</span>
-                </div>
-            </div>
-        );
+    // Live trajectory: render immediately, bypassing all disk-load states.
+    if (hasLive) {
+        return renderTrajectory();
     }
 
     if (activeProvider !== 'claude') {
@@ -397,6 +428,30 @@ export default function SubagentHistoryPanel({
                 </div>
                 <div className="agent-history-placeholder-note">
                     {t('tools.subagentHistoryUnavailable')}
+                </div>
+            </div>
+        );
+    }
+
+    // No tool_result yet → the sub-agent is still running. Show a running state
+    // rather than a permanent spinner (the reported "stuck loading" symptom).
+    if (!result) {
+        return (
+            <div className="agent-history-placeholder agent-history-placeholder-inline">
+                <div className="agent-history-placeholder-text">
+                    <Loader2 className="agent-history-placeholder-icon animate-spin" aria-hidden="true" />
+                    <span>{t('tools.subagentRunning', '子代理运行中…')}</span>
+                </div>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="agent-history-placeholder agent-history-placeholder-inline">
+                <div className="agent-history-placeholder-text">
+                    <Loader2 className="agent-history-placeholder-icon animate-spin" aria-hidden="true" />
+                    <span>{t('tools.subagentHistoryLoading')}</span>
                 </div>
             </div>
         );
@@ -444,44 +499,48 @@ export default function SubagentHistoryPanel({
         );
     }
 
-    return (
-        <div className="tool-section">
-            <div className="tool-section-label">{t('tools.subagentHistory')}:</div>
-            <SubagentProcessSummary
-                agentId={agentId}
-                requestSessionId={requestSessionId}
-                currentCwd={currentCwd}
-                process={process}
-            />
-            <div className="space-y-3">
-                {messages.map((message, messageIndex) => {
-                    if (!shouldRenderChatMessage(message)) {
-                        return null;
-                    }
-                    const blocks = getRenderableContentBlocks(message.raw);
-                    if (blocks.length > 0) {
+    return renderTrajectory();
+
+    function renderTrajectory() {
+        return (
+            <div className="tool-section">
+                <div className="tool-section-label">{t('tools.subagentHistory')}:</div>
+                <SubagentProcessSummary
+                    agentId={agentId}
+                    requestSessionId={requestSessionId}
+                    currentCwd={currentCwd}
+                    process={process}
+                />
+                <div className="space-y-3">
+                    {renderMessages.map((message, messageIndex) => {
+                        if (!shouldRenderChatMessage(message)) {
+                            return null;
+                        }
+                        const blocks = getRenderableContentBlocks(message.raw);
+                        if (blocks.length > 0) {
+                            return (
+                                <div key={message.id} className="agent-history-message assistant-message-flow">
+                                    <ContentBlockRenderer
+                                        blocks={blocks}
+                                        findToolResult={(id) => findToolResult(renderMessages, id, messageIndex)}
+                                        compact
+                                    />
+                                </div>
+                            );
+                        }
+
+                        if (!message.content.trim()) {
+                            return null;
+                        }
+
                         return (
-                            <div key={message.id} className="agent-history-message assistant-message-flow">
-                                <ContentBlockRenderer
-                                    blocks={blocks}
-                                    findToolResult={(toolId) => findToolResult(messages, toolId, messageIndex)}
-                                    compact
-                                />
+                            <div key={message.id} className="agent-history-message">
+                                <div className="task-field-content task-prompt">{message.content}</div>
                             </div>
                         );
-                    }
-
-                    if (!message.content.trim()) {
-                        return null;
-                    }
-
-                    return (
-                        <div key={message.id} className="agent-history-message">
-                            <div className="task-field-content task-prompt">{message.content}</div>
-                        </div>
-                    );
-                })}
+                    })}
+                </div>
             </div>
-        </div>
-    );
+        );
+    }
 }

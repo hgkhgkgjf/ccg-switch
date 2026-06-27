@@ -8,6 +8,8 @@ export interface Config {
     preferredTerminal: TerminalType;
     autoCheckUpdate?: boolean;
     checkUpdateIntervalHours?: number;
+    /** When enabled, the chat daemon runs verbosely and the debug log panel is shown. */
+    debugMode?: boolean;
 }
 
 export interface ApiConfig {

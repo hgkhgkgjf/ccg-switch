@@ -4,6 +4,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {
     ChevronDown,
     ChevronRight,
+    ChevronUp,
     Clock,
     FolderOpen,
     History,
@@ -29,6 +30,7 @@ import {
 } from '../../services/workspaceMetadataService';
 import {
     buildRecentChatProjectGroups,
+    filterSessionsByProvider,
     formatShortDate,
     getCachedProjectSessions,
     getProjectParentPath,
@@ -37,10 +39,12 @@ import {
     normalizeProjectPathForCache,
     rememberProjectSessions,
     sessionTitle,
+    type SessionProviderFilter,
     shouldAcceptSessionListResponse,
     shouldIgnoreSessionClick,
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
+    toggleSessionProviderFilter,
 } from './chatSessionSidebarUtils';
 import {ProviderBrandIcon} from './composer/ModelIcon';
 import {
@@ -81,6 +85,8 @@ type ContextMenuState =
     | null;
 const RECENT_CHAT_WINDOW_DAYS = 7;
 const RECENT_CHAT_WINDOW_MS = RECENT_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+/** 每个文件夹在「最近聊天」里默认展示的会话条数，其余折叠在「展开更多」后面。 */
+const RECENT_CHAT_DEFAULT_VISIBLE = 4;
 
 export function SessionProviderBadge({
     providerId,
@@ -129,10 +135,12 @@ export default function ChatSessionSidebar({
     const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(currentCwd);
     const [projectQuery, setProjectQuery] = useState('');
     const [sessionQuery, setSessionQuery] = useState('');
+    const [sessionProviderFilter, setSessionProviderFilter] = useState<SessionProviderFilter>('all');
     const [loadingProjects, setLoadingProjects] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
     const [sidebarState, setSidebarState] = useState(loadChatSessionSidebarState);
     const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+    const [expandedRecentMoreKeys, setExpandedRecentMoreKeys] = useState<Set<string>>(() => new Set());
     const sessionCacheRef = useRef<Map<string, SessionMeta[]>>(new Map());
     const sessionRequestSeqRef = useRef(0);
     const sessionInFlightKeyRef = useRef<string | null>(null);
@@ -316,15 +324,16 @@ export default function ChatSessionSidebar({
     );
 
     const filteredSessions = useMemo(() => {
+        const providerScopedSessions = filterSessionsByProvider(visibleSessions, sessionProviderFilter);
         const query = sessionQuery.trim().toLowerCase();
-        if (!query) return visibleSessions;
+        if (!query) return providerScopedSessions;
 
-        return visibleSessions.filter((session) => (
+        return providerScopedSessions.filter((session) => (
             sessionTitle(session).toLowerCase().includes(query)
             || session.sessionId.toLowerCase().includes(query)
             || session.providerId.toLowerCase().includes(query)
         ));
-    }, [sessionQuery, visibleSessions]);
+    }, [sessionProviderFilter, sessionQuery, visibleSessions]);
 
     const activeSessionKey = activeSession ? getSessionSelectionKey(activeSession) : null;
     const showSessionRefreshStatus = shouldShowSessionRefreshStatus(loadingSessions, visibleSessions.length);
@@ -332,7 +341,6 @@ export default function ChatSessionSidebar({
         () => buildRecentChatProjectGroups({
             projects,
             sessionsByProject: sessionCacheRef.current,
-            limitPerProject: 4,
             recentSince: Date.now() - RECENT_CHAT_WINDOW_MS,
         }),
         [projects, sessions],
@@ -350,6 +358,12 @@ export default function ChatSessionSidebar({
     const noProjectsLabel = translateWithFallback('chat.sessionPanel.noProjects', 'No projects');
     const sessionsLabel = translateWithFallback('chat.sessionPanel.sessions', 'Sessions');
     const recentChatsLabel = translateWithFallback('chat.sessionPanel.recentChats', 'Recent chats');
+    const showLessRecentLabel = translateWithFallback('chat.sessionPanel.showLessRecent', 'Show less');
+    const getShowMoreRecentLabel = (count: number) => translateWithFallback(
+        'chat.sessionPanel.showMoreRecent',
+        `Show ${count} more`,
+        {count},
+    );
     const projectSessionsLabel = translateWithFallback('chat.sessionPanel.projectSessions', 'Project sessions');
     const selectProjectLabel = translateWithFallback(
         'chat.sessionPanel.selectProject',
@@ -358,6 +372,8 @@ export default function ChatSessionSidebar({
     const noSessionsLabel = translateWithFallback('chat.sessionPanel.noSessions', 'No sessions');
     const refreshingSessionsLabel = translateWithFallback('chat.sessionPanel.refreshingSessions', 'Refreshing sessions...');
     const searchSessionsLabel = translateWithFallback('chat.sessionPanel.searchSessions', 'Search sessions...');
+    const filterCodexOnlyLabel = translateWithFallback('chat.sessionPanel.filterCodexOnly', 'Show Codex sessions only');
+    const filterClaudeOnlyLabel = translateWithFallback('chat.sessionPanel.filterClaudeOnly', 'Show Claude sessions only');
     const noMatchingSessionsLabel = translateWithFallback('chat.sessionPanel.noMatchingSessions', 'No matching sessions');
     const getProjectSessionCountLabel = (count: number) => translateWithFallback(
         'chat.sessionPanel.projectSessionCount',
@@ -440,6 +456,10 @@ export default function ChatSessionSidebar({
         onSessionSelect(session);
     };
 
+    const handleSessionProviderFilterToggle = (target: Exclude<SessionProviderFilter, 'all'>) => {
+        setSessionProviderFilter((current) => toggleSessionProviderFilter(current, target));
+    };
+
     const toggleRecentProject = (projectPath: string) => {
         const projectKey = normalizeProjectPathForCache(projectPath);
         updateSidebarState((current) => {
@@ -453,6 +473,19 @@ export default function ChatSessionSidebar({
                 ...current,
                 collapsedRecentProjectKeys: Array.from(next),
             };
+        });
+    };
+
+    const toggleRecentMore = (projectPath: string) => {
+        const projectKey = normalizeProjectPathForCache(projectPath);
+        setExpandedRecentMoreKeys((current) => {
+            const next = new Set(current);
+            if (next.has(projectKey)) {
+                next.delete(projectKey);
+            } else {
+                next.add(projectKey);
+            }
+            return next;
         });
     };
 
@@ -930,38 +963,42 @@ export default function ChatSessionSidebar({
                                     {noSessionsLabel}
                                 </div>
                             ) : (
-                                <div className="space-y-2 px-2">
+                                <div className="space-y-1.5 px-1.5">
                                     {recentChatGroups.map((group) => {
                                         const projectKey = normalizeProjectPathForCache(group.projectPath);
                                         const parentPath = getProjectParentPath(group.projectPath);
                                         const expanded = !collapsedRecentProjectKeys.has(projectKey);
+                                        const showAllSessions = expandedRecentMoreKeys.has(projectKey);
+                                        const visibleSessions = showAllSessions
+                                            ? group.sessions
+                                            : group.sessions.slice(0, RECENT_CHAT_DEFAULT_VISIBLE);
+                                        const hiddenSessionCount = group.sessions.length - visibleSessions.length;
                                         return (
                                             <div
                                                 key={group.projectPath}
-                                                className="space-y-0.5"
                                                 data-chat-recent-project-group={group.projectPath}
                                             >
                                                 <button
                                                     type="button"
-                                                    className="flex w-full items-start gap-1.5 rounded-md px-1.5 py-1.5 text-left text-[11px] font-medium text-base-content/55 hover:bg-base-200/60"
+                                                    className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-base-200 bg-base-100/95 px-1.5 py-1.5 text-left backdrop-blur-sm transition-colors hover:bg-base-200/70"
                                                     title={group.projectPath}
                                                     data-chat-recent-project-toggle={group.projectPath}
                                                     aria-expanded={expanded}
                                                     onClick={() => toggleRecentProject(group.projectPath)}
                                                 >
                                                     {expanded ? (
-                                                        <ChevronDown size={12} className="mt-0.5 shrink-0"/>
+                                                        <ChevronDown size={13} className="shrink-0 text-base-content/45"/>
                                                     ) : (
-                                                        <ChevronRight size={12} className="mt-0.5 shrink-0"/>
+                                                        <ChevronRight size={13} className="shrink-0 text-base-content/45"/>
                                                     )}
-                                                    <FolderOpen size={12} className="mt-0.5 shrink-0"/>
+                                                    <FolderOpen size={13} className="shrink-0 text-primary/70"/>
                                                     <span className="min-w-0 flex-1">
-                                                        <span className="block truncate text-base-content/70">
+                                                        <span className="block truncate text-xs font-semibold text-base-content/85">
                                                             {group.projectName}
                                                         </span>
                                                         {parentPath && (
                                                             <span
-                                                                className="mt-0.5 block truncate text-[10px] font-normal text-base-content/35"
+                                                                className="mt-0.5 block truncate text-[10px] font-normal text-base-content/40"
                                                                 data-chat-recent-project-parent-path
                                                             >
                                                                 {parentPath}
@@ -969,7 +1006,7 @@ export default function ChatSessionSidebar({
                                                         )}
                                                     </span>
                                                     <span
-                                                        className="mt-0.5 shrink-0 rounded-full border border-base-300 bg-base-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-base-content/45 dark:border-base-200 dark:bg-base-200/80"
+                                                        className="shrink-0 rounded-full bg-base-200 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-base-content/55 dark:bg-base-200/80"
                                                         data-chat-recent-project-count-badge
                                                     >
                                                         {group.sessions.length}
@@ -977,10 +1014,28 @@ export default function ChatSessionSidebar({
                                                 </button>
                                                 {expanded && (
                                                     <div
-                                                        className="ml-3 border-l border-base-300/70 pl-2"
+                                                        className="ml-[15px] space-y-0.5 border-l-2 border-base-200 py-1 pl-2.5"
                                                         data-chat-recent-session-list
                                                     >
-                                                        {group.sessions.map((session) => renderSessionRow(session, true))}
+                                                        {visibleSessions.map((session) => renderSessionRow(session, true))}
+                                                        {group.sessions.length > RECENT_CHAT_DEFAULT_VISIBLE && (
+                                                            <button
+                                                                type="button"
+                                                                className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] font-medium text-base-content/45 transition-colors hover:bg-base-200/60 hover:text-base-content/70"
+                                                                data-chat-recent-show-more={group.projectPath}
+                                                                aria-expanded={showAllSessions}
+                                                                onClick={() => toggleRecentMore(group.projectPath)}
+                                                            >
+                                                                {showAllSessions ? (
+                                                                    <ChevronUp size={12} className="shrink-0"/>
+                                                                ) : (
+                                                                    <ChevronDown size={12} className="shrink-0"/>
+                                                                )}
+                                                                <span className="truncate">
+                                                                    {showAllSessions ? showLessRecentLabel : getShowMoreRecentLabel(hiddenSessionCount)}
+                                                                </span>
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -1087,17 +1142,54 @@ export default function ChatSessionSidebar({
                                     </div>
                                 )}
                                 <div className="px-2 pb-2">
-                                    <label className="relative block">
-                                        <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
-                                        <input
-                                            type="text"
-                                            value={sessionQuery}
-                                            onChange={(event) => setSessionQuery(event.target.value)}
-                                            placeholder={searchSessionsLabel}
-                                            aria-label={searchSessionsLabel}
-                                            className="input input-bordered input-xs w-full pl-7 text-xs"
-                                        />
-                                    </label>
+                                    <div className="flex items-center gap-1.5">
+                                        <label className="relative block min-w-0 flex-1">
+                                            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35"/>
+                                            <input
+                                                type="text"
+                                                value={sessionQuery}
+                                                onChange={(event) => setSessionQuery(event.target.value)}
+                                                placeholder={searchSessionsLabel}
+                                                aria-label={searchSessionsLabel}
+                                                className="input input-bordered input-xs w-full pl-7 text-xs"
+                                            />
+                                        </label>
+                                        <div
+                                            className="flex shrink-0 items-center gap-0.5"
+                                            data-chat-session-provider-filter-group="true"
+                                        >
+                                            <button
+                                                type="button"
+                                                data-chat-session-provider-filter="codex"
+                                                aria-pressed={sessionProviderFilter === 'codex'}
+                                                title={filterCodexOnlyLabel}
+                                                aria-label={filterCodexOnlyLabel}
+                                                onClick={() => handleSessionProviderFilterToggle('codex')}
+                                                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors ${
+                                                    sessionProviderFilter === 'codex'
+                                                        ? 'border-primary/30 bg-primary/10'
+                                                        : 'border-base-300 bg-base-100 hover:bg-base-200/80'
+                                                }`}
+                                            >
+                                                <ProviderBrandIcon provider="codex" size={14} colored/>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-chat-session-provider-filter="claude"
+                                                aria-pressed={sessionProviderFilter === 'claude'}
+                                                title={filterClaudeOnlyLabel}
+                                                aria-label={filterClaudeOnlyLabel}
+                                                onClick={() => handleSessionProviderFilterToggle('claude')}
+                                                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors ${
+                                                    sessionProviderFilter === 'claude'
+                                                        ? 'border-primary/30 bg-primary/10'
+                                                        : 'border-base-300 bg-base-100 hover:bg-base-200/80'
+                                                }`}
+                                            >
+                                                <ProviderBrandIcon provider="claude" size={14} colored/>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {filteredSessions.length === 0 ? (

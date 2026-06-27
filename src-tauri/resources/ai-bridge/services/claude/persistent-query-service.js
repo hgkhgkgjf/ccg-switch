@@ -240,6 +240,15 @@ const _sessionCleanupTimer = setInterval(async () => {
 // unref() so the timer does not prevent natural process exit
 _sessionCleanupTimer.unref();
 
+/**
+ * 把一条子代理(sidechain)消息发到专用通道。经 daemon.js 的 stdout 拦截后,会
+ * 被打上当前 requestId 作为一行 NDJSON 送到 Rust,再转 chat://subagent-message。
+ * 与 [MESSAGE] 同样走 console.log(被 daemon 覆写为带 requestId 的 stdout)。
+ */
+function emitSubagentMessage(parentToolUseId, msg) {
+  console.log('[SUBAGENT_MESSAGE]', JSON.stringify({ parentToolUseId, message: msg }));
+}
+
 async function executeTurn(runtime, requestContext, turnMeta) {
   if (!runtime || runtime.closed) {
     const err = new Error('Runtime is closed');
@@ -283,6 +292,17 @@ async function executeTurn(runtime, requestContext, turnMeta) {
       if (turnState.streamingEnabled && !turnState.streamStarted) {
         process.stdout.write('[STREAM_START]\n');
         turnState.streamStarted = true;
+      }
+
+      // 子代理(sidechain)消息:带 parent_tool_use_id,从主流分流到专用通道,
+      // 不进主 [MESSAGE]/[CONTENT_DELTA]/[TOOL_RESULT]/[USAGE]/[SESSION_ID]。
+      // 只把 assistant / user(含 tool_use / tool_result / 文本)发给对应卡片;
+      // stream_event(token 级)与 system/result 丢弃(MVP 取消息级快照)。
+      if (msg?.parent_tool_use_id) {
+        if (msg.type === 'assistant' || msg.type === 'user') {
+          emitSubagentMessage(msg.parent_tool_use_id, msg);
+        }
+        continue;
       }
 
       if (msg?.type === 'stream_event' && turnState.streamingEnabled) {

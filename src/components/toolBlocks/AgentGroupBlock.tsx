@@ -146,6 +146,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
               enabled={expanded}
               hasVisibleMeta={hasVisibleMeta}
               result={result}
+              toolId={toolId}
             />
           </div>
         </div>

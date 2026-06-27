@@ -14,6 +14,7 @@ import {
 import {
     buildRecentChatProjectGroups,
     filterProjectChatSessions,
+    filterSessionsByProvider,
     filterSupportedChatSessions,
     getCachedProjectSessions,
     getProjectParentPath,
@@ -27,6 +28,7 @@ import {
     shouldIgnoreSessionClick,
     shouldShowSessionRefreshStatus,
     shouldSyncProjectFromCurrentCwd,
+    toggleSessionProviderFilter,
 } from './chatSessionSidebarUtils';
 
 (
@@ -402,6 +404,60 @@ describe('chatSessionSidebarUtils', () => {
         expect(remounted.textContent).toContain('Bridge follow up');
     });
 
+    it('filters project sessions by provider icon buttons and composes with search text', async () => {
+        const {container: rendered} = await renderSidebarWithData();
+
+        const codexFilter = rendered.querySelector('[data-chat-session-provider-filter="codex"]');
+        const claudeFilter = rendered.querySelector('[data-chat-session-provider-filter="claude"]');
+        expect(codexFilter).toBeInstanceOf(HTMLButtonElement);
+        expect(claudeFilter).toBeInstanceOf(HTMLButtonElement);
+        expect(codexFilter?.getAttribute('aria-pressed')).toBe('false');
+        expect(claudeFilter?.getAttribute('aria-pressed')).toBe('false');
+
+        expect(rendered.textContent).toContain('Continue Trellis work');
+        expect(rendered.textContent).toContain('Review multi session UI');
+
+        await act(async () => {
+            codexFilter?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        expect(codexFilter?.getAttribute('aria-pressed')).toBe('true');
+        expect(claudeFilter?.getAttribute('aria-pressed')).toBe('false');
+        expect(rendered.textContent).not.toContain('Continue Trellis work');
+        expect(rendered.textContent).toContain('Review multi session UI');
+
+        const sessionSearch = rendered.querySelector('input[aria-label="Search sessions..."]');
+        expect(sessionSearch).toBeInstanceOf(HTMLInputElement);
+        await act(async () => {
+            if (sessionSearch instanceof HTMLInputElement) {
+                const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+                valueSetter?.call(sessionSearch, 'trellis');
+            }
+            sessionSearch?.dispatchEvent(new Event('input', {bubbles: true}));
+        });
+
+        expect(rendered.textContent).not.toContain('Continue Trellis work');
+        expect(rendered.textContent).not.toContain('Review multi session UI');
+        expect(rendered.textContent).toContain('No matching sessions');
+
+        await act(async () => {
+            codexFilter?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        expect(codexFilter?.getAttribute('aria-pressed')).toBe('false');
+        expect(rendered.textContent).toContain('Continue Trellis work');
+        expect(rendered.textContent).not.toContain('Review multi session UI');
+
+        await act(async () => {
+            claudeFilter?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        });
+
+        expect(codexFilter?.getAttribute('aria-pressed')).toBe('false');
+        expect(claudeFilter?.getAttribute('aria-pressed')).toBe('true');
+        expect(rendered.textContent).toContain('Continue Trellis work');
+        expect(rendered.textContent).not.toContain('Review multi session UI');
+    });
+
     it('opens a project context menu with safe actions and disabled placeholders', async () => {
         const {container: rendered} = await renderSidebarWithData();
         const projectRow = rendered.querySelector('[data-chat-project-path="C:/workspace/ccg-switch"]');
@@ -642,6 +698,34 @@ describe('chatSessionSidebarUtils', () => {
         expect(filterSupportedChatSessions(sessions).map((session) => session.sessionId)).toEqual([
             'claude-1',
             'codex-1',
+        ]);
+    });
+
+    it('toggles the provider filter as a mutually exclusive, clearable switch', () => {
+        expect(toggleSessionProviderFilter('all', 'codex')).toBe('codex');
+        expect(toggleSessionProviderFilter('codex', 'codex')).toBe('all');
+        expect(toggleSessionProviderFilter('codex', 'claude')).toBe('claude');
+        expect(toggleSessionProviderFilter('claude', 'claude')).toBe('all');
+    });
+
+    it('filters sessions by the selected provider and keeps all when not filtering', () => {
+        const sessions = [
+            createSession({providerId: 'claude', sessionId: 'claude-1'}),
+            createSession({providerId: 'codex', sessionId: 'codex-1'}),
+            createSession({providerId: 'claude', sessionId: 'claude-2'}),
+        ];
+
+        expect(filterSessionsByProvider(sessions, 'all').map((session) => session.sessionId)).toEqual([
+            'claude-1',
+            'codex-1',
+            'claude-2',
+        ]);
+        expect(filterSessionsByProvider(sessions, 'codex').map((session) => session.sessionId)).toEqual([
+            'codex-1',
+        ]);
+        expect(filterSessionsByProvider(sessions, 'claude').map((session) => session.sessionId)).toEqual([
+            'claude-1',
+            'claude-2',
         ]);
     });
 
@@ -963,6 +1047,32 @@ describe('chatSessionSidebarUtils', () => {
         expect(groups).toHaveLength(1);
         expect(groups[0].sessions.map((session) => session.sessionId))
             .toEqual(['older-pinned', 'newest-unpinned']);
+    });
+
+    it('returns all recent sessions per project when limitPerProject is omitted (drives "show more")', () => {
+        const now = Date.now();
+        const sessions = Array.from({length: 7}, (_unused, index) => createSession({
+            providerId: 'claude',
+            sessionId: `s-${index}`,
+            projectDir: 'C:/workspace/ccg-switch',
+            lastActiveAt: now - index * 1_000,
+        }));
+        const groups = buildRecentChatProjectGroups({
+            projects: [
+                {
+                    name: 'ccg-switch',
+                    path: 'C:/workspace/ccg-switch',
+                    session_count: 7,
+                    last_active: null,
+                },
+            ],
+            sessionsByProject: new Map([['c:/workspace/ccg-switch', sessions]]),
+        });
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0].sessions).toHaveLength(7);
+        expect(groups[0].sessions.map((session) => session.sessionId))
+            .toEqual(['s-0', 's-1', 's-2', 's-3', 's-4', 's-5', 's-6']);
     });
 
     it('does not sync current cwd over a manually selected different project', () => {

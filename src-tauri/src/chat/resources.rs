@@ -11,6 +11,15 @@ use tauri::{AppHandle, Manager};
 
 pub const NODE_RUNTIME_VERSION: &str = "v24.11.1";
 
+/// Minimum Node.js major version the bundled ai-bridge / Claude Agent SDK
+/// supports. A system `node` older than this can still be imported but fails at
+/// runtime once the SDK spawns the bundled Claude Code CLI, which manifests as a
+/// daemon that goes "ready" yet never streams a reply. Detection rejects older
+/// system nodes and falls back to the pinned private runtime
+/// ([`NODE_RUNTIME_VERSION`]) so behavior matches a fresh install. Bump this if
+/// the SDK/CLI raises its floor.
+pub const MIN_NODE_MAJOR_VERSION: u32 = 18;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrivateNodePlatformSpec {
     pub install_dir: &'static str,
@@ -279,10 +288,57 @@ fn find_executable_in_dirs(exe: &str, dirs: impl IntoIterator<Item = PathBuf>) -
         .find(|candidate| candidate.exists())
 }
 
+/// Parse the major version from `node --version` output, e.g. "v24.11.1" -> 24.
+fn parse_node_major(version_output: &str) -> Option<u32> {
+    let trimmed = version_output.trim();
+    let without_v = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    without_v.split('.').next()?.parse::<u32>().ok()
+}
+
+/// Query a node binary's major version by running `node --version`.
+/// Returns `None` when the binary can't be executed or its output can't be parsed.
+fn node_major_version(node_path: &Path) -> Option<u32> {
+    let mut cmd = std::process::Command::new(node_path);
+    cmd.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW — avoid a console flash.
+    }
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_node_major(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Find the first `node` in `dirs` whose major version is new enough for the
+/// bundled SDK. Old or unverifiable nodes are skipped so the caller can fall
+/// back to the private runtime instead of silently spawning a broken daemon.
+fn find_node_meeting_min_version(
+    exe: &str,
+    dirs: impl IntoIterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    for dir in dirs {
+        let candidate = dir.join(exe);
+        if !candidate.exists() {
+            continue;
+        }
+        match node_major_version(&candidate) {
+            Some(major) if major >= MIN_NODE_MAJOR_VERSION => return Some(candidate),
+            _ => continue,
+        }
+    }
+    None
+}
+
 /// Detect a usable `node` executable.
 ///
-/// Order: `AI_BRIDGE_NODE` env override → CCG Switch private runtime → PATH/common install dirs.
+/// Order: `AI_BRIDGE_NODE` env override → CCG Switch private runtime → PATH/common
+/// install dirs. System nodes must meet [`MIN_NODE_MAJOR_VERSION`]; the explicit
+/// override and the pinned private runtime are trusted without a version probe.
 pub fn detect_node() -> Result<PathBuf, String> {
+    // Explicit override: honor as-is so power users keep an escape hatch.
     if let Ok(p) = std::env::var("AI_BRIDGE_NODE") {
         let pb = PathBuf::from(p);
         if pb.exists() {
@@ -290,21 +346,24 @@ pub fn detect_node() -> Result<PathBuf, String> {
         }
     }
 
-    let exe = if cfg!(windows) { "node.exe" } else { "node" };
-
+    // Private runtime is pinned to a known-good version — prefer it.
     if let Some(node) = private_node_executable() {
         return Ok(node);
     }
 
-    if let Some(node) = find_executable_in_dirs(exe, node_search_dirs()) {
+    // System node: only accept one new enough for the SDK + bundled CLI. An old
+    // node would import the SDK but fail when it spawns the Claude Code CLI.
+    let exe = if cfg!(windows) { "node.exe" } else { "node" };
+    if let Some(node) = find_node_meeting_min_version(exe, node_search_dirs()) {
         return Ok(node);
     }
 
-    Err(
-        "未找到 Node.js 运行环境。可在 SDK 依赖面板一键安装 CCG Switch 私有 Node.js，\
-         或手动安装 Node 18+ 后重启应用，也可以设置 AI_BRIDGE_NODE 指向 node 可执行文件。"
-            .to_string(),
-    )
+    Err(format!(
+        "未找到可用的 Node.js 运行环境（需 Node {MIN_NODE_MAJOR_VERSION}+）。\
+         可在 SDK 依赖面板一键安装 CCG Switch 私有 Node.js，\
+         或手动安装 Node {MIN_NODE_MAJOR_VERSION}+ 后重启应用，\
+         也可以设置 AI_BRIDGE_NODE 指向 node 可执行文件。"
+    ))
 }
 
 /// Detect a usable `npm` executable.
@@ -438,5 +497,30 @@ mod tests {
             npm_path.file_name().and_then(|name| name.to_str()),
             Some(if cfg!(windows) { "npm.cmd" } else { "npm" }),
         );
+    }
+
+    #[test]
+    fn parses_node_major_version_from_cli_output() {
+        assert_eq!(parse_node_major("v24.11.1"), Some(24));
+        assert_eq!(parse_node_major("v18.20.4\n"), Some(18));
+        assert_eq!(parse_node_major("  v16.0.0  "), Some(16));
+        // Tolerate a missing leading `v` just in case.
+        assert_eq!(parse_node_major("20.10.0"), Some(20));
+    }
+
+    #[test]
+    fn rejects_unparseable_node_version_output() {
+        assert_eq!(parse_node_major(""), None);
+        assert_eq!(parse_node_major("not-a-version"), None);
+        assert_eq!(parse_node_major("v"), None);
+    }
+
+    #[test]
+    fn min_node_major_version_rejects_versions_below_floor() {
+        // Guards the comparison used in find_node_meeting_min_version.
+        assert!(parse_node_major("v16.20.2").unwrap() < MIN_NODE_MAJOR_VERSION);
+        assert!(parse_node_major("v18.0.0").unwrap() >= MIN_NODE_MAJOR_VERSION);
+        // The pinned private runtime must clear the floor.
+        assert!(parse_node_major(NODE_RUNTIME_VERSION).unwrap() >= MIN_NODE_MAJOR_VERSION);
     }
 }

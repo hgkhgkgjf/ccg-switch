@@ -11,8 +11,10 @@ import {
     ChatRole,
     ChatStreamEvent,
     ContentBlock,
+    DaemonLogEntry,
     ImageBlock,
     MessageRaw,
+    SubagentMessageEvent,
     TokenUsage,
 } from '../types/chat';
 import {
@@ -49,6 +51,8 @@ const SESSION_HISTORY_FULL_MAP_CHUNK_SIZE = 250;
 const STOPPED_OUTPUT_ERROR = '已停止输出';
 const DEFAULT_PERMISSION_SESSION_ID = 'default';
 const CHAT_DAEMON_READY_TIMEOUT_MS = 15_000;
+const DAEMON_LOG_LIMIT = 500;
+let daemonLogSeq = 0;
 const stoppedRequestNotifications = new Set<string>();
 const retiredRequestIds = new Set<string>();
 const requestTabKeys = new Map<string, string>();
@@ -85,6 +89,22 @@ function scheduleDaemonReadyTimeout(
         });
     }, CHAT_DAEMON_READY_TIMEOUT_MS);
     (daemonReadyTimeout as {unref?: () => void}).unref?.();
+}
+
+function pushDaemonLog(logs: DaemonLogEntry[], payload: ChatDaemonEvent): DaemonLogEntry[] {
+    daemonLogSeq += 1;
+    const entry: DaemonLogEntry = {
+        id: daemonLogSeq,
+        timestamp: Date.now(),
+        event: payload.event,
+        message: payload.message ?? null,
+        provider: payload.provider ?? null,
+    };
+    const next = [...logs, entry];
+    if (next.length > DAEMON_LOG_LIMIT) {
+        next.splice(0, next.length - DAEMON_LOG_LIMIT);
+    }
+    return next;
 }
 
 function permissionSessionId(
@@ -302,12 +322,16 @@ export interface ChatSessionTab {
     handoffContextProvider: ChatProvider | null;
     status: ChatTabStatus;
     error: string | null;
+    /** 子代理(Task)实时轨迹：parentToolUseId(= 父 Task 工具块 id) → 子代理消息列表。 */
+    subagentRuns: Record<string, ChatMessage[]>;
     createdAt: number;
     updatedAt: number;
 }
 
 interface ChatState {
     messages: ChatMessage[];
+    /** 子代理(Task)实时轨迹：parentToolUseId → 子代理消息列表（activeTab 投影）。 */
+    subagentRuns: Record<string, ChatMessage[]>;
     /** 当前 provider */
     provider: ChatProvider;
     /**
@@ -334,6 +358,8 @@ interface ChatState {
     daemonStatus: string | null;
     /** 用户手动触发 daemon 恢复后的前端等待态 */
     daemonReconnecting: boolean;
+    /** daemon 诊断日志缓冲（debug 模式查看，含 stderr / sdk 加载错误等） */
+    daemonLogs: DaemonLogEntry[];
     /** 当前进行中的 requestId */
     activeRequestId: string | null;
     /** 当前会话 id（由 daemon 的 SESSION_ID 回填） */
@@ -374,6 +400,7 @@ interface ChatState {
 
     init: () => Promise<void>;
     reconnectDaemon: () => Promise<void>;
+    clearDaemonLogs: () => void;
     addDeniedTool: (toolId: string) => void;
     clearDeniedTools: () => void;
     setProvider: (p: ChatProvider) => void;
@@ -448,6 +475,7 @@ function createTabFromState(
         handoffContextProvider: state.handoffContextProvider,
         status: hasActiveChatTurn(state) ? 'running' : 'idle',
         error: state.error,
+        subagentRuns: state.subagentRuns,
         createdAt: now,
         updatedAt: now,
         ...overrides,
@@ -480,6 +508,7 @@ function createEmptyTabFromState(
         handoffContextProvider: null,
         status: 'idle',
         error: null,
+        subagentRuns: {},
         createdAt: timestamp,
         updatedAt: timestamp,
     };
@@ -488,6 +517,7 @@ function createEmptyTabFromState(
 function projectTabToState(tab: ChatSessionTab): Partial<ChatState> {
     return {
         messages: tab.messages,
+        subagentRuns: tab.subagentRuns,
         provider: tab.provider,
         permissionMode: tab.permissionMode,
         model: tab.model,
@@ -1096,8 +1126,24 @@ async function abortActiveRequestIfNeeded(
     return abortError;
 }
 
+/**
+ * 把一条子代理 raw 消息合并进 subagentRuns[parentToolUseId]。复用主转录的
+ * mergeRawChatMessage（已能合并 assistant 快照 / tool_result / user），返回新对象。
+ */
+function mergeSubagentRun(
+    runs: Record<string, ChatMessage[]>,
+    parentToolUseId: string,
+    raw: MessageRaw,
+): Record<string, ChatMessage[]> {
+    if (!parentToolUseId) return runs;
+    const existing = runs[parentToolUseId] ?? [];
+    const merged = mergeRawChatMessage(existing, raw, {createId: newId, now: Date.now});
+    return {...runs, [parentToolUseId]: merged};
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
+    subagentRuns: {},
     provider: 'claude',
     permissionMode: 'default',
     model: defaultModel('claude'),
@@ -1109,6 +1155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     daemonReady: false,
     daemonStatus: null,
     daemonReconnecting: false,
+    daemonLogs: [],
     activeRequestId: null,
     sessionId: null,
     currentCwd: null,
@@ -1272,14 +1319,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const daemonUn = await listen<ChatDaemonEvent>('chat://daemon', (event) => {
             const { event: name, message } = event.payload;
+            const daemonLogs = pushDaemonLog(get().daemonLogs, event.payload);
             if (name === 'ready') {
                 clearDaemonReadyTimeout();
-                set({ daemonReady: true, daemonStatus: 'ready', daemonReconnecting: false });
+                set({ daemonReady: true, daemonStatus: 'ready', daemonReconnecting: false, daemonLogs });
             } else if (name === 'shutdown') {
                 clearDaemonReadyTimeout();
-                set({ daemonReady: false, daemonStatus: 'shutdown', daemonReconnecting: false });
+                set({ daemonReady: false, daemonStatus: 'shutdown', daemonReconnecting: false, daemonLogs });
             } else {
-                set({ daemonStatus: message ? `${name}: ${message}` : name });
+                set({ daemonStatus: message ? `${name}: ${message}` : name, daemonLogs });
             }
         });
 
@@ -1337,6 +1385,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 bindPendingRequestIfNeeded(set, stateBeforeMessage, requestId);
                 const raw = JSON.parse(event.payload.json) as MessageRaw;
 
+                // 子代理消息(带 parent_tool_use_id)不进主 transcript，
+                // 路由到对应 Task 卡片的 subagentRuns（兼容旧 daemon 仍以 [MESSAGE] 形式发出的情况）。
+                const parentToolUseId = raw.parent_tool_use_id?.trim();
+                if (parentToolUseId) {
+                    set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                        ...tab,
+                        subagentRuns: mergeSubagentRun(tab.subagentRuns, parentToolUseId, raw),
+                    })));
+                    return;
+                }
+
                 set((state) => {
                     return updateRequestTabState(state, requestId, (tab) => {
                         const messages = mergeRawChatMessage(tab.messages, raw, {
@@ -1354,7 +1413,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         });
 
-        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn, toolPermissionUn, messageUn];
+        // 子代理(Task)消息走专用通道，按 parentToolUseId 路由进对应卡片的 subagentRuns。
+        const subagentMessageUn = await listen<SubagentMessageEvent>('chat://subagent-message', (event) => {
+            try {
+                const { requestId, parentToolUseId } = event.payload;
+                const trimmedParent = parentToolUseId?.trim();
+                if (!trimmedParent) return;
+                const stateBeforeMessage = get();
+                if (!shouldAcceptRequestEvent(stateBeforeMessage, requestId)) return;
+                bindPendingRequestIfNeeded(set, stateBeforeMessage, requestId);
+                const raw = JSON.parse(event.payload.json) as MessageRaw;
+                set((state) => updateRequestTabState(state, requestId, (tab) => ({
+                    ...tab,
+                    subagentRuns: mergeSubagentRun(tab.subagentRuns, trimmedParent, raw),
+                })));
+            } catch (e) {
+                console.error('[useChatStore] Failed to parse SUBAGENT_MESSAGE:', e);
+            }
+        });
+
+        unlisteners = [streamUn, doneUn, daemonUn, askUserUn, planApprovalUn, toolPermissionUn, messageUn, subagentMessageUn];
 
         // 预热 daemon（懒启动也可，但提前启动可减少首条消息延迟）
         try {
@@ -2363,4 +2441,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         })),
 
     clearDeniedTools: () => set({ deniedToolIds: new Set() }),
+
+    clearDaemonLogs: () => set({ daemonLogs: [] }),
 }));

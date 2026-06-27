@@ -41,6 +41,8 @@ pub struct DaemonClient {
     deps_dir: PathBuf,
     permission_dir: PathBuf,
     provider_config: RwLock<ProviderRuntimeConfig>,
+    /// When true, spawn the daemon with `CLAUDE_DEBUG=1` for verbose diagnostics.
+    debug: bool,
     request_counter: AtomicU64,
     running: Arc<AtomicBool>,
     inner: Arc<Mutex<Inner>>,
@@ -85,6 +87,7 @@ impl DaemonClient {
         permission_dir: PathBuf,
         api_key: Option<String>,
         base_url: Option<String>,
+        debug: bool,
     ) -> Self {
         Self {
             node_path,
@@ -92,6 +95,7 @@ impl DaemonClient {
             deps_dir,
             permission_dir,
             provider_config: RwLock::new(ProviderRuntimeConfig { api_key, base_url }),
+            debug,
             request_counter: AtomicU64::new(0),
             running: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(Mutex::new(Inner {
@@ -165,6 +169,12 @@ impl DaemonClient {
         for (key, value) in daemon_env_vars(&self.permission_dir, &self.deps_dir, &provider_config)
         {
             cmd.env(key, value);
+        }
+
+        // Verbose diagnostics: unlocks the daemon's gated `debugLog` output so the
+        // debug log panel can surface SDK/Node failure causes (see api-config.js).
+        if self.debug {
+            cmd.env("CLAUDE_DEBUG", "1");
         }
 
         #[cfg(windows)]

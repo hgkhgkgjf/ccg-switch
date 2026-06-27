@@ -49,6 +49,8 @@ export interface MessageRaw {
     };
     uuid?: string;
     timestamp?: string;
+    /** 非空表示这是子代理(sidechain)消息,指向父 Task 工具块的 tool_use id。 */
+    parent_tool_use_id?: string | null;
 }
 
 /** 内容块联合类型 */
@@ -124,12 +126,31 @@ export interface ChatMessageEvent {
     json: string;
 }
 
+/**
+ * 后端 "chat://subagent-message" 事件载荷。子代理(Task)消息从主流里分流到此，
+ * 按 parentToolUseId(= 父 Task 工具块 id)路由到对应的子代理卡片。
+ */
+export interface SubagentMessageEvent {
+    requestId: string;
+    parentToolUseId: string;
+    json: string;
+}
+
 /** 后端 "chat://daemon" 生命周期事件载荷 */
 export interface ChatDaemonEvent {
     event: string;
     pid?: number | null;
     message?: string | null;
     provider?: string | null;
+}
+
+/** 一条 daemon 诊断日志（debug 模式查看，来自 "chat://daemon" 事件） */
+export interface DaemonLogEntry {
+    id: number;
+    timestamp: number;
+    event: string;
+    message: string | null;
+    provider: string | null;
 }
 
 /** Provider 选择 */

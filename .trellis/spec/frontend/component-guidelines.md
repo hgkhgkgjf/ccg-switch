@@ -132,6 +132,15 @@ See `src/components/providers/ProviderCard.tsx` and
   identity stays visually consistent across the Chat UI. Keep readable
   `title` / `aria-label` text for those icon badges, and preserve a text
   fallback for unknown providers rather than forcing an unsupported icon.
+  The `Project sessions` session list may be narrowed by provider through
+  `codex` / `claude` icon toggles placed next to the session search box. Model
+  the filter as a single `'all' | 'claude' | 'codex'` state via
+  `toggleSessionProviderFilter` (mutually exclusive, and clicking the active
+  provider clears it back to `all`) and apply it through
+  `filterSessionsByProvider` before the text-search filter so both compose.
+  The toggles must reuse `ProviderBrandIcon`, expose `aria-pressed`, and carry
+  readable `title` / `aria-label`. This provider filter is transient view state,
+  not a persisted preference.
   Recent chat management belongs in the existing session sidebar, not a second
   independent navigation surface. Build recent groups from the dashboard
   project list plus cached/prefetched `list_sessions(projectPath)` results,

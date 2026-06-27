@@ -2138,6 +2138,77 @@ describe('useChatStore session transitions', () => {
         });
     });
 
+    it('routes sub-agent messages (parent_tool_use_id) into subagentRuns, not the main transcript', async () => {
+        const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+        tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
+            listeners[eventName] = callback;
+            return vi.fn();
+        });
+        tauriMocks.invoke.mockImplementation((command: string) => {
+            if (command === 'chat_start_daemon') return Promise.resolve(undefined);
+            if (command === 'chat_send') return Promise.resolve('request-agent');
+            throw new Error(`Unexpected command: ${command}`);
+        });
+
+        await useChatStore.getState().init();
+        const sent = await useChatStore.getState().send('Launch a sub-agent');
+        expect(sent).toBe(true);
+
+        // Main assistant spawns a Task tool_use — this stays in the main transcript.
+        listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-agent',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    message: {
+                        content: [{
+                            type: 'tool_use',
+                            id: 'toolu_taskA',
+                            name: 'Task',
+                            input: {description: 'A', prompt: 'You are sub-agent A'},
+                        }],
+                    },
+                } satisfies MessageRaw),
+            },
+        });
+
+        // Sub-agent prompt arrives WITH parent_tool_use_id (legacy [MESSAGE] form) — must not leak.
+        listeners['chat://message']?.({
+            payload: {
+                requestId: 'request-agent',
+                json: JSON.stringify({
+                    type: 'user',
+                    parent_tool_use_id: 'toolu_taskA',
+                    message: {content: [{type: 'text', text: 'You are sub-agent A. Report your id.'}]},
+                } satisfies MessageRaw),
+            },
+        });
+
+        // Sub-agent reply via the dedicated channel.
+        listeners['chat://subagent-message']?.({
+            payload: {
+                requestId: 'request-agent',
+                parentToolUseId: 'toolu_taskA',
+                json: JSON.stringify({
+                    type: 'assistant',
+                    parent_tool_use_id: 'toolu_taskA',
+                    message: {content: [{type: 'text', text: 'I am sub-agent A.'}]},
+                } satisfies MessageRaw),
+            },
+        });
+
+        const state = useChatStore.getState();
+        const mainText = state.messages.map((message) => message.content).join('\n');
+        expect(mainText).not.toContain('You are sub-agent A. Report your id.');
+        expect(mainText).not.toContain('I am sub-agent A.');
+
+        const run = state.subagentRuns['toolu_taskA'];
+        expect(run).toBeTruthy();
+        const runText = run.map((message) => message.content).join('\n');
+        expect(runText).toContain('You are sub-agent A. Report your id.');
+        expect(runText).toContain('I am sub-agent A.');
+    });
+
     it('deduplicates assistant text raw deltas after streamed content was synced into raw', async () => {
         const listeners: Record<string, (event: { payload: unknown }) => void> = {};
         tauriMocks.listen.mockImplementation(async (eventName: string, callback: (event: { payload: unknown }) => void) => {
@@ -2611,6 +2682,7 @@ describe('useChatStore session transitions', () => {
             openTabs: [
                 {
                     key: 'session:active',
+                    subagentRuns: {},
                     messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
                     provider: 'claude',
                     permissionMode: 'default',
@@ -2634,6 +2706,7 @@ describe('useChatStore session transitions', () => {
                 },
                 {
                     key: 'session:target',
+                    subagentRuns: {},
                     messages: [{id: 'target-message', role: 'user', content: 'target', createdAt: 2}],
                     provider: 'codex',
                     permissionMode: 'bypassPermissions',
@@ -2657,6 +2730,7 @@ describe('useChatStore session transitions', () => {
                 },
                 {
                     key: 'session:other',
+                    subagentRuns: {},
                     messages: [],
                     provider: 'claude',
                     permissionMode: 'default',
@@ -2710,6 +2784,7 @@ describe('useChatStore session transitions', () => {
             openTabs: [
                 {
                     key: 'session:active',
+                    subagentRuns: {},
                     messages: [{id: 'active-message', role: 'user', content: 'active', createdAt: 1}],
                     provider: 'codex',
                     permissionMode: 'default',

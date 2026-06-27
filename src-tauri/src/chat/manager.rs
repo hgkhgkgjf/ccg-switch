@@ -129,9 +129,10 @@ impl ChatManager {
 
                 // Read active Provider for Claude
                 let (api_key, base_url) = self.get_active_provider_config().await?;
+                let debug = self.debug_mode();
 
                 let client = Arc::new(DaemonClient::new(
-                    node, bridge, deps, perm_dir, api_key, base_url,
+                    node, bridge, deps, perm_dir, api_key, base_url, debug,
                 )) as Arc<dyn ManagerDaemonClient>;
 
                 // Forward lifecycle events to the frontend.
@@ -203,6 +204,15 @@ impl ChatManager {
         Ok(())
     }
 
+    /// Whether the app config has debug mode enabled. Falls back to `false` if
+    /// the config can't be read, so diagnostics never block daemon startup.
+    fn debug_mode(&self) -> bool {
+        let state = self.app.state::<crate::store::AppState>();
+        crate::services::config_service::load_config_from_db(&state.db)
+            .map(|config| config.debug_mode)
+            .unwrap_or(false)
+    }
+
     /// Get active Provider config (API Key and base URL)
     async fn get_active_provider_config(&self) -> Result<(Option<String>, Option<String>), String> {
         let state = self.app.state::<crate::store::AppState>();
@@ -251,6 +261,31 @@ impl ChatManager {
             while let Some(item) = rx.recv().await {
                 match item {
                     StreamLine::Line { text } => {
+                        // 子代理(Task)消息:带 parentToolUseId,走专用 chat://subagent-message
+                        // 路由到对应卡片,不进主 transcript / 主 stream。
+                        if let Some(rest) = text.strip_prefix("[SUBAGENT_MESSAGE]") {
+                            let rest = rest.trim();
+                            if let Ok(value) = serde_json::from_str::<Value>(rest) {
+                                let parent = value
+                                    .get("parentToolUseId")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                if let (false, Some(message)) =
+                                    (parent.is_empty(), value.get("message"))
+                                {
+                                    let _ = app.emit(
+                                        "chat://subagent-message",
+                                        crate::models::chat::SubagentMessageEvent {
+                                            request_id: request_id.clone(),
+                                            parent_tool_use_id: parent.to_string(),
+                                            json: message.to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+
                         // 检测 [MESSAGE] 标签，发送专用事件
                         if let Some(json) = text.strip_prefix("[MESSAGE]") {
                             let json_trimmed = json.trim();
